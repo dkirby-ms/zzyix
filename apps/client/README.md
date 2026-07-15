@@ -44,7 +44,7 @@ The experience is intentionally organic:
 
 ## Architecture Direction
 
-This folderWhat  currently contains the client-side prototype experience.
+This folder contains the client-side prototype experience.
 
 Near-term evolution path:
 
