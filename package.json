@@ -9,6 +9,9 @@
   "scripts": {
     "dev:client": "npm run dev --workspace=apps/client",
     "dev:server": "npm run dev --workspace=apps/server",
+    "audit": "npm run audit --workspaces --if-present",
+    "audit:client": "npm audit --workspace=apps/client",
+    "audit:server": "npm audit --workspace=apps/server",
     "build": "npm run build --workspaces --if-present",
     "build:client": "npm run build --workspace=apps/client",
     "build:server": "npm run build --workspace=apps/server",
