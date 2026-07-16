@@ -36,6 +36,10 @@ Gaps and differences identified between research findings and the implementation
   * Plan specifies: integration coverage for persistent sessions during Phase 2 validation
   * Implementation differs: current tests passed without exercising a live Postgres runtime
   * Rationale: Kept the persistence landing focused on runtime replacement and deferred heavier DB-backed integration coverage to follow-on work
+* DD-02: Post-review remediation phase added after Task Reviewer findings.
+  * Plan specifies: original five-phase implementation completed
+  * Implementation differs: added Phase 6 targeted fixes for concurrency bootstrap, replay consistency, pointer validation, and disconnect cleanup behavior
+  * Rationale: Required to close critical and major findings identified in `.copilot-tracking/reviews/2026-07-16/postgres-and-realtime-transport-plan-review.md`
 
 ## Implementation Paths Considered
 
@@ -92,3 +96,6 @@ Gaps and differences identified between research findings and the implementation
 * WI-09: Add real Postgres adapter fan-out tests for LISTEN/NOTIFY and multi-replica room broadcasts. (high)
   * Source: DR-09 and Phase 4 implementation
   * Dependency: Testcontainers-backed Postgres integration suite available
+* WI-10: Add explicit regression tests for invalid pointer payload suppression and concurrent first-join bootstrap idempotency. (medium)
+  * Source: Phase 6 remediation
+  * Dependency: Existing server test harness

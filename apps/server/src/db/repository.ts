@@ -168,10 +168,12 @@ const getNextOpSeq = async (db: DatabaseClient, canvasId: string): Promise<numbe
 export const loadSessionRecord = async (sessionId: string): Promise<AuthoritativeSessionRecord> => {
   const { db } = getDatabaseBundle()
 
-  let [canvas] = await db.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
+  const now = new Date()
+  await db.insert(canvases).values({ id: sessionId, createdAt: now, updatedAt: now }).onConflictDoNothing()
+
+  const [canvas] = await db.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
   if (!canvas) {
-    const now = new Date()
-    ;[canvas] = await db.insert(canvases).values({ id: sessionId, createdAt: now, updatedAt: now }).returning()
+    throw new Error(`Failed to load canvas ${sessionId}`)
   }
 
   const [tileRows, participantRows, latestOpSeq] = await Promise.all([
@@ -395,10 +397,12 @@ export const listOperationsAfter = async (sessionId: string, opSeq: number): Pro
 }
 
 export const loadSessionReplayRecord = async (sessionId: string): Promise<ReplaySessionRecord> => {
-  const [record, snapshot, operations] = await Promise.all([
+  const snapshot = await getLatestSnapshot(sessionId)
+  const snapshotOpSeq = snapshot?.opSeq ?? 0
+
+  const [record, operations] = await Promise.all([
     loadSessionRecord(sessionId),
-    getLatestSnapshot(sessionId),
-    getLatestSnapshot(sessionId).then((latestSnapshot) => listOperationsAfter(sessionId, latestSnapshot?.opSeq ?? 0)),
+    listOperationsAfter(sessionId, snapshotOpSeq),
   ])
 
   const baseTiles = Array.isArray(snapshot?.tiles) ? snapshot.tiles.filter(isTileInstance) : []
@@ -410,7 +414,7 @@ export const loadSessionReplayRecord = async (sessionId: string): Promise<Replay
       ...record.session,
       tiles: replayedTiles,
     },
-    snapshotOpSeq: snapshot?.opSeq ?? 0,
+    snapshotOpSeq,
     replayedOperations: operations,
   }
 }

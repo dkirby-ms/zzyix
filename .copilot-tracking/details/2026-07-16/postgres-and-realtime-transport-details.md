@@ -304,3 +304,67 @@ Document unresolved blockers requiring additional research or follow-on planning
 * Realtime contract and runtime behavior deliver sequencing-safe acks, replay-aware reconnect, and presence lifecycle handling.
 * Multi-instance transport synchronization uses Postgres adapter with documented operational constraints.
 * Validation passes across lint, build, and test suites with integration coverage for reconnect and concurrency scenarios.
+
+## Post-Review Remediation
+
+### Step 6.1: Make first-session bootstrap idempotent under concurrent first joins
+
+Refactor session bootstrap in repository hydration to avoid select-then-insert races.
+
+Files:
+* apps/server/src/db/repository.ts - Replace conditional insert path with conflict-safe create-or-load flow
+
+Success criteria:
+* Concurrent first joins for the same session do not fail due to insert races.
+* Session hydration remains deterministic after bootstrap.
+
+### Step 6.2: Fix reconnect replay consistency boundary
+
+Ensure replay load reads latest snapshot once and derives operation tail from that exact snapshot boundary.
+
+Files:
+* apps/server/src/db/repository.ts - Remove dual snapshot read pattern in replay loader
+
+Success criteria:
+* Replay operation tail is always computed from the same snapshot boundary that produced base tiles.
+
+### Step 6.3: Validate pointer payload finite numeric values before rebroadcast
+
+Add runtime guard for pointer payloads and ignore malformed values.
+
+Files:
+* apps/server/src/index.ts - pointer_move payload validator and guarded emit
+
+Success criteria:
+* Non-finite or malformed pointer payloads are ignored without throwing.
+* Valid payload behavior remains unchanged.
+
+### Step 6.4: Remove in-memory cleanup gating from disconnect lifecycle
+
+Eliminate disconnect dependency on stale in-memory cleanup behavior now that presence is persisted.
+
+Files:
+* apps/server/src/index.ts - disconnect handler cleanup path
+
+Success criteria:
+* Disconnect always persists participant leave state and emits `client_left`.
+* No in-memory session cleanup gating remains in disconnect path.
+
+### Step 6.5: Correct adapter terminology in contracts
+
+Align inter-server transport comments with current Postgres adapter implementation.
+
+Files:
+* apps/server/src/contracts.ts - InterServerEvents comment update
+
+Success criteria:
+* Comments reference Postgres adapter (not Redis).
+
+### Step 6.6: Validate remediation changes
+
+Validation commands:
+* npm --prefix apps/server run test -- index
+* npm --prefix apps/server run test -- index.integration
+* npm --prefix apps/server run test -- index.concurrency
+* npm --prefix apps/server run lint
+* npm --prefix apps/server run build

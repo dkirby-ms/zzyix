@@ -115,6 +115,19 @@ export const isRemoveTilePayload = (payload: unknown): payload is RemoveTilePayl
   return typeof payload.tileId === 'string'
 }
 
+const isPointerMovePayload = (payload: unknown): payload is { position: { x: number; y: number } } => {
+  if (!isObjectRecord(payload)) {
+    return false
+  }
+
+  const position = payload.position
+  if (!isObjectRecord(position)) {
+    return false
+  }
+
+  return isFiniteNumber(position.x) && isFiniteNumber(position.y)
+}
+
 export const invokeAckSafely = <T>(ack: unknown, response: T): void => {
   if (typeof ack === 'function') {
     ;(ack as (result: T) => void)(response)
@@ -550,6 +563,10 @@ io.on('connection', (socket) => {
   })
 
   socket.on('pointer_move', (payload) => {
+    if (!isPointerMovePayload(payload)) {
+      return
+    }
+
     console.log(`[pointer_move] ${clientId}:`, payload)
 
     socket.to(sessionId).emit('pointer_update', {
@@ -564,12 +581,8 @@ io.on('connection', (socket) => {
     console.log(`[Socket] Client disconnected: ${clientId} from session ${sessionId}`)
 
     try {
-      const disconnectState = await finalizeParticipantPresence(sessionId, clientId, Date.now())
+      await finalizeParticipantPresence(sessionId, clientId, Date.now())
       io.to(sessionId).emit('client_left', { clientId })
-
-      if (disconnectState.shouldCleanup) {
-        cleanupSessions()
-      }
     } catch (error) {
       console.error(`[Socket] Failed to persist disconnect for session ${sessionId}`, error)
     }

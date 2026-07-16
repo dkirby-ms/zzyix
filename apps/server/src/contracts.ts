@@ -295,7 +295,7 @@ export interface ServerToClientEvents {
   client_left: (payload: ClientLeftPayload) => void
 }
 
-/** Reserved for the Socket.IO Redis adapter (multi-server state sync). */
+/** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */
 export interface InterServerEvents {}
 
 // ─── FORMAL AGREEMENT ────────────────────────────────────────────────────────

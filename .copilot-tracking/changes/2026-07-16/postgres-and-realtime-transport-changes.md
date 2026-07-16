@@ -37,6 +37,9 @@ Implementing Postgres-backed authoritative state and realtime transport hardenin
 * apps/client/src/interaction/controller.test.ts - Added client-side sequence reconciliation coverage
 * apps/server/src/db/repository.ts - Added presence lifecycle persistence helpers and transport-facing adapter support updates
 * docs/decisions/2026-07-15-deployment-architecture-v01.md - Documented Socket.IO Postgres adapter usage with ACA sticky-session assumptions
+* apps/server/src/db/repository.ts - Remediated concurrent first-session bootstrap race and replay snapshot-tail consistency boundary
+* apps/server/src/index.ts - Added strict pointer payload validation and removed disconnect in-memory cleanup gating
+* apps/server/src/contracts.ts - Corrected inter-server transport comment to reflect Postgres adapter usage
 
 ### Removed
 
@@ -69,3 +72,10 @@ Validation status:
 Outstanding limitations:
 * Real Postgres-backed adapter fan-out and persistence integration coverage are still follow-on work.
 * Reconnect replay is currently unbounded for large operation tails and should gain explicit guardrails in follow-up work.
+
+Post-review remediation validation evidence:
+* Passed `npm --prefix apps/server run test -- index`
+* Passed `npm --prefix apps/server run test -- index.integration`
+* Passed `npm --prefix apps/server run test -- index.concurrency`
+* Passed `npm --prefix apps/server run lint`
+* Passed `npm --prefix apps/server run build`

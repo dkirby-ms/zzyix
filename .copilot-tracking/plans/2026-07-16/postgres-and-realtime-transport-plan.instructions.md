@@ -111,6 +111,23 @@ Implement durable Postgres-backed authoritative state and sequence-safe Socket.I
   * Document blockers requiring additional research/planning
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 290-292)
 
+### [x] Implementation Phase 6: Post-Review Remediation
+
+<!-- parallelizable: false -->
+
+* [x] Step 6.1: Make initial session bootstrap idempotent under concurrent first joins
+  * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Post-Review Remediation section)
+* [x] Step 6.2: Fix reconnect replay consistency by reading snapshot once and deriving tail from that boundary
+  * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Post-Review Remediation section)
+* [x] Step 6.3: Add runtime pointer payload finite-number validation before rebroadcast
+  * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Post-Review Remediation section)
+* [x] Step 6.4: Remove in-memory cleanup gating from disconnect lifecycle for persisted presence
+  * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Post-Review Remediation section)
+* [x] Step 6.5: Correct inter-server transport comment terminology to Postgres adapter
+  * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Post-Review Remediation section)
+* [x] Step 6.6: Validate remediation changes
+  * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Post-Review Remediation section)
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-16/postgres-and-realtime-transport-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.
