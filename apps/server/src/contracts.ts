@@ -212,9 +212,15 @@ export type PlaceTilePayload = {
   transform: Transform2D
 }
 
+export type PlaceTileRejectReason =
+  | 'OUT_OF_BOUNDS'
+  | 'OVERLAP'
+  | 'GAP_TOO_LARGE'
+  | 'PLACEMENT_REJECTED'
+
 export type PlaceTileAck =
   | { placed: TileInstance; rejected: false }
-  | { placed: null; rejected: true; reason: string }
+  | { placed: null; rejected: true; reason: PlaceTileRejectReason }
 
 export type RemoveTilePayload = {
   tileId: string

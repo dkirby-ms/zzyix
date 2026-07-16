@@ -11,7 +11,18 @@ Gaps and differences identified between research findings and the implementation
 
 ### Plan Deviations from Research
 
-* None currently open.
+* DD-01: Server dependency installation was required before Phase 1 validation commands could execute.
+  * Plan specifies: Run lint and targeted tests directly in Step 1.3.
+  * Implementation differs: Executed dependency install first, which generated apps/server/package-lock.json and apps/server/coverage artifacts.
+  * Rationale: apps/server local dev dependencies were absent in the execution environment; validation tools were unavailable until install.
+* DD-02: Lint warning persisted in pre-existing server handler file.
+  * Plan specifies: Validate Phase 1 changes.
+  * Implementation differs: Lint passed with warning in apps/server/src/index.ts for unused SCHEMA_VERSION import.
+  * Rationale: warning is outside Phase 1 file scope and did not impact domain port or parity tests.
+* DD-03: Phase 4 build surfaced pre-existing compiler configuration/runtime typing mismatches.
+  * Plan specifies: Run full validation and fix minor issues in-scope.
+  * Implementation differs: Added targeted fixes in apps/server/tsconfig.json and apps/server/src/index.ts before full validation passed.
+  * Rationale: build failures prevented completion of Step 4.1 and were straightforward to resolve within scope.
 
 ## Implementation Paths Considered
 
@@ -44,3 +55,12 @@ Gaps and differences identified between research findings and the implementation
 * WI-03: Add observability for op sequence diagnostics - Record per-session op sequence and reject reasons in structured logs/metrics. (low)
   * Source: Research potential next research item on op sequence diagnostics
   * Dependency: Deterministic sequencing implemented and validated
+* WI-04: Add socket-level integration tests for ack and broadcast ordering - Verify runtime ordering behavior over live Socket.IO transport, not only unit-level handler tests. (medium)
+  * Source: Phase 2 implementation suggestion
+  * Dependency: Authoritative mutation handlers stabilized
+* WI-05: Add persistence for operation history and snapshot replay - Extend current in-memory authoritative model to durable history when issue scope expands. (high)
+  * Source: Phase 2 implementation suggestion
+  * Dependency: Current deterministic in-memory semantics complete and accepted
+* WI-06: Consider extracting server runtime side effects behind a bootstrap module - Isolate process signal/server listen wiring for cleaner unit testing and fewer typing edge cases. (low)
+  * Source: Phase 4 validation fixes
+  * Dependency: Current authoritative behavior accepted and stabilized

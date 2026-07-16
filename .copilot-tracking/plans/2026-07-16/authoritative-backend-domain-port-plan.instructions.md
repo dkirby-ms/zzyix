@@ -50,53 +50,53 @@ Implement authoritative server-side domain validation and deterministic operatio
 
 ## Implementation Checklist
 
-### [ ] Implementation Phase 1: Port Domain Engine and Establish Parity Tests
+### [x] Implementation Phase 1: Port Domain Engine and Establish Parity Tests
 
 <!-- parallelizable: false -->
 
-* [ ] Step 1.1: Copy and adapt domain modules into server domain folder
+* [x] Step 1.1: Copy and adapt domain modules into server domain folder
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 12-35)
-* [ ] Step 1.2: Add server parity tests for placement validation behavior
+* [x] Step 1.2: Add server parity tests for placement validation behavior
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 36-55)
-* [ ] Step 1.3: Validate phase changes
+* [x] Step 1.3: Validate phase changes
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 56-63)
   * Run lint and targeted server tests for this phase scope
 
-### [ ] Implementation Phase 2: Enforce Authoritative Mutation Semantics
+### [x] Implementation Phase 2: Enforce Authoritative Mutation Semantics
 
 <!-- parallelizable: false -->
 
-* [ ] Step 2.1: Introduce authoritative per-session state and sequencing
+* [x] Step 2.1: Introduce authoritative per-session state and sequencing
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 69-90)
-* [ ] Step 2.2: Wire place_tile validation, closed reject reasons, and post-mutation broadcast ordering
+* [x] Step 2.2: Wire place_tile validation, closed reject reasons, and post-mutation broadcast ordering
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 92-117)
-* [ ] Step 2.3: Enforce tile ID validation and remove_tile idempotency
+* [x] Step 2.3: Enforce tile ID validation and remove_tile idempotency
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 118-140)
-* [ ] Step 2.4: Validate phase changes
+* [x] Step 2.4: Validate phase changes
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 142-149)
 
-### [ ] Implementation Phase 3: Validate Reconciliation and Concurrency Convergence
+### [x] Implementation Phase 3: Validate Reconciliation and Concurrency Convergence
 
 <!-- parallelizable: false -->
 
-* [ ] Step 3.1: Ensure authoritative snapshot/reconnect behavior from server state
+* [x] Step 3.1: Ensure authoritative snapshot/reconnect behavior from server state
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 154-175)
-* [ ] Step 3.2: Add deterministic concurrency matrix tests
+* [x] Step 3.2: Add deterministic concurrency matrix tests
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 176-195)
-* [ ] Step 3.3: Validate phase changes
+* [x] Step 3.3: Validate phase changes
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 196-203)
 
-### [ ] Implementation Phase 4: Validation
+### [x] Implementation Phase 4: Validation
 
 <!-- parallelizable: false -->
 
-* [ ] Step 4.1: Run full project validation
+* [x] Step 4.1: Run full project validation
   * Execute all lint commands, server build, and complete server tests
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 208-215)
-* [ ] Step 4.2: Fix minor validation issues
+* [x] Step 4.2: Fix minor validation issues
   * Apply straightforward corrections discovered in lint/build/test output
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 216-219)
-* [ ] Step 4.3: Report blocking issues
+* [x] Step 4.3: Report blocking issues
   * Document out-of-scope blockers and recommend follow-on planning when needed
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 220-223)
 
