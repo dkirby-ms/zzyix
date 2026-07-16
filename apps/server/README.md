@@ -1,0 +1,49 @@
+# zzyix Server
+
+WebSocket + REST API server for the zzyix collaborative mosaic tile-placement application.
+
+## Quick Start
+
+```bash
+npm install
+npm run dev
+```
+
+Server runs on `http://localhost:3001` with Socket.IO WebSocket on the same origin.
+
+## Development
+
+- `npm run dev` — Start with hot reload (via nodemon + ts-node)
+- `npm run build` — Compile TypeScript to `dist/`
+- `npm run lint` — Run oxlint
+- `npm run test` — Run tests with coverage
+- `npm run test:watch` — Watch tests
+
+## Deployment
+
+```bash
+npm run build
+npm start
+```
+
+Set environment variables:
+- `PORT` — Server port (default: 3001)
+- `HOST` — Server host (default: 0.0.0.0)
+- `CORS_ORIGIN` — Allowed CORS origin for Socket.IO (default: *)
+
+## Architecture
+
+- **Express** — REST API layer (health checks, session management)
+- **Socket.IO** — WebSocket protocol with typed events (ClientToServerEvents, ServerToClientEvents)
+- **Domain Engine** — `apps/server/src/domain/` — Tile validation, placement logic, authoritative game state
+
+## Contracts
+
+All REST and Socket.IO operations are defined in `src/contracts.ts`. This file is the single source of truth for the API specification and must be shared with the client team.
+
+See [contracts.ts](./src/contracts.ts) for:
+- Typed Socket.IO event maps
+- REST endpoint shapes
+- Validation rules
+- Error codes and scenarios
+- Formal agreement between client and server teams
