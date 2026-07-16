@@ -60,54 +60,54 @@ Implement durable Postgres-backed authoritative state and sequence-safe Socket.I
 * [x] Step 1.4: Validate phase changes
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 80-84)
 
-### [ ] Implementation Phase 2: Replace In-Memory Session Store with Postgres Persistence
+### [x] Implementation Phase 2: Replace In-Memory Session Store with Postgres Persistence
 
 <!-- parallelizable: false -->
 
-* [ ] Step 2.1: Implement shared Postgres client and repository layer
+* [x] Step 2.1: Implement shared Postgres client and repository layer
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 85-104)
-* [ ] Step 2.2: Integrate persistence-backed state hydration and operation writes in socket handlers
+* [x] Step 2.2: Integrate persistence-backed state hydration and operation writes in socket handlers
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 105-125)
-* [ ] Step 2.3: Add explicit transactional op_seq allocator strategy for concurrent writes
+* [x] Step 2.3: Add explicit transactional op_seq allocator strategy for concurrent writes
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 113-134)
-* [ ] Step 2.4: Add snapshot trigger logic and retention cleanup job wiring
+* [x] Step 2.4: Add snapshot trigger logic and retention cleanup job wiring
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 135-156)
-* [ ] Step 2.5: Validate phase changes
+* [x] Step 2.5: Validate phase changes
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 158-162)
 
-### [ ] Implementation Phase 3: Complete Realtime Sequencing, Acknowledgment, and Reconnect Guarantees
+### [x] Implementation Phase 3: Complete Realtime Sequencing, Acknowledgment, and Reconnect Guarantees
 
 <!-- parallelizable: false -->
 
-* [ ] Step 3.1: Add opSeq and snapshot sequence fields to transport contracts
+* [x] Step 3.1: Add opSeq and snapshot sequence fields to transport contracts
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 159-178)
-* [ ] Step 3.2: Implement reconnect replay flow from snapshot plus operation tail
+* [x] Step 3.2: Implement reconnect replay flow from snapshot plus operation tail
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 179-200)
-* [ ] Step 3.3: Validate phase changes
+* [x] Step 3.3: Validate phase changes
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 214-218)
 
-### [ ] Implementation Phase 4: Multi-Instance Transport and Presence Hardening
+### [x] Implementation Phase 4: Multi-Instance Transport and Presence Hardening
 
 <!-- parallelizable: false -->
 
-* [ ] Step 4.1: Wire Socket.IO Postgres adapter from shared pool and document affinity assumptions
+* [x] Step 4.1: Wire Socket.IO Postgres adapter from shared pool and document affinity assumptions
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 223-243)
-* [ ] Step 4.2: Persist participant presence transitions on connect and disconnect
+* [x] Step 4.2: Persist participant presence transitions on connect and disconnect
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 245-266)
-* [ ] Step 4.3: Validate phase changes
+* [x] Step 4.3: Validate phase changes
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 269-273)
 
-### [ ] Implementation Phase 5: Validation
+### [x] Implementation Phase 5: Validation
 
 <!-- parallelizable: false -->
 
-* [ ] Step 5.1: Run full project validation
+* [x] Step 5.1: Run full project validation
   * Execute all lint commands, workspace builds, and tests for impacted packages
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 279-285)
-* [ ] Step 5.2: Fix minor validation issues
+* [x] Step 5.2: Fix minor validation issues
   * Apply direct corrections for straightforward findings
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 286-288)
-* [ ] Step 5.3: Report blocking issues
+* [x] Step 5.3: Report blocking issues
   * Document blockers requiring additional research/planning
   * Details: .copilot-tracking/details/2026-07-16/postgres-and-realtime-transport-details.md (Lines 290-292)
 

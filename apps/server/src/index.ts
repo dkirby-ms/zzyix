@@ -1,6 +1,7 @@
 import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
+import { createAdapter } from '@socket.io/postgres-adapter'
 import { randomUUID } from 'node:crypto'
 import type {
   ClientToServerEvents,
@@ -18,7 +19,20 @@ import type {
   TilePlacedPayload,
   TileRemovedPayload,
 } from './contracts'
+import {
+  closeDatabaseBundle,
+  getDatabaseBundle,
+  listActiveParticipants,
+  loadSessionReplayRecord,
+  loadSessionRecord,
+  markParticipantJoined,
+  markParticipantLeft,
+  persistSnapshotIfNeeded,
+  persistTilePlacement,
+  persistTileRemoval,
+} from './db'
 import { defaultBounds, validatePlacement } from './domain/placementSolver'
+import { startRetentionJob } from './jobs/retention'
 
 type AuthoritativeSessionState = {
   session: Session
@@ -26,7 +40,20 @@ type AuthoritativeSessionState = {
   lastOpSeq: number
 }
 
+type PresenceRepository = {
+  listActiveParticipants: typeof listActiveParticipants
+  loadSessionReplayRecord: typeof loadSessionReplayRecord
+  markParticipantJoined: typeof markParticipantJoined
+  markParticipantLeft: typeof markParticipantLeft
+}
+
 const sessions = new Map<string, AuthoritativeSessionState>()
+const defaultPresenceRepository: PresenceRepository = {
+  listActiveParticipants,
+  loadSessionReplayRecord,
+  markParticipantJoined,
+  markParticipantLeft,
+}
 const TILE_SHAPES = new Set<PlaceTilePayload['shape']>(['square', 'triangle', 'rectangle', 'l-shape'])
 const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'glass', 'stone'])
 
@@ -183,6 +210,50 @@ export const getSessionState = (sessionId: string): AuthoritativeSessionState =>
   return created
 }
 
+export const initializeParticipantPresence = async (
+  sessionId: string,
+  clientId: string,
+  joinedAt: number,
+  repository: PresenceRepository = defaultPresenceRepository,
+): Promise<{
+  joinedClient: ClientPresence
+  snapshot: {
+    session: Session
+    clients: ClientPresence[]
+    lastOpSeq: number
+  }
+}> => {
+  const joinedClient = await repository.markParticipantJoined(sessionId, clientId, joinedAt)
+  const record = await repository.loadSessionReplayRecord(sessionId)
+
+  return {
+    joinedClient,
+    snapshot: {
+      session: record.session,
+      clients: record.clients,
+      lastOpSeq: record.lastOpSeq,
+    },
+  }
+}
+
+export const finalizeParticipantPresence = async (
+  sessionId: string,
+  clientId: string,
+  leftAt: number,
+  repository: PresenceRepository = defaultPresenceRepository,
+): Promise<{
+  activeClients: ClientPresence[]
+  shouldCleanup: boolean
+}> => {
+  await repository.markParticipantLeft(sessionId, clientId, leftAt)
+  const activeClients = await repository.listActiveParticipants(sessionId)
+
+  return {
+    activeClients,
+    shouldCleanup: activeClients.length === 0,
+  }
+}
+
 const nextOpSeq = (state: AuthoritativeSessionState): number => {
   state.lastOpSeq += 1
   return state.lastOpSeq
@@ -225,10 +296,12 @@ export const applyPlaceTile = (
     ack: {
       placed: tile,
       rejected: false,
+      opSeq,
     },
     event: {
       tile,
       placedBy,
+      opSeq,
     },
   }
 }
@@ -264,10 +337,11 @@ export const applyRemoveTile = (
 
   return {
     opSeq,
-    ack: { removed: true },
+    ack: { removed: true, opSeq },
     event: {
       tileId: payload.tileId,
       removedBy,
+      opSeq,
     },
   }
 }
@@ -342,6 +416,20 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEve
   },
 )
 
+const configureRealtimeAdapter = (): void => {
+  if (!process.env.DATABASE_URL) {
+    if (process.env.NODE_ENV === 'test') {
+      return
+    }
+
+    throw new Error('DATABASE_URL is required for Postgres-backed persistence')
+  }
+
+  io.adapter(createAdapter(getDatabaseBundle().pool))
+}
+
+configureRealtimeAdapter()
+
 // ─── Connection Middleware ───────────────────────────────────────────────────
 
 io.use((socket, next) => {
@@ -364,64 +452,106 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const { sessionId, clientId } = socket.data
-  const state = getSessionState(sessionId)
-  const joinedAt = Date.now()
 
-  // Join the session room
-  socket.join(sessionId)
-  state.clients.set(clientId, {
-    clientId,
-    joinedAt,
-  })
+  const initializeConnection = async (): Promise<void> => {
+    const joinedAt = Date.now()
 
-  console.log(
-    `[Socket] Client joined: ${clientId} | Session: ${sessionId} | Room size: ${io.sockets.adapter.rooms.get(sessionId)?.size ?? 0}`,
-  )
+    socket.join(sessionId)
+    const connectionState = await initializeParticipantPresence(sessionId, clientId, joinedAt)
 
-  socket.emit('session_snapshot', {
-    session: state.session,
-    clients: [...state.clients.values()],
-  })
+    console.log(
+      `[Socket] Client joined: ${clientId} | Session: ${sessionId} | Room size: ${io.sockets.adapter.rooms.get(sessionId)?.size ?? 0}`,
+    )
 
-  socket.to(sessionId).emit('client_joined', {
-    client: {
-      clientId,
-      joinedAt,
-    },
+    socket.emit('session_snapshot', connectionState.snapshot)
+
+    socket.to(sessionId).emit('client_joined', { client: connectionState.joinedClient })
+  }
+
+  void initializeConnection().catch((error) => {
+    console.error(`[Socket] Failed to initialize session ${sessionId}`, error)
+    socket.disconnect(true)
   })
 
   // ── Event Handlers ────────────────────────────────────────────────────────
 
-  socket.on('place_tile', (payload, ack) => {
+  socket.on('place_tile', async (payload, ack) => {
     console.log(`[place_tile] ${clientId} attempting to place`, payload)
-    const result = handlePlaceTileRequest(state, payload, clientId)
-    invokeAckSafely(ack, result.ack)
 
-    // Broadcast only after successful authoritative mutation.
-    if (result.event) {
-      io.to(sessionId).emit('tile_placed', result.event)
+    if (!isPlaceTilePayload(payload)) {
+      invokeAckSafely(ack, {
+        placed: null,
+        rejected: true,
+        reason: 'PLACEMENT_REJECTED',
+      })
+      return
+    }
+
+    try {
+      const record = await loadSessionRecord(sessionId)
+      const validation = validatePlacement(payload.shape, payload.transform, record.session.tiles, defaultBounds)
+
+      if (!validation.valid) {
+        invokeAckSafely(ack, {
+          placed: null,
+          rejected: true,
+          reason: toRejectReason(validation.reason),
+        })
+        return
+      }
+
+      const result = await persistTilePlacement({
+        sessionId,
+        payload,
+        placedBy: clientId,
+      })
+
+      invokeAckSafely(ack, result.ack)
+
+      if (result.event && 'tile' in result.event && 'opSeq' in result) {
+        io.to(sessionId).emit('tile_placed', result.event)
+        await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
+      }
+    } catch (error) {
+      console.error(`[place_tile] Failed for session ${sessionId}`, error)
+      invokeAckSafely(ack, {
+        placed: null,
+        rejected: true,
+        reason: 'PLACEMENT_REJECTED',
+      })
     }
   })
 
-  socket.on('remove_tile', (payload, ack) => {
+  socket.on('remove_tile', async (payload, ack) => {
     console.log(`[remove_tile] ${clientId} attempting to remove`, payload.tileId)
-    const result = handleRemoveTileRequest(state, payload, clientId)
-    invokeAckSafely(ack, result.ack)
 
-    // Broadcast only on successful authoritative removal.
-    if (result.event) {
-      io.to(sessionId).emit('tile_removed', result.event)
+    if (!isRemoveTilePayload(payload) || !isValidTileId(payload.tileId)) {
+      invokeAckSafely(ack, { removed: false })
+      return
+    }
+
+    try {
+      const result = await persistTileRemoval({
+        sessionId,
+        payload,
+        removedBy: clientId,
+      })
+
+      invokeAckSafely(ack, result.ack)
+
+      if (result.event && 'tileId' in result.event && 'opSeq' in result) {
+        io.to(sessionId).emit('tile_removed', result.event)
+        await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
+      }
+    } catch (error) {
+      console.error(`[remove_tile] Failed for session ${sessionId}`, error)
+      invokeAckSafely(ack, { removed: false })
     }
   })
 
   socket.on('pointer_move', (payload) => {
     console.log(`[pointer_move] ${clientId}:`, payload)
-    const existing = state.clients.get(clientId)
-    if (existing) {
-      existing.pointer = payload.position
-    }
 
-    // Broadcast to peers only (not the sender)
     socket.to(sessionId).emit('pointer_update', {
       clientId,
       position: payload.position,
@@ -430,22 +560,47 @@ io.on('connection', (socket) => {
 
   // ── Disconnection ──────────────────────────────────────────────────────────
 
-  socket.on('disconnect', () => {
+  socket.on('disconnect', async () => {
     console.log(`[Socket] Client disconnected: ${clientId} from session ${sessionId}`)
-    state.clients.delete(clientId)
-    io.to(sessionId).emit('client_left', { clientId })
-    cleanupSessions()
+
+    try {
+      const disconnectState = await finalizeParticipantPresence(sessionId, clientId, Date.now())
+      io.to(sessionId).emit('client_left', { clientId })
+
+      if (disconnectState.shouldCleanup) {
+        cleanupSessions()
+      }
+    } catch (error) {
+      console.error(`[Socket] Failed to persist disconnect for session ${sessionId}`, error)
+    }
   })
 })
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
 
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully')
-  httpServer.close(() => {
-    console.log('Server closed')
-    process.exit(0)
+const retentionJob = process.env.NODE_ENV === 'test' ? null : startRetentionJob()
+
+const shutdown = async (signal: string): Promise<void> => {
+  console.log(`${signal} received, shutting down gracefully`)
+  retentionJob?.stop()
+
+  await new Promise<void>((resolve) => {
+    httpServer.close(() => {
+      console.log('Server closed')
+      resolve()
+    })
   })
+
+  await closeDatabaseBundle()
+  process.exit(0)
+}
+
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM')
+})
+
+process.on('SIGINT', () => {
+  void shutdown('SIGINT')
 })
 
 // ─── Start Server ────────────────────────────────────────────────────────────

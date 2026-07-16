@@ -92,6 +92,8 @@ WebSockets are required for low-latency collaborative tile placement. Key findin
 - ACA supports **session affinity (sticky sessions)** on the main HTTP ingress port. Enabling this ensures a given client always routes to the same replica, which is required for single-process in-memory session state.
 - Sticky sessions are a single-node solution. Horizontal scaling beyond one active replica with shared canvas state will require an external pub-sub or state layer (e.g., Redis). This is deferred — sticky sessions are sufficient for initial scale.
 
+For the current server runtime, room broadcasts are synchronized across replicas with the Socket.IO Postgres adapter by reusing the shared Postgres pool already required for persistence. This does not remove the ACA sticky-session requirement. Affinity is still required so reconnects and follow-up traffic land on the same replica, and the adapter does not provide Socket.IO connection state recovery by itself.
+
 > **Deferred:** Cross-replica state sync design (Redis pub-sub or equivalent) is out of scope for this ADR. It will be addressed when scaling requirements demand more than one server replica.
 
 ---

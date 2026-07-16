@@ -32,7 +32,10 @@ Gaps and differences identified between research findings and the implementation
 
 ### Plan Deviations from Research
 
-* None currently.
+* DD-01: Phase 2 validation retained existing in-process integration coverage instead of adding real Postgres-backed integration tests.
+  * Plan specifies: integration coverage for persistent sessions during Phase 2 validation
+  * Implementation differs: current tests passed without exercising a live Postgres runtime
+  * Rationale: Kept the persistence landing focused on runtime replacement and deferred heavier DB-backed integration coverage to follow-on work
 
 ## Implementation Paths Considered
 
@@ -77,3 +80,15 @@ Gaps and differences identified between research findings and the implementation
 * WI-05: Add an explicit migration runner wrapper for operational apply and rollback workflows. (medium)
   * Source: Phase 1 implementation
   * Dependency: Baseline Postgres migration workflow adoption
+* WI-06: Add real Postgres integration coverage for repository hydration, advisory-lock sequencing, and retention execution. (high)
+  * Source: Phase 2 implementation
+  * Dependency: Baseline persistence runtime complete
+* WI-07: Add bounded replay guardrails for stale snapshots and large operation tails. (medium)
+  * Source: DR-08 and Phase 3 implementation
+  * Dependency: Baseline reconnect replay complete
+* WI-08: Wire client reconciliation helpers into the eventual live socket transport surface. (medium)
+  * Source: Phase 3 implementation
+  * Dependency: Client transport runtime work scheduled
+* WI-09: Add real Postgres adapter fan-out tests for LISTEN/NOTIFY and multi-replica room broadcasts. (high)
+  * Source: DR-09 and Phase 4 implementation
+  * Dependency: Testcontainers-backed Postgres integration suite available
