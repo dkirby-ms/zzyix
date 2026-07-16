@@ -1,0 +1,27 @@
+{
+  "name": "zzyix-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/client",
+    "apps/server"
+  ],
+  "scripts": {
+    "dev:client": "npm run dev --workspace=apps/client",
+    "dev:server": "npm run dev --workspace=apps/server",
+    "audit": "npm run audit --workspaces --if-present",
+    "audit:client": "npm audit --workspace=apps/client",
+    "audit:server": "npm audit --workspace=apps/server",
+    "build": "npm run build --workspaces --if-present",
+    "build:client": "npm run build --workspace=apps/client",
+    "build:server": "npm run build --workspace=apps/server",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:client": "npm run lint --workspace=apps/client",
+    "lint:server": "npm run lint --workspace=apps/server",
+    "test": "npm run test --workspaces --if-present",
+    "test:client": "npm run test --workspace=apps/client",
+    "test:server": "npm run test --workspace=apps/server",
+    "test:watch:client": "npm run test:watch --workspace=apps/client",
+    "test:watch:server": "npm run test:watch --workspace=apps/server"
+  }
+}
