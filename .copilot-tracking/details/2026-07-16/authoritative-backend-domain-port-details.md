@@ -221,6 +221,75 @@ Iterate on small lint/test/build issues directly related to this scope without e
 
 If validation fails due to out-of-scope architectural concerns (for example persistence/history storage design), document blockers and propose follow-on planning.
 
+## Implementation Phase 5: Runtime Hardening Rework from Review
+
+<!-- parallelizable: false -->
+
+### Step 5.1: Add runtime payload validation and ack callback safety
+
+Introduce runtime trust-boundary checks for `place_tile` and `remove_tile` payloads before domain logic invocation, and guard acknowledgement callback invocation when callbacks are omitted or malformed.
+
+Files:
+* apps/server/src/index.ts - Add runtime payload guard helpers and safe acknowledgement invocation helper
+* apps/server/src/index.test.ts - Add malformed payload and missing/non-function acknowledgement tests
+
+Success criteria:
+* `place_tile` malformed payloads are rejected deterministically without domain mutation.
+* `remove_tile` malformed payloads return idempotent `removed:false` without mutation.
+* Handlers no longer throw when ack is missing or not a function.
+
+Context references:
+* .copilot-tracking/reviews/2026-07-16/authoritative-backend-domain-port-plan-review.md - Critical runtime payload trust boundary finding and major ack-safety finding
+
+Dependencies:
+* Implementation Phases 1-4 completion
+
+### Step 5.2: Harden CORS credentialed origin handling and add session cleanup strategy
+
+Replace wildcard CORS fallback under credentialed mode with a safe default and env-driven explicit origin list handling. Add deterministic session cleanup helpers for empty or stale sessions.
+
+Files:
+* apps/server/src/index.ts - CORS origin resolver and session cleanup helpers/usage
+* apps/server/src/index.test.ts - CORS resolver behavior and session cleanup tests
+
+Success criteria:
+* Credentialed CORS initialization never falls back to wildcard origin.
+* Runtime supports single or comma-separated configured origins.
+* Session cleanup removes empty sessions and stale tile-bearing sessions with no clients.
+
+Context references:
+* .copilot-tracking/reviews/2026-07-16/authoritative-backend-domain-port-plan-review.md - Major CORS and session lifecycle findings
+
+Dependencies:
+* Step 5.1 completion
+
+### Step 5.3: Align contract documentation and extend tests for malformed paths
+
+Resolve documentation drift by aligning bounds commentary with authoritative solver constants and fixing remove semantics commentary to tileId-based behavior. Ensure tests cover malformed request paths and defensive runtime behavior.
+
+Files:
+* apps/server/src/contracts.ts - Bounds and remove event documentation updates
+* apps/server/src/index.test.ts - Additional malformed path and guard tests
+
+Success criteria:
+* Contract comments match server authoritative bounds defaults and remove operation semantics.
+* Test suite includes malformed payload and missing callback defensive path assertions.
+
+Context references:
+* .copilot-tracking/reviews/2026-07-16/authoritative-backend-domain-port-plan-review.md - Major/minor documentation and transport robustness findings
+
+Dependencies:
+* Step 5.2 completion
+
+### Step 5.4: Validate rework changes
+
+Run complete server validation for rework scope.
+
+Validation commands:
+* npm --prefix apps/server run lint
+* npm --prefix apps/server run test
+* npm --prefix apps/server run build
+
 ## Dependencies
 
 * Node.js toolchain compatible with apps/server package scripts

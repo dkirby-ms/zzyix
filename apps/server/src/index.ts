@@ -27,10 +27,89 @@ type AuthoritativeSessionState = {
 }
 
 const sessions = new Map<string, AuthoritativeSessionState>()
+const TILE_SHAPES = new Set<PlaceTilePayload['shape']>(['square', 'triangle', 'rectangle', 'l-shape'])
+const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'glass', 'stone'])
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
+const DEFAULT_SESSION_STALE_MS = 30 * 60 * 1000
 
 export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tileId)
+
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value)
+
+export const isPlaceTilePayload = (payload: unknown): payload is PlaceTilePayload => {
+  if (!isObjectRecord(payload)) {
+    return false
+  }
+
+  if (typeof payload.color !== 'string') {
+    return false
+  }
+
+  if (!TILE_SHAPES.has(payload.shape as PlaceTilePayload['shape'])) {
+    return false
+  }
+
+  if (!MATERIAL_VARIANTS.has(payload.material as PlaceTilePayload['material'])) {
+    return false
+  }
+
+  const transform = payload.transform
+  if (!isObjectRecord(transform)) {
+    return false
+  }
+
+  if (!isFiniteNumber(transform.rotation)) {
+    return false
+  }
+
+  if (transform.mirrored !== undefined && typeof transform.mirrored !== 'boolean') {
+    return false
+  }
+
+  const position = transform.position
+  if (!isObjectRecord(position)) {
+    return false
+  }
+
+  return isFiniteNumber(position.x) && isFiniteNumber(position.y)
+}
+
+export const isRemoveTilePayload = (payload: unknown): payload is RemoveTilePayload => {
+  if (!isObjectRecord(payload)) {
+    return false
+  }
+
+  return typeof payload.tileId === 'string'
+}
+
+export const invokeAckSafely = <T>(ack: unknown, response: T): void => {
+  if (typeof ack === 'function') {
+    ;(ack as (result: T) => void)(response)
+  }
+}
+
+export const resolveCorsOrigin = (rawOrigin: string | undefined): string | string[] => {
+  const configured = (rawOrigin ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0 && origin !== '*')
+
+  if (configured.length === 0) {
+    return DEFAULT_CORS_ORIGIN
+  }
+
+  if (configured.length === 1) {
+    return configured[0]
+  }
+
+  return configured
+}
 
 export const toRejectReason = (reason: string): PlaceTileRejectReason => {
   if (reason.startsWith('out-of-bounds')) {
@@ -59,7 +138,41 @@ export const createAuthoritativeSessionState = (
   lastOpSeq: 0,
 })
 
+export const shouldCleanupSession = (
+  state: AuthoritativeSessionState,
+  now: number,
+  staleAfterMs: number,
+): boolean => {
+  if (state.clients.size > 0) {
+    return false
+  }
+
+  if (state.session.tiles.length === 0) {
+    return true
+  }
+
+  return now - state.session.updatedAt >= staleAfterMs
+}
+
+export const cleanupSessions = (
+  now: number = Date.now(),
+  staleAfterMs: number = DEFAULT_SESSION_STALE_MS,
+): string[] => {
+  const removedSessionIds: string[] = []
+
+  for (const [sessionId, state] of sessions) {
+    if (shouldCleanupSession(state, now, staleAfterMs)) {
+      sessions.delete(sessionId)
+      removedSessionIds.push(sessionId)
+    }
+  }
+
+  return removedSessionIds
+}
+
 export const getSessionState = (sessionId: string): AuthoritativeSessionState => {
+  cleanupSessions()
+
   const existing = sessions.get(sessionId)
   if (existing) {
     return existing
@@ -159,6 +272,46 @@ export const applyRemoveTile = (
   }
 }
 
+export const handlePlaceTileRequest = (
+  state: AuthoritativeSessionState,
+  payload: unknown,
+  placedBy: string,
+): {
+  opSeq?: number
+  ack: PlaceTileAck
+  event?: TilePlacedPayload
+} => {
+  if (!isPlaceTilePayload(payload)) {
+    return {
+      ack: {
+        placed: null,
+        rejected: true,
+        reason: 'PLACEMENT_REJECTED',
+      },
+    }
+  }
+
+  return applyPlaceTile(state, payload, placedBy)
+}
+
+export const handleRemoveTileRequest = (
+  state: AuthoritativeSessionState,
+  payload: unknown,
+  removedBy: string,
+): {
+  opSeq?: number
+  ack: RemoveTileAck
+  event?: TileRemovedPayload
+} => {
+  if (!isRemoveTilePayload(payload)) {
+    return {
+      ack: { removed: false },
+    }
+  }
+
+  return applyRemoveTile(state, payload, removedBy)
+}
+
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 const PORT = Number(process.env.PORT ?? 3001)
@@ -182,7 +335,7 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEve
   httpServer,
   {
     cors: {
-      origin: process.env.CORS_ORIGIN ?? '*',
+      origin: resolveCorsOrigin(process.env.CORS_ORIGIN),
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -241,8 +394,8 @@ io.on('connection', (socket) => {
 
   socket.on('place_tile', (payload, ack) => {
     console.log(`[place_tile] ${clientId} attempting to place`, payload)
-    const result = applyPlaceTile(state, payload, clientId)
-    ack(result.ack)
+    const result = handlePlaceTileRequest(state, payload, clientId)
+    invokeAckSafely(ack, result.ack)
 
     // Broadcast only after successful authoritative mutation.
     if (result.event) {
@@ -252,8 +405,8 @@ io.on('connection', (socket) => {
 
   socket.on('remove_tile', (payload, ack) => {
     console.log(`[remove_tile] ${clientId} attempting to remove`, payload.tileId)
-    const result = applyRemoveTile(state, payload, clientId)
-    ack(result.ack)
+    const result = handleRemoveTileRequest(state, payload, clientId)
+    invokeAckSafely(ack, result.ack)
 
     // Broadcast only on successful authoritative removal.
     if (result.event) {
@@ -281,6 +434,7 @@ io.on('connection', (socket) => {
     console.log(`[Socket] Client disconnected: ${clientId} from session ${sessionId}`)
     state.clients.delete(clientId)
     io.to(sessionId).emit('client_left', { clientId })
+    cleanupSessions()
   })
 })
 

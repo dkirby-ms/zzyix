@@ -100,6 +100,19 @@ Implement authoritative server-side domain validation and deterministic operatio
   * Document out-of-scope blockers and recommend follow-on planning when needed
   * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 220-223)
 
+### [x] Implementation Phase 5: Runtime Hardening Rework from Review
+
+<!-- parallelizable: false -->
+
+* [x] Step 5.1: Add runtime payload validation and ack callback safety
+  * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 224-247)
+* [x] Step 5.2: Harden CORS credentialed origin handling and add session cleanup strategy
+  * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 248-267)
+* [x] Step 5.3: Align contract documentation and extend tests for malformed payload/missing callback paths
+  * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 268-288)
+* [x] Step 5.4: Validate rework changes
+  * Details: .copilot-tracking/details/2026-07-16/authoritative-backend-domain-port-details.md (Lines 289-296)
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-16/authoritative-backend-domain-port-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.
@@ -115,3 +128,5 @@ See .copilot-tracking/plans/logs/2026-07-16/authoritative-backend-domain-port-lo
 * Server enforces authoritative placement validation and state ownership with deterministic rejects and remove semantics. - Traces to: Issue #9 acceptance criteria and research scope
 * Conflict handling rules are implemented and tested with deterministic ordering evidence. - Traces to: Research scenario 2 and contract deterministic policy
 * Clients can reconcile consistently from authoritative acks and snapshots. - Traces to: Issue #9 acceptance criteria and research selected approach
+* Runtime handler boundaries reject malformed operation payloads and tolerate missing/non-function ack callbacks without crashing handlers. - Traces to: 2026-07-16 implementation review critical/major findings
+* Credentialed CORS configuration avoids wildcard fallback and session map lifecycle includes cleanup behavior for empty/stale sessions. - Traces to: 2026-07-16 implementation review major findings

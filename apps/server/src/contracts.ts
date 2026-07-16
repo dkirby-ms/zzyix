@@ -93,7 +93,7 @@ export type ApiError = {
 // Clients MUST NOT assume a placement is valid without server authorization.
 //
 // A tile placement is VALID when ALL of the following conditions hold:
-//   1. The tile transform's position is within the canvas bounds (default: [-4, -4] to [4, 4]).
+//   1. The tile transform's position is within the canvas bounds (default: minX=-5.2, maxX=5.2, minY=-3.4, maxY=3.4).
 //   2. The transformed tile polygon does NOT overlap with any settled tile polygon.
 //   3. The transformed tile polygon is NOT penetrating the canvas boundary (edge-to-edge
 //      contact is allowed via grout gap tolerance MAX_GROUT_GAP = 0.22).
@@ -269,7 +269,7 @@ export type ClientLeftPayload = {
 export interface ClientToServerEvents {
   /** Place a tile; server validates and responds via acknowledgement. */
   place_tile: (payload: PlaceTilePayload, ack: (response: PlaceTileAck) => void) => void
-  /** Remove the last tile; server responds via acknowledgement. */
+  /** Remove by authoritative tileId; server responds via acknowledgement. */
   remove_tile: (payload: RemoveTilePayload, ack: (response: RemoveTileAck) => void) => void
   /** Fire-and-forget cursor position for collaborative presence. */
   pointer_move: (payload: PointerMovePayload) => void

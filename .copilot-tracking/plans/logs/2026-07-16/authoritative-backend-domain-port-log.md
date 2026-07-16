@@ -23,6 +23,10 @@ Gaps and differences identified between research findings and the implementation
   * Plan specifies: Run full validation and fix minor issues in-scope.
   * Implementation differs: Added targeted fixes in apps/server/tsconfig.json and apps/server/src/index.ts before full validation passed.
   * Rationale: build failures prevented completion of Step 4.1 and were straightforward to resolve within scope.
+* DD-04: Review-driven runtime hardening required an additional implementation phase not present in the original plan.
+  * Plan specifies: Phases 1-4 complete feature behavior and validation.
+  * Implementation differs: Added Phase 5 for runtime payload guards, ack safety, CORS credential hardening, session cleanup, and contract documentation alignment.
+  * Rationale: .copilot-tracking/reviews/2026-07-16/authoritative-backend-domain-port-plan-review.md identified critical/major robustness gaps despite green lint/test/build.
 
 ## Implementation Paths Considered
 
@@ -64,3 +68,9 @@ Gaps and differences identified between research findings and the implementation
 * WI-06: Consider extracting server runtime side effects behind a bootstrap module - Isolate process signal/server listen wiring for cleaner unit testing and fewer typing edge cases. (low)
   * Source: Phase 4 validation fixes
   * Dependency: Current authoritative behavior accepted and stabilized
+* WI-07: Add transport-level malformed payload integration tests over live Socket.IO - Exercise runtime trust-boundary behavior over network path beyond helper-level tests. (medium)
+  * Source: Phase 5 implementation follow-on
+  * Dependency: Current Phase 5 guard logic stabilized
+* WI-08: Externalize session cleanup TTL to explicit runtime configuration docs - Document and expose cleanup policy tuning for operations. (low)
+  * Source: Phase 5 implementation follow-on
+  * Dependency: Operational hardening backlog acceptance
