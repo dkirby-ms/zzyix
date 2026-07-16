@@ -1,3 +1,4 @@
 /.vite
 apps/server/coverage/
 node_modules/
+apps/client/coverage/
