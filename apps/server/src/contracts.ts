@@ -219,7 +219,7 @@ export type PlaceTileRejectReason =
   | 'PLACEMENT_REJECTED'
 
 export type PlaceTileAck =
-  | { placed: TileInstance; rejected: false }
+  | { placed: TileInstance; rejected: false; opSeq: number }
   | { placed: null; rejected: true; reason: PlaceTileRejectReason }
 
 export type RemoveTilePayload = {
@@ -228,6 +228,7 @@ export type RemoveTilePayload = {
 
 export type RemoveTileAck = {
   removed: boolean
+  opSeq?: number
 }
 
 export type PointerMovePayload = {
@@ -237,16 +238,19 @@ export type PointerMovePayload = {
 export type SessionSnapshotPayload = {
   session: Session
   clients: ClientPresence[]
+  lastOpSeq: number
 }
 
 export type TilePlacedPayload = {
   tile: TileInstance
   placedBy: string
+  opSeq: number
 }
 
 export type TileRemovedPayload = {
   tileId: string
   removedBy: string
+  opSeq: number
 }
 
 export type PointerUpdatePayload = {
@@ -291,7 +295,7 @@ export interface ServerToClientEvents {
   client_left: (payload: ClientLeftPayload) => void
 }
 
-/** Reserved for the Socket.IO Redis adapter (multi-server state sync). */
+/** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */
 export interface InterServerEvents {}
 
 // ─── FORMAL AGREEMENT ────────────────────────────────────────────────────────

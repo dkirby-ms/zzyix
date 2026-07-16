@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { applyPlaceTile, getSessionState } from './index'
+import { describe, expect, it, vi } from 'vitest'
+import { applyPlaceTile, finalizeParticipantPresence, getSessionState, initializeParticipantPresence } from './index'
 import { vec2 } from './domain/math2d'
 
 let sessionCounter = 0
@@ -32,11 +32,13 @@ describe('authoritative snapshot reconciliation', () => {
     const snapshot = {
       session: state.session,
       clients: [...state.clients.values()],
+      lastOpSeq: state.lastOpSeq,
     }
 
     expect(snapshot.session.id).toBe(sessionId)
     expect(snapshot.session.tiles).toHaveLength(1)
     expect(snapshot.clients).toEqual([{ clientId: 'client-1', joinedAt }])
+    expect(snapshot.lastOpSeq).toBe(1)
   })
 
   it('reconnect snapshot reflects latest canonical session state', () => {
@@ -65,10 +67,55 @@ describe('authoritative snapshot reconciliation', () => {
     const reconnectSnapshot = {
       session: reconnectState.session,
       clients: [...reconnectState.clients.values()],
+      lastOpSeq: reconnectState.lastOpSeq,
     }
 
     expect(reconnectSnapshot.session.id).toBe(sessionId)
     expect(reconnectSnapshot.session.tiles).toHaveLength(1)
     expect(reconnectSnapshot.clients).toEqual([{ clientId: 'client-a', joinedAt: 15 }])
+    expect(reconnectSnapshot.lastOpSeq).toBe(1)
+  })
+
+  it('initializes participant presence from persisted replay state', async () => {
+    const repository = {
+      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
+      loadSessionReplayRecord: vi.fn().mockResolvedValue({
+        session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
+        lastOpSeq: 3,
+        snapshotOpSeq: 3,
+        replayedOperations: [],
+      }),
+      listActiveParticipants: vi.fn(),
+      markParticipantLeft: vi.fn(),
+    }
+
+    const result = await initializeParticipantPresence('session-1', 'client-a', 1_000, repository)
+
+    expect(repository.markParticipantJoined).toHaveBeenCalledWith('session-1', 'client-a', 1_000)
+    expect(repository.loadSessionReplayRecord).toHaveBeenCalledWith('session-1')
+    expect(result).toEqual({
+      joinedClient: { clientId: 'client-a', joinedAt: 1_000 },
+      snapshot: {
+        session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
+        lastOpSeq: 3,
+      },
+    })
+  })
+
+  it('finalizes participant presence and requests cleanup when the room becomes empty', async () => {
+    const repository = {
+      markParticipantJoined: vi.fn(),
+      loadSessionReplayRecord: vi.fn(),
+      markParticipantLeft: vi.fn().mockResolvedValue(undefined),
+      listActiveParticipants: vi.fn().mockResolvedValue([]),
+    }
+
+    const result = await finalizeParticipantPresence('session-1', 'client-a', 2_000, repository)
+
+    expect(repository.markParticipantLeft).toHaveBeenCalledWith('session-1', 'client-a', 2_000)
+    expect(repository.listActiveParticipants).toHaveBeenCalledWith('session-1')
+    expect(result).toEqual({ activeClients: [], shouldCleanup: true })
   })
 })

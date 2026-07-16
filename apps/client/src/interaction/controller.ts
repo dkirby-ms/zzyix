@@ -7,6 +7,27 @@ import type { Vec2 } from '../domain/math2d'
 import type { TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 
+export type SequencedSnapshot = {
+  tiles: TileInstance[]
+  lastOpSeq: number
+}
+
+export type SequencedTilePlaced = {
+  tile: TileInstance
+  opSeq: number
+}
+
+export type SequencedTileRemoved = {
+  tileId: string
+  opSeq: number
+}
+
+export type SequencedTilesState = {
+  tiles: TileInstance[]
+  lastOpSeq: number
+  requiresSnapshot: boolean
+}
+
 export type ActiveTile = {
   shape: TileShape
   color: string
@@ -34,6 +55,62 @@ export const createInitialGhost = (): GhostState => ({
   rejection: { x: 0, y: 0 },
   debugReason: 'no pointer yet',
 })
+
+export const createInitialSequencedTilesState = (): SequencedTilesState => ({
+  tiles: [],
+  lastOpSeq: 0,
+  requiresSnapshot: false,
+})
+
+export const applySequencedSnapshot = (snapshot: SequencedSnapshot): SequencedTilesState => ({
+  tiles: snapshot.tiles,
+  lastOpSeq: snapshot.lastOpSeq,
+  requiresSnapshot: false,
+})
+
+export const reconcileSequencedTilePlaced = (
+  state: SequencedTilesState,
+  payload: SequencedTilePlaced,
+): SequencedTilesState => {
+  if (payload.opSeq <= state.lastOpSeq) {
+    return state
+  }
+
+  if (payload.opSeq !== state.lastOpSeq + 1) {
+    return {
+      ...state,
+      requiresSnapshot: true,
+    }
+  }
+
+  return {
+    tiles: [...state.tiles.filter((tile) => tile.id !== payload.tile.id), payload.tile],
+    lastOpSeq: payload.opSeq,
+    requiresSnapshot: false,
+  }
+}
+
+export const reconcileSequencedTileRemoved = (
+  state: SequencedTilesState,
+  payload: SequencedTileRemoved,
+): SequencedTilesState => {
+  if (payload.opSeq <= state.lastOpSeq) {
+    return state
+  }
+
+  if (payload.opSeq !== state.lastOpSeq + 1) {
+    return {
+      ...state,
+      requiresSnapshot: true,
+    }
+  }
+
+  return {
+    tiles: state.tiles.filter((tile) => tile.id !== payload.tileId),
+    lastOpSeq: payload.opSeq,
+    requiresSnapshot: false,
+  }
+}
 
 export const updateGhostTarget = (
   pointer: Vec2,
