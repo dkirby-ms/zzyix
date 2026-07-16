@@ -206,6 +206,17 @@ export type SocketData = {
 // can import individual payload types without taking the full event map.
 
 export type PlaceTilePayload = {
+  /**
+   * Optional optimistic concurrency precondition.
+   *
+   * When provided, the server compares this value with the current canvas
+   * revision and rejects stale or out-of-order requests.
+   *
+   * For transport retries of an already-accepted operation, clients can omit
+   * this value so idempotent replay logic can return the original opSeq.
+   */
+  expectedRevision?: number
+  tileId?: string
   shape: TileShape
   color: string
   material: MaterialVariant
@@ -217,19 +228,32 @@ export type PlaceTileRejectReason =
   | 'OVERLAP'
   | 'GAP_TOO_LARGE'
   | 'PLACEMENT_REJECTED'
+  | 'DUPLICATE_OPERATION'
+  | 'STALE_REVISION'
+  | 'OUT_OF_ORDER_REVISION'
 
 export type PlaceTileAck =
-  | { placed: TileInstance; rejected: false; opSeq: number }
+  | { placed: TileInstance; rejected: false; opSeq: number; idempotent?: boolean }
   | { placed: null; rejected: true; reason: PlaceTileRejectReason }
 
+export type RemoveTileRejectReason =
+  | 'TILE_NOT_FOUND'
+  | 'DUPLICATE_OPERATION'
+  | 'STALE_REVISION'
+  | 'OUT_OF_ORDER_REVISION'
+
 export type RemoveTilePayload = {
+  /**
+   * Optional optimistic concurrency precondition. See PlaceTilePayload for
+   * replay semantics when retried operations need deterministic acknowledgements.
+   */
+  expectedRevision?: number
   tileId: string
 }
 
-export type RemoveTileAck = {
-  removed: boolean
-  opSeq?: number
-}
+export type RemoveTileAck =
+  | { removed: true; opSeq: number; idempotent?: boolean }
+  | { removed: false; reason?: RemoveTileRejectReason }
 
 export type PointerMovePayload = {
   position: Vec2

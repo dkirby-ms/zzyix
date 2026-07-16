@@ -96,6 +96,42 @@ describe('authoritative handler semantics', () => {
     expect(unknownValid.event).toBeUndefined()
   })
 
+  it('keeps remove replay ordering deterministic across repeated duplicate requests', () => {
+    const state = createAuthoritativeSessionState('session-3-replay', 1)
+
+    const placed = applyPlaceTile(
+      state,
+      {
+        shape: 'square',
+        color: '#fff',
+        material: 'ceramic',
+        transform: {
+          position: vec2(0, 0),
+          rotation: 0,
+        },
+      },
+      'client-a',
+    )
+
+    expect(placed.ack.rejected).toBe(false)
+    if (placed.ack.rejected) {
+      throw new Error('expected place tile success')
+    }
+
+    const firstRemove = applyRemoveTile(state, { tileId: placed.ack.placed.id }, 'client-a')
+    const replayRemoveA = applyRemoveTile(state, { tileId: placed.ack.placed.id }, 'client-a')
+    const replayRemoveB = applyRemoveTile(state, { tileId: placed.ack.placed.id }, 'client-a')
+
+    expect(firstRemove.ack).toEqual({ removed: true, opSeq: 2 })
+    expect(replayRemoveA.ack).toEqual({ removed: false })
+    expect(replayRemoveB.ack).toEqual({ removed: false })
+    expect(firstRemove.opSeq).toBe(2)
+    expect(replayRemoveA.opSeq).toBe(3)
+    expect(replayRemoveB.opSeq).toBe(4)
+    expect(state.lastOpSeq).toBe(4)
+    expect(state.session.tiles).toHaveLength(0)
+  })
+
   it('removes known tile id and emits tile_removed payload', () => {
     const state = createAuthoritativeSessionState('session-4', 1)
     const placed = applyPlaceTile(
@@ -182,6 +218,40 @@ describe('authoritative handler semantics', () => {
     expect(isRemoveTilePayload(null)).toBe(false)
     expect(isRemoveTilePayload({ tileId: 123 })).toBe(false)
     expect(isRemoveTilePayload({ tileId: 'abc' })).toBe(true)
+  })
+
+  it('accepts only non-negative integer expectedRevision values in payload guards', () => {
+    expect(
+      isPlaceTilePayload({
+        shape: 'square',
+        color: '#fff',
+        material: 'ceramic',
+        expectedRevision: 2,
+        transform: { position: { x: 0, y: 0 }, rotation: 0 },
+      }),
+    ).toBe(true)
+    expect(
+      isPlaceTilePayload({
+        shape: 'square',
+        color: '#fff',
+        material: 'ceramic',
+        expectedRevision: -1,
+        transform: { position: { x: 0, y: 0 }, rotation: 0 },
+      }),
+    ).toBe(false)
+    expect(
+      isPlaceTilePayload({
+        shape: 'square',
+        color: '#fff',
+        material: 'ceramic',
+        expectedRevision: 1.5,
+        transform: { position: { x: 0, y: 0 }, rotation: 0 },
+      }),
+    ).toBe(false)
+
+    expect(isRemoveTilePayload({ tileId: 'abc', expectedRevision: 0 })).toBe(true)
+    expect(isRemoveTilePayload({ tileId: 'abc', expectedRevision: -1 })).toBe(false)
+    expect(isRemoveTilePayload({ tileId: 'abc', expectedRevision: 1.2 })).toBe(false)
   })
 
   it('uses safe CORS defaults when wildcard is missing or configured', () => {

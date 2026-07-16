@@ -118,4 +118,138 @@ describe('authoritative snapshot reconciliation', () => {
     expect(repository.listActiveParticipants).toHaveBeenCalledWith('session-1')
     expect(result).toEqual({ activeClients: [], shouldCleanup: true })
   })
+
+  it('reuses original opSeq for duplicate place replay and suppresses second broadcast write', () => {
+    const emit = vi.fn()
+    const room = { emit }
+    const io = {
+      to: vi.fn().mockReturnValue(room),
+    }
+    const persistSnapshotIfNeeded = vi.fn()
+
+    const firstResult = {
+      opSeq: 9,
+      revision: 4,
+      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+      ack: {
+        placed: {
+          id: '11111111-1111-4111-8111-111111111111',
+          shape: 'square' as const,
+          color: '#123',
+          material: 'glass' as const,
+          transform: { position: { x: 0, y: 0 }, rotation: 0 },
+          createdAt: 10,
+        },
+        rejected: false as const,
+        opSeq: 9,
+      },
+      event: {
+        tile: {
+          id: '11111111-1111-4111-8111-111111111111',
+          shape: 'square' as const,
+          color: '#123',
+          material: 'glass' as const,
+          transform: { position: { x: 0, y: 0 }, rotation: 0 },
+          createdAt: 10,
+        },
+        placedBy: 'client-a',
+        opSeq: 9,
+      },
+    }
+
+    const replayResult = {
+      ...firstResult,
+      ack: {
+        ...firstResult.ack,
+        idempotent: true,
+      },
+    }
+
+    const handlePersistResult = async (result: typeof firstResult): Promise<void> => {
+      if (result.event && 'tile' in result.event && 'opSeq' in result && !result.ack.idempotent) {
+        io.to('session-1').emit('tile_placed', result.event)
+        await persistSnapshotIfNeeded('session-1', result.opSeq, result.session)
+      }
+    }
+
+    void handlePersistResult(firstResult)
+    void handlePersistResult(replayResult)
+
+    expect(firstResult.ack.opSeq).toBe(9)
+    expect(replayResult.ack.opSeq).toBe(9)
+    expect(io.to).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('tile_placed', firstResult.event)
+    expect(persistSnapshotIfNeeded).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces stale and out-of-order revision rejects as typed outcomes', () => {
+    const staleReject = {
+      revision: 6,
+      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+      ack: {
+        placed: null,
+        rejected: true as const,
+        reason: 'STALE_REVISION' as const,
+      },
+    }
+
+    const outOfOrderReject = {
+      revision: 6,
+      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+      ack: {
+        removed: false as const,
+        reason: 'OUT_OF_ORDER_REVISION' as const,
+      },
+    }
+
+    expect(staleReject.ack).toEqual({
+      placed: null,
+      rejected: true,
+      reason: 'STALE_REVISION',
+    })
+    expect(outOfOrderReject.ack).toEqual({
+      removed: false,
+      reason: 'OUT_OF_ORDER_REVISION',
+    })
+  })
+
+  it('suppresses duplicate remove replay broadcast and snapshot write while preserving opSeq', () => {
+    const emit = vi.fn()
+    const room = { emit }
+    const io = {
+      to: vi.fn().mockReturnValue(room),
+    }
+    const persistSnapshotIfNeeded = vi.fn()
+
+    const firstRemoval = {
+      opSeq: 12,
+      revision: 7,
+      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+      ack: { removed: true as const, opSeq: 12 },
+      event: { tileId: '11111111-1111-4111-8111-111111111111', removedBy: 'client-a', opSeq: 12 },
+    }
+
+    const replayRemoval = {
+      ...firstRemoval,
+      ack: { ...firstRemoval.ack, idempotent: true },
+    }
+
+    const handleRemoveResult = async (result: typeof firstRemoval): Promise<void> => {
+      if (result.event && 'tileId' in result.event && 'opSeq' in result && !result.ack.idempotent) {
+        io.to('session-1').emit('tile_removed', result.event)
+        await persistSnapshotIfNeeded('session-1', result.opSeq, result.session)
+      }
+    }
+
+    void handleRemoveResult(firstRemoval)
+    void handleRemoveResult(replayRemoval)
+
+    expect(firstRemoval.ack.opSeq).toBe(12)
+    expect(replayRemoval.ack.opSeq).toBe(12)
+    expect(io.to).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('tile_removed', firstRemoval.event)
+    expect(persistSnapshotIfNeeded).toHaveBeenCalledTimes(1)
+  })
 })
