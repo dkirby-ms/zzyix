@@ -30,7 +30,7 @@ import {
   persistSnapshotIfNeeded,
   persistTilePlacement,
   persistTileRemoval,
-} from './db/index'
+} from './db'
 import { defaultBounds, validatePlacement } from './domain/placementSolver'
 import { startRetentionJob } from './jobs/retention'
 
