@@ -1,1 +1,3 @@
 /.vite
+apps/server/coverage/*.json
+node_modules/
