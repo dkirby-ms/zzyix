@@ -13,7 +13,7 @@ Server runs on `http://localhost:3001` with Socket.IO WebSocket on the same orig
 
 ## Development
 
-- `npm run dev` — Start with hot reload (via nodemon + ts-node)
+- `npm run dev` — Start with hot reload (via nodemon + tsx)
 - `npm run build` — Compile TypeScript to `dist/`
 - `npm run lint` — Run oxlint
 - `npm run test` — Run tests with coverage

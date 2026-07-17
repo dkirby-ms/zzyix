@@ -10,23 +10,31 @@ import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeom
 export type SequencedSnapshot = {
   tiles: TileInstance[]
   lastOpSeq: number
+  revision: number
 }
 
 export type SequencedTilePlaced = {
   tile: TileInstance
   opSeq: number
+  revision: number
 }
 
 export type SequencedTileRemoved = {
   tileId: string
   opSeq: number
+  revision: number
 }
 
 export type SequencedTilesState = {
   tiles: TileInstance[]
   lastOpSeq: number
+  revision: number        // authoritative canvas revision from server acks/snapshot
   requiresSnapshot: boolean
 }
+
+export type OptimisticPlacementAck =
+  | { placed: null; rejected: true }
+  | { placed: TileInstance; rejected: false; opSeq: number; newRevision: number }
 
 export type ActiveTile = {
   shape: TileShape
@@ -59,14 +67,49 @@ export const createInitialGhost = (): GhostState => ({
 export const createInitialSequencedTilesState = (): SequencedTilesState => ({
   tiles: [],
   lastOpSeq: 0,
+  revision: 0,
   requiresSnapshot: false,
 })
 
 export const applySequencedSnapshot = (snapshot: SequencedSnapshot): SequencedTilesState => ({
   tiles: snapshot.tiles,
   lastOpSeq: snapshot.lastOpSeq,
+  revision: snapshot.revision,
   requiresSnapshot: false,
 })
+
+export const reconcileOptimisticPlacementAck = (
+  state: SequencedTilesState,
+  tempTile: TileInstance,
+  ack: OptimisticPlacementAck,
+): SequencedTilesState => {
+  const withoutTemp = state.tiles.filter((tile) => tile.id !== tempTile.id)
+
+  if (ack.rejected) {
+    return {
+      ...state,
+      tiles: withoutTemp,
+    }
+  }
+
+  const alreadyPresent = withoutTemp.some((tile) => tile.id === ack.placed.id)
+
+  if (alreadyPresent) {
+    return {
+      ...state,
+      tiles: withoutTemp,
+      lastOpSeq: Math.max(state.lastOpSeq, ack.opSeq),
+      revision: ack.newRevision,
+    }
+  }
+
+  return {
+    ...state,
+    tiles: [...withoutTemp, { ...ack.placed, settleFrom: tempTile.settleFrom, placedBy: tempTile.placedBy }],
+    lastOpSeq: Math.max(state.lastOpSeq, ack.opSeq),
+    revision: ack.newRevision,
+  }
+}
 
 export const reconcileSequencedTilePlaced = (
   state: SequencedTilesState,
@@ -86,6 +129,7 @@ export const reconcileSequencedTilePlaced = (
   return {
     tiles: [...state.tiles.filter((tile) => tile.id !== payload.tile.id), payload.tile],
     lastOpSeq: payload.opSeq,
+    revision: payload.revision,
     requiresSnapshot: false,
   }
 }
@@ -108,8 +152,25 @@ export const reconcileSequencedTileRemoved = (
   return {
     tiles: state.tiles.filter((tile) => tile.id !== payload.tileId),
     lastOpSeq: payload.opSeq,
+    revision: payload.revision,
     requiresSnapshot: false,
   }
+}
+
+export const isServerTileId = (id: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+
+export const createServerTileId = (): string => {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+
+  const randomHex = (size: number): string =>
+    Array.from({ length: size }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+
+  const variantNibble = (8 + Math.floor(Math.random() * 4)).toString(16)
+
+  return `${randomHex(8)}-${randomHex(4)}-4${randomHex(3)}-${variantNibble}${randomHex(3)}-${randomHex(12)}`
 }
 
 export const updateGhostTarget = (

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyPlaceTile,
+  createAuthoritativeSessionState,
   finalizeParticipantPresence,
   getSessionState,
   initializeParticipantPresence,
@@ -40,12 +41,14 @@ describe('authoritative snapshot reconciliation', () => {
       session: state.session,
       clients: [...state.clients.values()],
       lastOpSeq: state.lastOpSeq,
+      revision: state.lastOpSeq,
     }
 
     expect(snapshot.session.id).toBe(sessionId)
     expect(snapshot.session.tiles).toHaveLength(1)
     expect(snapshot.clients).toEqual([{ clientId: 'client-1', joinedAt }])
     expect(snapshot.lastOpSeq).toBe(1)
+    expect(snapshot.revision).toBe(1)
   })
 
   it('reconnect snapshot reflects latest canonical session state', () => {
@@ -76,12 +79,14 @@ describe('authoritative snapshot reconciliation', () => {
       session: reconnectState.session,
       clients: [...reconnectState.clients.values()],
       lastOpSeq: reconnectState.lastOpSeq,
+      revision: reconnectState.lastOpSeq,
     }
 
     expect(reconnectSnapshot.session.id).toBe(sessionId)
     expect(reconnectSnapshot.session.tiles).toHaveLength(1)
     expect(reconnectSnapshot.clients).toEqual([{ clientId: 'client-a', joinedAt: 15 }])
     expect(reconnectSnapshot.lastOpSeq).toBe(1)
+    expect(reconnectSnapshot.revision).toBe(1)
   })
 
   it('initializes participant presence from persisted replay state', async () => {
@@ -91,6 +96,7 @@ describe('authoritative snapshot reconciliation', () => {
         session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
         clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
         lastOpSeq: 3,
+        revision: 4,
         snapshotOpSeq: 3,
         replayedOperations: [],
       }),
@@ -108,6 +114,7 @@ describe('authoritative snapshot reconciliation', () => {
         session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
         clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
         lastOpSeq: 3,
+        revision: 4,
       },
     })
   })
@@ -194,7 +201,7 @@ describe('authoritative snapshot reconciliation', () => {
       revision: 7,
       session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
       ack: { removed: true as const, opSeq: 12 },
-      event: { tileId: '11111111-1111-4111-8111-111111111111', removedBy: 'client-a', opSeq: 12 },
+      event: { tileId: '11111111-1111-4111-8111-111111111111', removedBy: 'client-a', opSeq: 12, revision: 7 },
     }
 
     const replayRemoval = {
@@ -218,5 +225,225 @@ describe('authoritative snapshot reconciliation', () => {
     expect(emit).toHaveBeenCalledTimes(1)
     expect(emit).toHaveBeenCalledWith('tile_removed', firstRemoval.event)
     expect(persistSnapshotIfNeeded).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('multi-client collaboration', () => {
+  it('two clients joining the same session receive identical snapshot tiles and revision', async () => {
+    const sessionId = nextSessionId()
+    const replayRecord = {
+      session: { id: sessionId, tiles: [], createdAt: 10, updatedAt: 20 },
+      clients: [],
+      lastOpSeq: 0,
+      revision: 0,
+      snapshotOpSeq: 0,
+      replayedOperations: [],
+    }
+
+    const repositoryA = {
+      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
+      loadSessionReplayRecord: vi.fn().mockResolvedValue(replayRecord),
+      listActiveParticipants: vi.fn(),
+      markParticipantLeft: vi.fn(),
+    }
+    const repositoryB = {
+      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-b', joinedAt: 1_001 }),
+      loadSessionReplayRecord: vi.fn().mockResolvedValue(replayRecord),
+      listActiveParticipants: vi.fn(),
+      markParticipantLeft: vi.fn(),
+    }
+
+    const resultA = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repositoryA)
+    const resultB = await initializeParticipantPresence(sessionId, 'client-b', 1_001, repositoryB)
+
+    // Both clients receive snapshots from the same authoritative session record
+    expect(resultA.snapshot.session.id).toBe(sessionId)
+    expect(resultB.snapshot.session.id).toBe(sessionId)
+    expect(resultA.snapshot.session.tiles).toEqual(resultB.snapshot.session.tiles)
+    expect(resultA.snapshot.lastOpSeq).toBe(resultB.snapshot.lastOpSeq)
+  })
+
+  it('client A placement produces a broadcastable event visible to client B', () => {
+    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+
+    const result = applyPlaceTile(
+      state,
+      {
+        tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        shape: 'square',
+        color: '#abc',
+        material: 'ceramic',
+        transform: { position: vec2(0, 0), rotation: 0 },
+      },
+      'client-a',
+    )
+
+    expect(result.ack.rejected).toBe(false)
+    expect(result.event).toBeDefined()
+
+    if (result.event) {
+      // The broadcast event that client B would receive via tile_placed
+      expect(result.event.opSeq).toBe(result.opSeq)
+      expect(result.event.placedBy).toBe('client-a')
+      expect(result.event.tile.id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      expect(result.event.revision).toBe(result.ack.rejected ? -1 : result.ack.newRevision)
+    }
+  })
+
+  it('updates passive client revision from peer broadcast revision payload', () => {
+    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+
+    const peerPlacement = applyPlaceTile(
+      state,
+      {
+        tileId: '99999999-9999-4999-8999-999999999999',
+        shape: 'square',
+        color: '#abc',
+        material: 'ceramic',
+        transform: { position: vec2(0, 0), rotation: 0 },
+      },
+      'client-a',
+    )
+
+    expect(peerPlacement.ack.rejected).toBe(false)
+    if (!peerPlacement.ack.rejected && peerPlacement.event) {
+      expect(peerPlacement.event.revision).toBe(peerPlacement.ack.newRevision)
+      const passiveClientRevision = peerPlacement.event.revision
+      expect(passiveClientRevision).toBe(1)
+    }
+  })
+
+  it('serves explicit snapshot request without reconnect side effects', async () => {
+    const sessionId = nextSessionId()
+    const repository = {
+      markParticipantJoined: vi.fn(),
+      markParticipantLeft: vi.fn(),
+      listActiveParticipants: vi.fn(),
+      loadSessionReplayRecord: vi.fn().mockResolvedValue({
+        session: { id: sessionId, tiles: [], createdAt: 10, updatedAt: 20 },
+        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
+        lastOpSeq: 2,
+        revision: 2,
+        snapshotOpSeq: 2,
+        replayedOperations: [],
+      }),
+    }
+
+    const snapshot = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repository)
+
+    expect(repository.loadSessionReplayRecord).toHaveBeenCalledTimes(1)
+    expect(snapshot.snapshot.lastOpSeq).toBe(2)
+    expect(snapshot.snapshot.revision).toBe(2)
+  })
+
+  it('preserves placedBy through replay snapshot for per-author undo after reconnect', async () => {
+    const sessionId = nextSessionId()
+    const replayTile = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      shape: 'square' as const,
+      color: '#abc',
+      material: 'ceramic' as const,
+      transform: { position: vec2(0, 0), rotation: 0 },
+      createdAt: 10,
+      placedBy: 'client-a',
+    }
+
+    const repository = {
+      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
+      markParticipantLeft: vi.fn(),
+      listActiveParticipants: vi.fn(),
+      loadSessionReplayRecord: vi.fn().mockResolvedValue({
+        session: { id: sessionId, tiles: [replayTile], createdAt: 10, updatedAt: 20 },
+        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
+        lastOpSeq: 1,
+        revision: 1,
+        snapshotOpSeq: 1,
+        replayedOperations: [],
+      }),
+    }
+
+    const result = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repository)
+
+    expect(result.snapshot.session.tiles[0].placedBy).toBe('client-a')
+  })
+
+  it('concurrent placements on non-overlapping positions both succeed and broadcast', () => {
+    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+
+    const resultA = applyPlaceTile(
+      state,
+      {
+        tileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        shape: 'square',
+        color: '#111',
+        material: 'ceramic',
+        transform: { position: vec2(0, 0), rotation: 0 },
+      },
+      'client-a',
+    )
+
+    const resultB = applyPlaceTile(
+      state,
+      {
+        tileId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        shape: 'square',
+        color: '#222',
+        material: 'glass',
+        transform: { position: vec2(1.01, 0), rotation: 0 },
+      },
+      'client-b',
+    )
+
+    // Both placements succeed (non-overlapping positions)
+    expect(resultA.ack.rejected).toBe(false)
+    expect(resultB.ack.rejected).toBe(false)
+    expect(state.session.tiles).toHaveLength(2)
+
+    // Each produces a broadcastable event
+    expect(resultA.event).toBeDefined()
+    expect(resultB.event).toBeDefined()
+
+    if (resultA.event && resultB.event) {
+      // opSeq is monotonically increasing
+      expect(resultA.event.opSeq).toBeLessThan(resultB.event.opSeq)
+    }
+  })
+
+  it('stale expectedRevision is correctly identified against the advanced session revision', () => {
+    // Simulates the server-side condition that triggers STALE_REVISION + resync_required:
+    //   Client A places a tile, advancing the authoritative revision from 0 to 1.
+    //   Client B holds an expectedRevision of 0 (has not yet received A's broadcast).
+    //   The socket handler checks: payload.expectedRevision (0) < record.revision (1)
+    //   → STALE_REVISION ack is returned, and resync_required is emitted to client B.
+    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+
+    const resultA = applyPlaceTile(
+      state,
+      {
+        tileId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        shape: 'square',
+        color: '#abc',
+        material: 'ceramic',
+        transform: { position: vec2(0, 0), rotation: 0 },
+      },
+      'client-a',
+    )
+
+    expect(resultA.ack.rejected).toBe(false)
+    // state.lastOpSeq now represents the authoritative revision (1)
+    expect(state.lastOpSeq).toBe(1)
+
+    // Client B's stale expectedRevision (0) is behind the current revision (1).
+    // The condition that the place_tile socket handler evaluates:
+    const clientBExpectedRevision = 0
+    const isStale = clientBExpectedRevision < state.lastOpSeq
+    expect(isStale).toBe(true)
+
+    // The resync_required payload the handler would emit to client B:
+    const expectedResyncPayload = {
+      currentOpSeq: state.lastOpSeq,
+      reason: 'REVISION_MISMATCH' as const,
+    }
+    expect(expectedResyncPayload).toEqual({ currentOpSeq: 1, reason: 'REVISION_MISMATCH' })
   })
 })

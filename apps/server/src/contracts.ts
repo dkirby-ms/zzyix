@@ -52,6 +52,7 @@ export type TileInstance = {
   material: MaterialVariant
   transform: Transform2D
   createdAt: number
+  placedBy?: string
 }
 
 // ─── Session ──────────────────────────────────────────────────────────────────
@@ -234,7 +235,7 @@ export type PlaceTileRejectReason =
   | 'OUT_OF_ORDER_REVISION'
 
 export type PlaceTileAck =
-  | { placed: TileInstance; rejected: false; opSeq: number; idempotent?: boolean }
+  | { placed: TileInstance; rejected: false; opSeq: number; newRevision: number; idempotent?: boolean }
   | { placed: null; rejected: true; reason: PlaceTileRejectReason }
 
 export type RemoveTileRejectReason =
@@ -254,7 +255,7 @@ export type RemoveTilePayload = {
 }
 
 export type RemoveTileAck =
-  | { removed: true; opSeq: number; idempotent?: boolean }
+  | { removed: true; opSeq: number; newRevision: number; idempotent?: boolean }
   | { removed: false; reason?: RemoveTileRejectReason }
 
 export type PointerMovePayload = {
@@ -265,18 +266,21 @@ export type SessionSnapshotPayload = {
   session: Session
   clients: ClientPresence[]
   lastOpSeq: number
+  revision: number
 }
 
 export type TilePlacedPayload = {
   tile: TileInstance
   placedBy: string
   opSeq: number
+  revision: number
 }
 
 export type TileRemovedPayload = {
   tileId: string
   removedBy: string
   opSeq: number
+  revision: number
 }
 
 export type PointerUpdatePayload = {
@@ -292,6 +296,12 @@ export type ClientLeftPayload = {
   clientId: string
 }
 
+export type ResyncRequiredPayload = {
+  /** The server's current authoritative opSeq at the time of the resync signal. */
+  currentOpSeq: number
+  reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
+}
+
 // ── Typed event maps ──────────────────────────────────────────────────────────
 // Pass these to Server<C, S, I, D> and Socket<C, S, I, D>.
 
@@ -301,6 +311,8 @@ export interface ClientToServerEvents {
   place_tile: (payload: PlaceTilePayload, ack: (response: PlaceTileAck) => void) => void
   /** Remove by authoritative tileId; server responds via acknowledgement. */
   remove_tile: (payload: RemoveTilePayload, ack: (response: RemoveTileAck) => void) => void
+  /** Request an authoritative snapshot without reconnecting the socket. */
+  request_snapshot: () => void
   /** Fire-and-forget cursor position for collaborative presence. */
   pointer_move: (payload: PointerMovePayload) => void
 }
@@ -319,6 +331,8 @@ export interface ServerToClientEvents {
   client_joined: (payload: ClientJoinedPayload) => void
   /** Broadcast to all sockets in the session room when a peer disconnects. */
   client_left: (payload: ClientLeftPayload) => void
+  /** Emitted to a single socket when its placement/removal is rejected due to a stale revision. */
+  resync_required: (payload: ResyncRequiredPayload) => void
 }
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */

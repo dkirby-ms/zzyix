@@ -19,6 +19,7 @@ type ControlsPanelProps = {
   onMirror: () => void
   canUndo: boolean
   onUndo: () => void
+  clearDisabled: boolean
   onClear: () => void
 }
 
@@ -42,6 +43,7 @@ export const ControlsPanel = ({
   onMirror,
   canUndo,
   onUndo,
+  clearDisabled,
   onClear,
 }: ControlsPanelProps) => {
   return (
@@ -127,7 +129,7 @@ export const ControlsPanel = ({
         <h2>Edit</h2>
         <div className="pill-row">
           <button type="button" disabled={!canUndo} onClick={onUndo}>Undo</button>
-          <button type="button" onClick={onClear}>Clear</button>
+          <button type="button" disabled={clearDisabled} onClick={onClear}>Clear</button>
         </div>
       </section>
 

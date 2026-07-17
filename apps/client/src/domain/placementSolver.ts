@@ -20,6 +20,7 @@ export type TileInstance = {
   transform: Transform2D
   settleFrom?: Transform2D
   createdAt: number
+  placedBy?: string
 }
 
 type Projection = {

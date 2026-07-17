@@ -82,6 +82,7 @@ describe('authoritative handler semantics', () => {
     expect(result.event?.tile.id).toBe(state.session.tiles[0].id)
     expect(result.event?.placedBy).toBe('client-a')
     expect(result.event?.opSeq).toBe(1)
+    expect(result.event?.revision).toBe(1)
   })
 
   it('returns removed:false for malformed and unknown tile ids (idempotent)', () => {
@@ -125,7 +126,7 @@ describe('authoritative handler semantics', () => {
     const replayRemoveA = applyRemoveTile(state, { tileId: placed.ack.placed.id }, 'client-a')
     const replayRemoveB = applyRemoveTile(state, { tileId: placed.ack.placed.id }, 'client-a')
 
-    expect(firstRemove.ack).toEqual({ removed: true, opSeq: 2 })
+    expect(firstRemove.ack).toEqual({ removed: true, opSeq: 2, newRevision: 2 })
     expect(replayRemoveA.ack).toEqual({ removed: false })
     expect(replayRemoveB.ack).toEqual({ removed: false })
     expect(firstRemove.opSeq).toBe(2)
@@ -164,6 +165,7 @@ describe('authoritative handler semantics', () => {
     expect(remove.event?.tileId).toBe(placed.ack.placed.id)
     expect(remove.event?.removedBy).toBe('client-a')
     expect(remove.event?.opSeq).toBe(2)
+    expect(remove.event?.revision).toBe(2)
     expect(state.session.tiles).toHaveLength(0)
   })
 
