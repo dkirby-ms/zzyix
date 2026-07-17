@@ -1,10 +1,3 @@
----
-title: zzyix
-description: Casual learning project for practicing agentic SDLC while building a collaborative mosaic web application.
-ms.date: 2026-07-16
-ms.topic: overview
----
-
 ## What This Is
 
 zzyix is a casual project for learning agentic software development lifecycle (SDLC) practices while building a collaborative mosaic web app.
