@@ -34,6 +34,8 @@ Incrementally hardens the existing server-authoritative session protocol so mult
 
 ## Additional or Deviating Changes
 
+* Build-time fix: Added missing `revision: state.revision` to return statements in `reconcileSequencedTilePlaced` and `reconcileSequencedTileRemoved` (broadcast events don't carry revision, so existing revision is preserved)
+
 ## Release Summary
 
 All 4 phases completed successfully. 11 files modified across client and server apps.

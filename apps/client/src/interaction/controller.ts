@@ -127,6 +127,7 @@ export const reconcileSequencedTilePlaced = (
   return {
     tiles: [...state.tiles.filter((tile) => tile.id !== payload.tile.id), payload.tile],
     lastOpSeq: payload.opSeq,
+    revision: state.revision,
     requiresSnapshot: false,
   }
 }
@@ -149,6 +150,7 @@ export const reconcileSequencedTileRemoved = (
   return {
     tiles: state.tiles.filter((tile) => tile.id !== payload.tileId),
     lastOpSeq: payload.opSeq,
+    revision: state.revision,
     requiresSnapshot: false,
   }
 }
