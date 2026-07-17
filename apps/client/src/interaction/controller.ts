@@ -28,6 +28,10 @@ export type SequencedTilesState = {
   requiresSnapshot: boolean
 }
 
+export type OptimisticPlacementAck =
+  | { placed: null; rejected: true }
+  | { placed: TileInstance; rejected: false; opSeq: number }
+
 export type ActiveTile = {
   shape: TileShape
   color: string
@@ -67,6 +71,37 @@ export const applySequencedSnapshot = (snapshot: SequencedSnapshot): SequencedTi
   lastOpSeq: snapshot.lastOpSeq,
   requiresSnapshot: false,
 })
+
+export const reconcileOptimisticPlacementAck = (
+  state: SequencedTilesState,
+  tempTile: TileInstance,
+  ack: OptimisticPlacementAck,
+): SequencedTilesState => {
+  const withoutTemp = state.tiles.filter((tile) => tile.id !== tempTile.id)
+
+  if (ack.rejected) {
+    return {
+      ...state,
+      tiles: withoutTemp,
+    }
+  }
+
+  const alreadyPresent = withoutTemp.some((tile) => tile.id === ack.placed.id)
+
+  if (alreadyPresent) {
+    return {
+      ...state,
+      tiles: withoutTemp,
+      lastOpSeq: Math.max(state.lastOpSeq, ack.opSeq),
+    }
+  }
+
+  return {
+    ...state,
+    tiles: [...withoutTemp, { ...ack.placed, settleFrom: tempTile.settleFrom }],
+    lastOpSeq: Math.max(state.lastOpSeq, ack.opSeq),
+  }
+}
 
 export const reconcileSequencedTilePlaced = (
   state: SequencedTilesState,
@@ -111,6 +146,9 @@ export const reconcileSequencedTileRemoved = (
     requiresSnapshot: false,
   }
 }
+
+export const isServerTileId = (id: string): boolean =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
 
 export const updateGhostTarget = (
   pointer: Vec2,

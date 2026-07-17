@@ -1,15 +1,29 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { vec2 } from './domain/math2d'
 import { normalizeAngle, quantizeRotation } from './domain/tileGeometry'
 import type { TileShape } from './domain/tileGeometry'
 import {
+  applySequencedSnapshot,
   createInitialGhost,
+  createInitialSequencedTilesState,
+  isServerTileId,
+  reconcileOptimisticPlacementAck,
+  reconcileSequencedTilePlaced,
+  reconcileSequencedTileRemoved,
   stepGhost,
   tryPlaceTile,
   updateGhostTarget,
 } from './interaction/controller'
-import type { ActiveTile } from './interaction/controller'
-import type { TileInstance } from './domain/placementSolver'
+import type { ActiveTile, SequencedTilesState } from './interaction/controller'
+import { ensureClientId, ensureSession } from './network/session'
+import { useSocketConnection } from './network/useSocketConnection'
+import type {
+  PlaceTileAck,
+  PlaceTilePayload,
+  SessionSnapshotPayload,
+  TilePlacedPayload,
+  TileRemovedPayload,
+} from '../../server/src/contracts'
 import { MosaicScene } from './render/MosaicScene'
 import { ControlsPanel } from './ui/ControlsPanel'
 import { palettes } from './ui/palettes'
@@ -17,7 +31,9 @@ import type { PaletteName } from './ui/palettes'
 import './App.css'
 
 function App() {
-  const [tiles, setTiles] = useState<TileInstance[]>([])
+  const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
+    createInitialSequencedTilesState(),
+  )
   const [shape, setShape] = useState<TileShape>('square')
   const [material, setMaterial] = useState<'ceramic' | 'glass' | 'stone'>('ceramic')
   const [paletteName, setPaletteName] = useState<PaletteName>('terracotta')
@@ -28,6 +44,9 @@ function App() {
   const [ghostVisible, setGhostVisible] = useState(false)
   const [invalidPulse, setInvalidPulse] = useState(false)
   const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 })
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const clientId = useMemo(() => ensureClientId(), [])
+  const serverUrl = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
 
   const activeTile: ActiveTile = useMemo(
     () => ({
@@ -38,6 +57,77 @@ function App() {
       mirrored,
     }),
     [shape, color, material, rotation, mirrored],
+  )
+
+  useEffect(() => {
+    ensureSession()
+      .then(setSessionId)
+      .catch((error: unknown) => {
+        console.error('Session bootstrap failed:', error)
+      })
+  }, [])
+
+  const triggerInvalidPulse = useCallback((): void => {
+    setInvalidPulse(true)
+    window.setTimeout(() => setInvalidPulse(false), 180)
+  }, [])
+
+  const requestSnapshot = useCallback((): void => {
+    const socket = socketRef.current
+    if (!socket) return
+
+    window.setTimeout(() => {
+      socket.disconnect()
+      socket.connect()
+    }, 0)
+  }, [socketRef])
+
+  const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
+    setSequencedState(
+      applySequencedSnapshot({
+        tiles: payload.session.tiles,
+        lastOpSeq: payload.lastOpSeq,
+      }),
+    )
+  }, [])
+
+  const onTilePlaced = useCallback((payload: TilePlacedPayload): void => {
+    setSequencedState((prev) => {
+      const next = reconcileSequencedTilePlaced(prev, {
+        tile: payload.tile,
+        opSeq: payload.opSeq,
+      })
+
+      if (next.requiresSnapshot) {
+        requestSnapshot()
+      }
+
+      return next
+    })
+  }, [requestSnapshot])
+
+  const onTileRemoved = useCallback((payload: TileRemovedPayload): void => {
+    setSequencedState((prev) => {
+      const next = reconcileSequencedTileRemoved(prev, {
+        tileId: payload.tileId,
+        opSeq: payload.opSeq,
+      })
+
+      if (next.requiresSnapshot) {
+        requestSnapshot()
+      }
+
+      return next
+    })
+  }, [requestSnapshot])
+
+  const socketRef = useSocketConnection(
+    serverUrl,
+    sessionId,
+    clientId,
+    onSnapshot,
+    onTilePlaced,
+    onTileRemoved,
   )
 
   useEffect(() => {
@@ -75,13 +165,31 @@ function App() {
       }
 
       if (event.key.toLowerCase() === 'z') {
-        setTiles((prev) => prev.slice(0, -1))
+        const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id))
+        if (!lastSettled) return
+
+        const socket = socketRef.current
+        if (!socket) return
+
+        socket.emit('remove_tile', { tileId: lastSettled.id }, (ack) => {
+          if (!ack.removed) {
+            requestSnapshot()
+            return
+          }
+
+          setSequencedState((prev) =>
+            reconcileSequencedTileRemoved(prev, {
+              tileId: lastSettled.id,
+              opSeq: ack.opSeq,
+            }),
+          )
+        })
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [requestSnapshot, sequencedState.tiles, socketRef])
 
   useEffect(() => {
     setGhost((prev) => ({
@@ -95,7 +203,7 @@ function App() {
   }, [rotation, mirrored])
 
   const updatePointer = (x: number, y: number): void => {
-    const updated = updateGhostTarget(vec2(x, y), activeTile, tiles)
+    const updated = updateGhostTarget(vec2(x, y), activeTile, sequencedState.tiles)
     setGhostVisible(true)
     setGhost((prev) => ({
       ...prev,
@@ -110,15 +218,61 @@ function App() {
   }
 
   const attemptPlace = (): void => {
-    const result = tryPlaceTile(activeTile, ghost, tiles)
-    if (result.placed) {
-      setTiles((prev) => [...prev, result.placed!])
-      setInvalidPulse(false)
+    const result = tryPlaceTile(activeTile, ghost, sequencedState.tiles)
+    if (!result.placed) {
+      triggerInvalidPulse()
       return
     }
 
-    setInvalidPulse(true)
-    window.setTimeout(() => setInvalidPulse(false), 180)
+    const tempTile = result.placed
+
+    setSequencedState((prev) => ({
+      ...prev,
+      tiles: [...prev.tiles, tempTile],
+    }))
+
+    const socket = socketRef.current
+    if (!socket) return
+
+    const payload: PlaceTilePayload = {
+      tileId: tempTile.id,
+      shape: tempTile.shape,
+      color: tempTile.color,
+      material: tempTile.material,
+      transform: tempTile.transform,
+    }
+
+    socket.emit('place_tile', payload, (ack: PlaceTileAck) => {
+      if (ack.rejected) {
+        setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
+        triggerInvalidPulse()
+        return
+      }
+
+      setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
+    })
+  }
+
+  const handleUndo = (): void => {
+    const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id))
+    if (!lastSettled) return
+
+    const socket = socketRef.current
+    if (!socket) return
+
+    socket.emit('remove_tile', { tileId: lastSettled.id }, (ack) => {
+      if (!ack.removed) {
+        requestSnapshot()
+        return
+      }
+
+      setSequencedState((prev) =>
+        reconcileSequencedTileRemoved(prev, {
+          tileId: lastSettled.id,
+          opSeq: ack.opSeq,
+        }),
+      )
+    })
   }
 
   return (
@@ -142,19 +296,20 @@ function App() {
         onRotateFine={() => setRotation((prev) => normalizeAngle(prev + Math.PI / 12))}
         onRotateFineCcw={() => setRotation((prev) => normalizeAngle(prev - Math.PI / 12))}
         onMirror={() => setMirrored((prev) => !prev)}
-        canUndo={tiles.length > 0}
-        onUndo={() => setTiles((prev) => prev.slice(0, -1))}
-        onClear={() => setTiles([])}
+        canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id))}
+        onUndo={handleUndo}
+        clearDisabled
+        onClear={() => {}}
       />
 
       <section className="canvas-shell">
         <div className="status-strip" data-state={ghost.confidence}>
           <span>{ghost.confidence.replace('-', ' ')}</span>
-          <span>{tiles.length} placed</span>
+          <span>{sequencedState.tiles.length} placed</span>
         </div>
 
         <MosaicScene
-          tiles={tiles}
+          tiles={sequencedState.tiles}
           activeShape={shape}
           ghost={{
             transform: ghost.current,
@@ -197,7 +352,7 @@ function App() {
             </div>
             <div className="debug-row">
               <span className="debug-label">tiles</span>
-              <span className="debug-value">{tiles.length}</span>
+              <span className="debug-value">{sequencedState.tiles.length}</span>
             </div>
           </div>
         )}
