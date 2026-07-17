@@ -851,6 +851,8 @@ const shutdown = async (signal: string): Promise<void> => {
   writeLog('info', 'shutdown_signal_received', { signal })
   retentionJob?.stop()
 
+  await new Promise<void>((resolve) => io.close(() => resolve()))
+
   await new Promise<void>((resolve) => {
     httpServer.close(() => {
       writeLog('info', 'server_closed')
