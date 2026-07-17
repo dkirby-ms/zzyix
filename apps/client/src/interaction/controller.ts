@@ -150,6 +150,19 @@ export const reconcileSequencedTileRemoved = (
 export const isServerTileId = (id: string): boolean =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
 
+export const createServerTileId = (): string => {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+
+  const randomHex = (size: number): string =>
+    Array.from({ length: size }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+
+  const variantNibble = (8 + Math.floor(Math.random() * 4)).toString(16)
+
+  return `${randomHex(8)}-${randomHex(4)}-4${randomHex(3)}-${variantNibble}${randomHex(3)}-${randomHex(12)}`
+}
+
 export const updateGhostTarget = (
   pointer: Vec2,
   activeTile: ActiveTile,

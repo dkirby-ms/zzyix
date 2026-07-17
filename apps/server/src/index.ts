@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
@@ -59,6 +60,67 @@ const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'gla
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_SESSION_STALE_MS = 30 * 60 * 1000
+
+type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+
+const LOG_LEVELS: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+}
+
+const resolveLogLevel = (rawLevel: string | undefined): LogLevel => {
+  const normalized = (rawLevel ?? '').toLowerCase()
+
+  if (normalized === 'debug' || normalized === 'info' || normalized === 'warn' || normalized === 'error') {
+    return normalized
+  }
+
+  return process.env.NODE_ENV === 'production' ? 'info' : 'debug'
+}
+
+const ACTIVE_LOG_LEVEL = resolveLogLevel(process.env.LOG_LEVEL)
+
+const serializeLogValue = (value: unknown): string => {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (value instanceof Error) {
+    return value.stack ?? value.message
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+const shouldLog = (level: LogLevel): boolean => LOG_LEVELS[level] >= LOG_LEVELS[ACTIVE_LOG_LEVEL]
+
+const writeLog = (level: LogLevel, message: string, context?: Record<string, unknown>): void => {
+  if (!shouldLog(level)) {
+    return
+  }
+
+  const timestamp = new Date().toISOString()
+  const contextSuffix = context ? ` ${serializeLogValue(context)}` : ''
+  const line = `[${timestamp}] [${level.toUpperCase()}] ${message}${contextSuffix}`
+
+  if (level === 'error') {
+    console.error(line)
+    return
+  }
+
+  if (level === 'warn') {
+    console.warn(line)
+    return
+  }
+
+  console.log(line)
+}
 
 export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tileId)
 
@@ -438,9 +500,60 @@ const httpServer = createServer(app)
 
 app.use(express.json())
 
+// CORS middleware for HTTP endpoints
+app.use((_req, res, next) => {
+  const origin = resolveCorsOrigin(process.env.CORS_ORIGIN)
+  const corsOrigin = Array.isArray(origin) ? origin[0] : origin
+
+  res.header('Access-Control-Allow-Origin', corsOrigin)
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Content-Type')
+  res.header('Access-Control-Allow-Credentials', 'true')
+
+  if (_req.method === 'OPTIONS') {
+    return res.sendStatus(200)
+  }
+
+  next()
+})
+
+app.use((req, res, next) => {
+  const startedAt = Date.now()
+
+  res.on('finish', () => {
+    writeLog('info', 'http_request', {
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+      ip: req.ip,
+    })
+  })
+
+  next()
+})
+
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', version: '0.0.0' })
+})
+
+// Session creation endpoint
+app.post('/sessions', async (_req, res) => {
+  try {
+    const sessionId = crypto.randomUUID()
+    getSessionState(sessionId)
+
+    // Initialize canvas in database to satisfy foreign key constraints
+    await loadSessionRecord(sessionId)
+
+    writeLog('info', 'session_created', { sessionId })
+
+    res.status(200).json({ session: { id: sessionId } })
+  } catch (error) {
+    writeLog('error', 'session_creation_failed', { error })
+    res.status(500).json({ error: 'Failed to create session' })
+  }
 })
 
 // ─── Initialize Socket.IO ────────────────────────────────────────────────────
@@ -475,15 +588,32 @@ configureRealtimeAdapter()
 io.use((socket, next) => {
   const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
 
-  if (!auth.sessionId || !auth.clientId) {
-    return next(new Error('Missing sessionId or clientId in auth'))
+  console.log('[Socket.IO] Incoming connection:', {
+    auth: auth,
+    authType: typeof auth,
+    hasSessionId: !!auth?.sessionId,
+    hasClientId: !!auth?.clientId,
+  })
+
+  if (!auth || !auth.sessionId || !auth.clientId) {
+    const errorMsg = `Missing sessionId or clientId in auth: ${JSON.stringify(auth)}`
+    console.error('[Socket.IO] Auth validation failed:', errorMsg)
+    return next(new Error(errorMsg))
   }
 
   // Store per-socket metadata
   socket.data.sessionId = auth.sessionId
   socket.data.clientId = auth.clientId
 
-  console.log(`[Socket] Client connecting: ${auth.clientId} to session ${auth.sessionId}`)
+  writeLog('info', 'socket_connecting', {
+    clientId: auth.clientId,
+    sessionId: auth.sessionId,
+  })
+
+  console.log('[Socket.IO] Auth validated successfully:', {
+    sessionId: auth.sessionId,
+    clientId: auth.clientId,
+  })
 
   next()
 })
@@ -499,9 +629,11 @@ io.on('connection', (socket) => {
     socket.join(sessionId)
     const connectionState = await initializeParticipantPresence(sessionId, clientId, joinedAt)
 
-    console.log(
-      `[Socket] Client joined: ${clientId} | Session: ${sessionId} | Room size: ${io.sockets.adapter.rooms.get(sessionId)?.size ?? 0}`,
-    )
+    writeLog('info', 'socket_joined', {
+      clientId,
+      sessionId,
+      roomSize: io.sockets.adapter.rooms.get(sessionId)?.size ?? 0,
+    })
 
     socket.emit('session_snapshot', connectionState.snapshot)
 
@@ -509,14 +641,22 @@ io.on('connection', (socket) => {
   }
 
   void initializeConnection().catch((error) => {
-    console.error(`[Socket] Failed to initialize session ${sessionId}`, error)
+    writeLog('error', 'socket_initialize_failed', {
+      sessionId,
+      clientId,
+      error,
+    })
     socket.disconnect(true)
   })
 
   // ── Event Handlers ────────────────────────────────────────────────────────
 
   socket.on('place_tile', async (payload, ack) => {
-    console.log(`[place_tile] ${clientId} attempting to place`, payload)
+    writeLog('debug', 'place_tile_received', {
+      sessionId,
+      clientId,
+      payload,
+    })
 
     if (!isPlaceTilePayload(payload)) {
       invokeAckSafely(ack, {
@@ -553,6 +693,12 @@ io.on('connection', (socket) => {
       const validation = validatePlacement(payload.shape, payload.transform, record.session.tiles, defaultBounds)
 
       if (!validation.valid) {
+        writeLog('info', 'place_tile_rejected', {
+          sessionId,
+          clientId,
+          reason: validation.reason,
+          tileId: payload.tileId,
+        })
         invokeAckSafely(ack, {
           placed: null,
           rejected: true,
@@ -567,6 +713,15 @@ io.on('connection', (socket) => {
         placedBy: clientId,
       })
 
+      writeLog('info', 'place_tile_processed', {
+        sessionId,
+        clientId,
+        tileId: payload.tileId,
+        rejected: result.ack.rejected,
+        idempotent: result.ack.idempotent ?? false,
+        opSeq: result.opSeq,
+      })
+
       invokeAckSafely(ack, result.ack)
 
       // Retries should acknowledge deterministically but must not rebroadcast
@@ -576,7 +731,11 @@ io.on('connection', (socket) => {
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }
     } catch (error) {
-      console.error(`[place_tile] Failed for session ${sessionId}`, error)
+      writeLog('error', 'place_tile_failed', {
+        sessionId,
+        clientId,
+        error,
+      })
       invokeAckSafely(ack, {
         placed: null,
         rejected: true,
@@ -586,7 +745,11 @@ io.on('connection', (socket) => {
   })
 
   socket.on('remove_tile', async (payload, ack) => {
-    console.log(`[remove_tile] ${clientId} attempting to remove`, payload.tileId)
+    writeLog('debug', 'remove_tile_received', {
+      sessionId,
+      clientId,
+      payload,
+    })
 
     if (!isRemoveTilePayload(payload) || !isValidTileId(payload.tileId)) {
       invokeAckSafely(ack, { removed: false })
@@ -614,6 +777,16 @@ io.on('connection', (socket) => {
         removedBy: clientId,
       })
 
+      writeLog('info', 'remove_tile_processed', {
+        sessionId,
+        clientId,
+        tileId: payload.tileId,
+        removed: result.ack.removed,
+        reason: result.ack.reason,
+        idempotent: result.ack.idempotent ?? false,
+        opSeq: result.opSeq,
+      })
+
       invokeAckSafely(ack, result.ack)
 
       // Duplicate remove replays reuse opSeq and ack, but should not emit a
@@ -623,7 +796,11 @@ io.on('connection', (socket) => {
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }
     } catch (error) {
-      console.error(`[remove_tile] Failed for session ${sessionId}`, error)
+      writeLog('error', 'remove_tile_failed', {
+        sessionId,
+        clientId,
+        error,
+      })
       invokeAckSafely(ack, { removed: false })
     }
   })
@@ -633,7 +810,11 @@ io.on('connection', (socket) => {
       return
     }
 
-    console.log(`[pointer_move] ${clientId}:`, payload)
+    writeLog('debug', 'pointer_move', {
+      sessionId,
+      clientId,
+      position: payload.position,
+    })
 
     socket.to(sessionId).emit('pointer_update', {
       clientId,
@@ -644,13 +825,20 @@ io.on('connection', (socket) => {
   // ── Disconnection ──────────────────────────────────────────────────────────
 
   socket.on('disconnect', async () => {
-    console.log(`[Socket] Client disconnected: ${clientId} from session ${sessionId}`)
+    writeLog('info', 'socket_disconnected', {
+      clientId,
+      sessionId,
+    })
 
     try {
       await finalizeParticipantPresence(sessionId, clientId, Date.now())
       io.to(sessionId).emit('client_left', { clientId })
     } catch (error) {
-      console.error(`[Socket] Failed to persist disconnect for session ${sessionId}`, error)
+      writeLog('error', 'socket_disconnect_persist_failed', {
+        sessionId,
+        clientId,
+        error,
+      })
     }
   })
 })
@@ -660,12 +848,12 @@ io.on('connection', (socket) => {
 const retentionJob = process.env.NODE_ENV === 'test' ? null : startRetentionJob()
 
 const shutdown = async (signal: string): Promise<void> => {
-  console.log(`${signal} received, shutting down gracefully`)
+  writeLog('info', 'shutdown_signal_received', { signal })
   retentionJob?.stop()
 
   await new Promise<void>((resolve) => {
     httpServer.close(() => {
-      console.log('Server closed')
+      writeLog('info', 'server_closed')
       resolve()
     })
   })
@@ -686,6 +874,11 @@ process.on('SIGINT', () => {
 
 if (process.env.NODE_ENV !== 'test') {
   httpServer.listen(PORT, HOST, () => {
-    console.log(`[Server] Listening on ${HOST}:${PORT}`)
+    writeLog('info', 'server_listening', {
+      host: HOST,
+      port: PORT,
+      corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
+      logLevel: ACTIVE_LOG_LEVEL,
+    })
   })
 }

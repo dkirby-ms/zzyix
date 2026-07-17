@@ -292,7 +292,7 @@ export const MosaicScene = ({
 }: MosaicSceneProps) => {
   return (
     <Canvas
-      shadows
+      shadows="percentage"
       camera={{
         position: [0, 0, 8],
         zoom: 58,

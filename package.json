@@ -7,6 +7,7 @@
     "apps/server"
   ],
   "scripts": {
+    "dev": "npm run dev:server & npm run dev:client",
     "dev:client": "npm run dev --workspace=apps/client",
     "dev:server": "npm run dev --workspace=apps/server",
     "audit": "npm run audit --workspaces --if-present",

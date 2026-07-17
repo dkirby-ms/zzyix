@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { vec2 } from '../domain/math2d'
 import {
   applySequencedSnapshot,
+  createServerTileId,
   createInitialGhost,
   isServerTileId,
   reconcileOptimisticPlacementAck,
@@ -239,5 +240,14 @@ describe('interaction controller', () => {
     expect(isServerTileId('11111111-1111-4111-8111-111111111111')).toBe(true)
     expect(isServerTileId('temp-1234')).toBe(false)
     expect(isServerTileId('9e3d6f0a-59b7-4f40-bf4d-5f2a1b7a9cde')).toBe(true)
+  })
+
+  it('creates UUID tile ids acceptable to server validation', () => {
+    const first = createServerTileId()
+    const second = createServerTileId()
+
+    expect(isServerTileId(first)).toBe(true)
+    expect(isServerTileId(second)).toBe(true)
+    expect(first).not.toBe(second)
   })
 })

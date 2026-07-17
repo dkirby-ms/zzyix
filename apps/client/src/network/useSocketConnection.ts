@@ -26,6 +26,23 @@ export const useSocketConnection = (
 
     const socket: AppSocket = io(serverUrl, {
       auth: { sessionId, clientId },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 5,
+    })
+
+    socket.on('connect', () => {
+      console.log('✅ Socket.IO connected:', { sessionId: socket.id })
+    })
+
+    socket.on('connect_error', (error: Error) => {
+      console.error('❌ Socket.IO connection error:', error.message)
+    })
+
+    socket.on('disconnect', (reason: string) => {
+      console.log('🔌 Socket.IO disconnected:', reason)
     })
 
     socket.on('session_snapshot', onSnapshot)

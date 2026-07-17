@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "nodemon --exec node --env-file=../../.env --loader ts-node/esm --experimental-specifier-resolution=node src/index.ts",
+    "dev": "nodemon --exec 'node --env-file=../../.env --import tsx/esm' src/index.ts",
     "build": "tsc",
     "lint": "oxlint",
     "start": "node dist/index.js",
@@ -32,7 +32,7 @@
     "oxlint": "^1.71.0",
     "pg-mem": "^3.0.5",
     "testcontainers": "^11.7.1",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.23.1",
     "typescript": "~6.0.2",
     "vitest": "^4.1.10"
   }

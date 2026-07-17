@@ -6,6 +6,7 @@ import {
   applySequencedSnapshot,
   createInitialGhost,
   createInitialSequencedTilesState,
+  createServerTileId,
   isServerTileId,
   reconcileOptimisticPlacementAck,
   reconcileSequencedTilePlaced,
@@ -235,7 +236,7 @@ function App() {
     if (!socket) return
 
     const payload: PlaceTilePayload = {
-      tileId: tempTile.id,
+      tileId: createServerTileId(),
       shape: tempTile.shape,
       color: tempTile.color,
       material: tempTile.material,
