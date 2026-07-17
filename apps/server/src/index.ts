@@ -713,20 +713,22 @@ io.on('connection', (socket) => {
         placedBy: clientId,
       })
 
+      const placeAck = result.ack
+
       writeLog('info', 'place_tile_processed', {
         sessionId,
         clientId,
         tileId: payload.tileId,
-        rejected: result.ack.rejected,
-        idempotent: result.ack.idempotent ?? false,
-        opSeq: result.opSeq,
+        rejected: placeAck.rejected,
+        idempotent: placeAck.rejected ? false : (placeAck.idempotent ?? false),
+        opSeq: 'opSeq' in result ? result.opSeq : null,
       })
 
-      invokeAckSafely(ack, result.ack)
+      invokeAckSafely(ack, placeAck)
 
       // Retries should acknowledge deterministically but must not rebroadcast
       // already applied operations.
-      if (result.event && 'tile' in result.event && 'opSeq' in result && !result.ack.idempotent) {
+      if (result.event && 'tile' in result.event && 'opSeq' in result && !placeAck.rejected && !placeAck.idempotent) {
         io.to(sessionId).emit('tile_placed', result.event)
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }
@@ -777,21 +779,23 @@ io.on('connection', (socket) => {
         removedBy: clientId,
       })
 
+      const removeAck = result.ack
+
       writeLog('info', 'remove_tile_processed', {
         sessionId,
         clientId,
         tileId: payload.tileId,
-        removed: result.ack.removed,
-        reason: result.ack.reason,
-        idempotent: result.ack.idempotent ?? false,
-        opSeq: result.opSeq,
+        removed: removeAck.removed,
+        reason: removeAck.removed ? undefined : removeAck.reason,
+        idempotent: removeAck.removed ? (removeAck.idempotent ?? false) : false,
+        opSeq: 'opSeq' in result ? result.opSeq : null,
       })
 
-      invokeAckSafely(ack, result.ack)
+      invokeAckSafely(ack, removeAck)
 
       // Duplicate remove replays reuse opSeq and ack, but should not emit a
       // second tile_removed broadcast.
-      if (result.event && 'tileId' in result.event && 'opSeq' in result && !result.ack.idempotent) {
+      if (result.event && 'tileId' in result.event && 'opSeq' in result && removeAck.removed && !removeAck.idempotent) {
         io.to(sessionId).emit('tile_removed', result.event)
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }

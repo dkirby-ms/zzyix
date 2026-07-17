@@ -13,14 +13,29 @@ export type AuthoritativeSessionRecord = {
 }
 
 export type PersistedMutationResult =
+  | PersistedPlacementResult
+  | PersistedRemovalResult
+
+export type PersistedPlacementResult =
   | {
       opSeq: number
       revision: number
       session: Session
       ack:
         | { placed: TileInstance; rejected: false; opSeq: number; idempotent?: boolean }
-        | { removed: true; opSeq: number; idempotent?: boolean }
-      event: TilePlacedPayload | TileRemovedPayload
+        | {
+            placed: null
+            rejected: true
+            reason:
+              | 'OUT_OF_BOUNDS'
+              | 'OVERLAP'
+              | 'GAP_TOO_LARGE'
+              | 'PLACEMENT_REJECTED'
+              | 'REQUEST_HASH_MISMATCH'
+              | 'STALE_REVISION'
+              | 'OUT_OF_ORDER_REVISION'
+          }
+      event: TilePlacedPayload
     }
   | {
       revision: number
@@ -38,6 +53,21 @@ export type PersistedMutationResult =
               | 'STALE_REVISION'
               | 'OUT_OF_ORDER_REVISION'
           }
+      event?: undefined
+    }
+
+export type PersistedRemovalResult =
+  | {
+      opSeq: number
+      revision: number
+      session: Session
+      ack: { removed: true; opSeq: number; idempotent?: boolean }
+      event: TileRemovedPayload
+    }
+  | {
+      revision: number
+      session: Session
+      ack:
         | {
             removed: false
             reason?:
@@ -349,7 +379,7 @@ export const persistTilePlacement = async (params: {
   payload: PlaceTilePayload
   placedBy: string
   createdAt?: number
-}): Promise<PersistedMutationResult> => {
+}): Promise<PersistedPlacementResult> => {
   const { db } = getDatabaseBundle()
   const { sessionId, payload, placedBy } = params
 
@@ -574,7 +604,7 @@ export const persistTileRemoval = async (params: {
   sessionId: string
   payload: RemoveTilePayload
   removedBy: string
-}): Promise<PersistedMutationResult> => {
+}): Promise<PersistedRemovalResult> => {
   const { db } = getDatabaseBundle()
   const { sessionId, payload, removedBy } = params
 
