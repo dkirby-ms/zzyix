@@ -2,15 +2,11 @@
 
 zzyix is a casual project for learning agentic software development lifecycle (SDLC) practices while building a collaborative mosaic web app.
 
-## Why This Project Exists
-
-This project is intentionally practical and low-pressure.
-
 * Learn by shipping small increments instead of writing perfect plans up front
 * Explore different agentic coding techniques and tools
 * Keep scope grounded in a fun product idea: collaborative mosaic building
 
-## What We Are Building
+## Scope
 
 The product goal is a web experience where multiple users can place and arrange tile shapes on a shared canvas in real time.
 
