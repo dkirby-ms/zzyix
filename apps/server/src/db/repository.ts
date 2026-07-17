@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, inArray, isNull, lte, max, sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
+import { and, asc, desc, eq, inArray, isNull, lte, max, sql } from 'drizzle-orm'
 import type { ClientPresence, Session, TileInstance } from '../contracts'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts'
 import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema'
@@ -9,6 +9,7 @@ export type AuthoritativeSessionRecord = {
   session: Session
   clients: ClientPresence[]
   lastOpSeq: number
+  revision: number
 }
 
 export type PersistedMutationResult =
@@ -33,10 +34,19 @@ export type PersistedMutationResult =
               | 'OVERLAP'
               | 'GAP_TOO_LARGE'
               | 'PLACEMENT_REJECTED'
+              | 'REQUEST_HASH_MISMATCH'
               | 'STALE_REVISION'
               | 'OUT_OF_ORDER_REVISION'
           }
-        | { removed: false; reason?: 'TILE_NOT_FOUND' | 'DUPLICATE_OPERATION' | 'STALE_REVISION' | 'OUT_OF_ORDER_REVISION' }
+        | {
+            removed: false
+            reason?:
+              | 'TILE_NOT_FOUND'
+              | 'DUPLICATE_OPERATION'
+              | 'REQUEST_HASH_MISMATCH'
+              | 'STALE_REVISION'
+              | 'OUT_OF_ORDER_REVISION'
+          }
       event?: undefined
     }
 
@@ -205,13 +215,17 @@ const makeIdempotencyKey = (
   operation: 'place_tile' | 'remove_tile',
   sessionId: string,
   tileId: string,
+  requestIdentity: unknown,
 ): { key: string; requestHash: string } => {
-  const requestHash = stableJson({ operation, sessionId, tileId })
+  const requestHash = stableJson({ operation, sessionId, requestIdentity })
   return {
     key: `${operation}:${sessionId}:${tileId}`,
     requestHash,
   }
 }
+
+const isMatchingRequestHash = (storedRequestHash: string, requestHash: string): boolean =>
+  storedRequestHash === requestHash
 
 const upsertIdempotencyOutcome = async (
   db: DatabaseClient,
@@ -288,6 +302,7 @@ export const loadSessionRecord = async (sessionId: string): Promise<Authoritativ
     session: mapSession(canvas, tileRows),
     clients: participantRows.map(mapClient),
     lastOpSeq: latestOpSeq[0]?.value ?? 0,
+    revision: canvas.version,
   }
 }
 
@@ -333,7 +348,6 @@ export const persistTilePlacement = async (params: {
   sessionId: string
   payload: PlaceTilePayload
   placedBy: string
-  tileId?: string
   createdAt?: number
 }): Promise<PersistedMutationResult> => {
   const { db } = getDatabaseBundle()
@@ -342,9 +356,15 @@ export const persistTilePlacement = async (params: {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${sessionId}))`)
     const currentRevision = await getCanvasRevision(tx, sessionId)
-    const tileId = params.tileId ?? randomUUID()
+    const tileId = params.payload.tileId
     const createdAt = new Date(params.createdAt ?? Date.now())
-    const { key: idempotencyKey, requestHash } = makeIdempotencyKey('place_tile', sessionId, tileId)
+    const { key: idempotencyKey, requestHash } = makeIdempotencyKey('place_tile', sessionId, tileId, {
+      tileId: payload.tileId,
+      shape: payload.shape,
+      color: payload.color,
+      material: payload.material,
+      transform: payload.transform,
+    })
 
     if (params.payload.expectedRevision !== undefined) {
       if (params.payload.expectedRevision < currentRevision) {
@@ -377,7 +397,7 @@ export const persistTilePlacement = async (params: {
     }
 
     const [existingIdempotency] = await tx
-      .select({ response: idempotencyKeys.response })
+      .select({ response: idempotencyKeys.response, requestHash: idempotencyKeys.requestHash })
       .from(idempotencyKeys)
       .where(
         and(
@@ -387,6 +407,20 @@ export const persistTilePlacement = async (params: {
         ),
       )
       .limit(1)
+
+    if (existingIdempotency && !isMatchingRequestHash(existingIdempotency.requestHash, requestHash)) {
+      const [canvas] = await tx.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
+      if (!canvas) {
+        throw new Error(`Failed to load canvas ${sessionId}`)
+      }
+
+      const tileRows = await tx.select().from(tiles).where(eq(tiles.canvasId, sessionId)).orderBy(asc(tiles.createdAt))
+      return {
+        revision: currentRevision,
+        session: mapSession(canvas, tileRows),
+        ack: { placed: null, rejected: true, reason: 'REQUEST_HASH_MISMATCH' },
+      }
+    }
 
     if (existingIdempotency && isPlaceAckResponse(existingIdempotency.response)) {
       const replayResponse = existingIdempotency.response
@@ -496,7 +530,7 @@ export const persistTilePlacement = async (params: {
       canvasId: sessionId,
       opSeq,
       opType: 'tile_placed',
-      payload: { tileId, ...payload },
+      payload,
       clientId: placedBy,
       createdAt,
     })
@@ -548,7 +582,9 @@ export const persistTileRemoval = async (params: {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${sessionId}))`)
     const currentRevision = await getCanvasRevision(tx, sessionId)
     const now = new Date()
-    const { key: idempotencyKey, requestHash } = makeIdempotencyKey('remove_tile', sessionId, payload.tileId)
+    const { key: idempotencyKey, requestHash } = makeIdempotencyKey('remove_tile', sessionId, payload.tileId, {
+      tileId: payload.tileId,
+    })
 
     if (params.payload.expectedRevision !== undefined) {
       if (params.payload.expectedRevision < currentRevision) {
@@ -581,7 +617,7 @@ export const persistTileRemoval = async (params: {
     }
 
     const [existingIdempotency] = await tx
-      .select({ response: idempotencyKeys.response })
+      .select({ response: idempotencyKeys.response, requestHash: idempotencyKeys.requestHash })
       .from(idempotencyKeys)
       .where(
         and(
@@ -591,6 +627,20 @@ export const persistTileRemoval = async (params: {
         ),
       )
       .limit(1)
+
+    if (existingIdempotency && !isMatchingRequestHash(existingIdempotency.requestHash, requestHash)) {
+      const [canvas] = await tx.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
+      if (!canvas) {
+        throw new Error(`Failed to load canvas ${sessionId}`)
+      }
+
+      const tileRows = await tx.select().from(tiles).where(eq(tiles.canvasId, sessionId)).orderBy(asc(tiles.createdAt))
+      return {
+        revision: currentRevision,
+        session: mapSession(canvas, tileRows),
+        ack: { removed: false, reason: 'REQUEST_HASH_MISMATCH' },
+      }
+    }
 
     if (existingIdempotency && isRemoveAckResponse(existingIdempotency.response)) {
       const [canvas] = await tx.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
@@ -781,10 +831,11 @@ export const loadSessionReplayRecord = async (sessionId: string): Promise<Replay
 export const pruneRetention = async (params: {
   operationCutoffMs: number
   snapshotCutoffMs: number
-}): Promise<{ deletedOperations: number; deletedSnapshots: number }> => {
+}): Promise<{ deletedOperations: number; deletedSnapshots: number; deletedIdempotencyKeys: number }> => {
   const { db } = getDatabaseBundle()
   const operationCutoff = new Date(Date.now() - params.operationCutoffMs)
   const snapshotCutoff = new Date(Date.now() - params.snapshotCutoffMs)
+  const now = new Date()
 
   const staleSnapshots = await db
     .select({ id: snapshots.id })
@@ -796,6 +847,11 @@ export const pruneRetention = async (params: {
     .from(operationLog)
     .where(lte(operationLog.createdAt, operationCutoff))
 
+  const staleIdempotencyKeys = await db
+    .select({ key: idempotencyKeys.key, clientId: idempotencyKeys.clientId })
+    .from(idempotencyKeys)
+    .where(lte(idempotencyKeys.expiresAt, now))
+
   if (staleSnapshots.length > 0) {
     await db.delete(snapshots).where(inArray(snapshots.id, staleSnapshots.map((entry) => entry.id)))
   }
@@ -804,8 +860,13 @@ export const pruneRetention = async (params: {
     await db.delete(operationLog).where(inArray(operationLog.id, staleOperations.map((entry) => entry.id)))
   }
 
+  if (staleIdempotencyKeys.length > 0) {
+    await db.delete(idempotencyKeys).where(lte(idempotencyKeys.expiresAt, now))
+  }
+
   return {
     deletedOperations: staleOperations.length,
     deletedSnapshots: staleSnapshots.length,
+    deletedIdempotencyKeys: staleIdempotencyKeys.length,
   }
 }

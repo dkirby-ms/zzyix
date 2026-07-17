@@ -2,7 +2,6 @@ import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
-import { randomUUID } from 'node:crypto'
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -71,6 +70,10 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 export const isPlaceTilePayload = (payload: unknown): payload is PlaceTilePayload => {
   if (!isObjectRecord(payload)) {
+    return false
+  }
+
+  if (typeof payload.tileId !== 'string' || !isValidTileId(payload.tileId)) {
     return false
   }
 
@@ -320,7 +323,7 @@ export const applyPlaceTile = (
   }
 
   const tile = {
-    id: randomUUID(),
+    id: payload.tileId,
     ...payload,
     createdAt: Date.now(),
   }
@@ -526,6 +529,27 @@ io.on('connection', (socket) => {
 
     try {
       const record = await loadSessionRecord(sessionId)
+
+      if (payload.expectedRevision !== undefined) {
+        if (payload.expectedRevision < record.revision) {
+          invokeAckSafely(ack, {
+            placed: null,
+            rejected: true,
+            reason: 'STALE_REVISION',
+          })
+          return
+        }
+
+        if (payload.expectedRevision > record.revision) {
+          invokeAckSafely(ack, {
+            placed: null,
+            rejected: true,
+            reason: 'OUT_OF_ORDER_REVISION',
+          })
+          return
+        }
+      }
+
       const validation = validatePlacement(payload.shape, payload.transform, record.session.tiles, defaultBounds)
 
       if (!validation.valid) {
@@ -570,6 +594,20 @@ io.on('connection', (socket) => {
     }
 
     try {
+      const record = await loadSessionRecord(sessionId)
+
+      if (payload.expectedRevision !== undefined) {
+        if (payload.expectedRevision < record.revision) {
+          invokeAckSafely(ack, { removed: false, reason: 'STALE_REVISION' })
+          return
+        }
+
+        if (payload.expectedRevision > record.revision) {
+          invokeAckSafely(ack, { removed: false, reason: 'OUT_OF_ORDER_REVISION' })
+          return
+        }
+      }
+
       const result = await persistTileRemoval({
         sessionId,
         payload,

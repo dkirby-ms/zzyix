@@ -31,6 +31,7 @@ describe('authoritative handler semantics', () => {
     const result = applyPlaceTile(
       state,
       {
+        tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -57,6 +58,7 @@ describe('authoritative handler semantics', () => {
     const result = applyPlaceTile(
       state,
       {
+        tileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -71,7 +73,7 @@ describe('authoritative handler semantics', () => {
     expect(result.opSeq).toBe(1)
     expect(result.ack.rejected).toBe(false)
     if (!result.ack.rejected) {
-      expect(result.ack.placed.id).toBeTruthy()
+      expect(result.ack.placed.id).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
       expect(isValidTileId(result.ack.placed.id)).toBe(true)
       expect(result.ack.opSeq).toBe(1)
     }
@@ -102,6 +104,7 @@ describe('authoritative handler semantics', () => {
     const placed = applyPlaceTile(
       state,
       {
+        tileId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -137,6 +140,7 @@ describe('authoritative handler semantics', () => {
     const placed = applyPlaceTile(
       state,
       {
+        tileId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -208,6 +212,7 @@ describe('authoritative handler semantics', () => {
     expect(isPlaceTilePayload({})).toBe(false)
     expect(
       isPlaceTilePayload({
+        tileId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -223,6 +228,7 @@ describe('authoritative handler semantics', () => {
   it('accepts only non-negative integer expectedRevision values in payload guards', () => {
     expect(
       isPlaceTilePayload({
+        tileId: '11111111-1111-4111-8111-111111111111',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -232,6 +238,7 @@ describe('authoritative handler semantics', () => {
     ).toBe(true)
     expect(
       isPlaceTilePayload({
+        tileId: '22222222-2222-4222-8222-222222222222',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -241,6 +248,7 @@ describe('authoritative handler semantics', () => {
     ).toBe(false)
     expect(
       isPlaceTilePayload({
+        tileId: '33333333-3333-4333-8333-333333333333',
         shape: 'square',
         color: '#fff',
         material: 'ceramic',
@@ -316,5 +324,34 @@ describe('authoritative handler semantics', () => {
 
     const removedAgain = cleanupSessions(now, staleAfterMs)
     expect(removedAgain).toEqual([])
+  })
+
+  it('keeps deterministic local sequencing when duplicate place is re-submitted in memory', () => {
+    const state = createAuthoritativeSessionState('session-duplicate-place', 1)
+    const payload = {
+      tileId: '11111111-1111-4111-8111-111111111111',
+      shape: 'square' as const,
+      color: '#fff',
+      material: 'ceramic' as const,
+      transform: {
+        position: vec2(0, 0),
+        rotation: 0,
+      },
+    }
+
+    const first = applyPlaceTile(state, payload, 'client-a')
+    const replay = applyPlaceTile(state, payload, 'client-a')
+
+    expect(first.ack.rejected).toBe(false)
+    expect(replay.ack.rejected).toBe(true)
+    if (!first.ack.rejected) {
+      expect(first.ack.opSeq).toBe(1)
+      expect(first.ack.placed.id).toBe(payload.tileId)
+    }
+    if (replay.ack.rejected) {
+      expect(replay.ack.reason).toBe('OVERLAP')
+    }
+    expect(state.session.tiles).toHaveLength(1)
+    expect(state.lastOpSeq).toBe(2)
   })
 })

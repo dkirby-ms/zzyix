@@ -117,6 +117,25 @@ Implement deterministic revision sequencing and idempotent mutation handling for
   * Provide user with next steps and recommended planning
   * Avoid large-scale fixes within this phase
 
+### [x] Implementation Phase 6: Review-Driven Rework Closure
+
+<!-- parallelizable: false -->
+
+* [x] Step 6.1: Enforce deterministic place identity at contract boundary
+  * Made `PlaceTilePayload.tileId` required and aligned payload guards/tests accordingly.
+* [x] Step 6.2: Enforce idempotency request-hash mismatch outcomes
+  * Added typed `REQUEST_HASH_MISMATCH` reject outcomes for place/remove idempotency-key reuse conflicts.
+* [x] Step 6.3: Add handler-level stale/out-of-order precondition checks
+  * Applied explicit `expectedRevision` checks in socket handlers before repository mutation calls.
+* [x] Step 6.4: Extend retention to prune expired idempotency keys
+  * Added expired key cleanup in retention prune flow and returned cleanup counts.
+* [x] Step 6.5: Validate rework phase
+  * `npm --prefix apps/server run lint`
+  * `npm --prefix apps/server run build`
+  * `npm --prefix apps/server run test -- index`
+  * `npm --prefix apps/server run test -- index.integration`
+  * `npm --prefix apps/server run test -- retention`
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-16/revisioning-idempotency-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.

@@ -178,9 +178,9 @@ export type GetSessionResponse = {
 //   6. Server broadcasts tile_placed(tile-1) to all clients.
 //   7. All clients receive the broadcast and converge on the same state.
 //
-// KEY: Server assigns tile IDs. Clients MUST support:
+// KEY: Clients provide stable tile IDs. Clients MUST support:
 //   - Optimistic local placement (show tiles immediately, even if pending).
-//   - Reconciliation on ack (if rejected, remove; if accepted, use server ID).
+//   - Reconciliation on ack (if rejected, remove; if accepted, keep same ID).
 //   - Reconciliation on broadcast (merge server's truth if different).
 //
 // Animation metadata (settleFrom) is CLIENT-ONLY and never sent to or from server.
@@ -216,7 +216,7 @@ export type PlaceTilePayload = {
    * this value so idempotent replay logic can return the original opSeq.
    */
   expectedRevision?: number
-  tileId?: string
+  tileId: string
   shape: TileShape
   color: string
   material: MaterialVariant
@@ -228,6 +228,7 @@ export type PlaceTileRejectReason =
   | 'OVERLAP'
   | 'GAP_TOO_LARGE'
   | 'PLACEMENT_REJECTED'
+  | 'REQUEST_HASH_MISMATCH'
   | 'DUPLICATE_OPERATION'
   | 'STALE_REVISION'
   | 'OUT_OF_ORDER_REVISION'
@@ -238,6 +239,7 @@ export type PlaceTileAck =
 
 export type RemoveTileRejectReason =
   | 'TILE_NOT_FOUND'
+  | 'REQUEST_HASH_MISMATCH'
   | 'DUPLICATE_OPERATION'
   | 'STALE_REVISION'
   | 'OUT_OF_ORDER_REVISION'

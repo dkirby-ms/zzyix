@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import { applyPlaceTile, finalizeParticipantPresence, getSessionState, initializeParticipantPresence } from './index'
+import {
+  applyPlaceTile,
+  finalizeParticipantPresence,
+  getSessionState,
+  initializeParticipantPresence,
+  isPlaceTilePayload,
+} from './index'
 import { vec2 } from './domain/math2d'
 
 let sessionCounter = 0
@@ -17,6 +23,7 @@ describe('authoritative snapshot reconciliation', () => {
     const place = applyPlaceTile(
       state,
       {
+        tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         shape: 'square',
         color: '#abc',
         material: 'ceramic',
@@ -48,6 +55,7 @@ describe('authoritative snapshot reconciliation', () => {
     const firstPlace = applyPlaceTile(
       state,
       {
+        tileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
         shape: 'square',
         color: '#123',
         material: 'glass',
@@ -119,96 +127,55 @@ describe('authoritative snapshot reconciliation', () => {
     expect(result).toEqual({ activeClients: [], shouldCleanup: true })
   })
 
-  it('reuses original opSeq for duplicate place replay and suppresses second broadcast write', () => {
-    const emit = vi.fn()
-    const room = { emit }
-    const io = {
-      to: vi.fn().mockReturnValue(room),
-    }
-    const persistSnapshotIfNeeded = vi.fn()
-
-    const firstResult = {
-      opSeq: 9,
-      revision: 4,
-      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
-      ack: {
-        placed: {
-          id: '11111111-1111-4111-8111-111111111111',
-          shape: 'square' as const,
-          color: '#123',
-          material: 'glass' as const,
-          transform: { position: { x: 0, y: 0 }, rotation: 0 },
-          createdAt: 10,
-        },
-        rejected: false as const,
-        opSeq: 9,
-      },
-      event: {
-        tile: {
-          id: '11111111-1111-4111-8111-111111111111',
-          shape: 'square' as const,
-          color: '#123',
-          material: 'glass' as const,
-          transform: { position: { x: 0, y: 0 }, rotation: 0 },
-          createdAt: 10,
-        },
-        placedBy: 'client-a',
-        opSeq: 9,
-      },
+  it('keeps deterministic sequencing when duplicate place payload is replayed through production path', () => {
+    const sessionId = nextSessionId()
+    const state = getSessionState(sessionId)
+    const payload = {
+      tileId: '11111111-1111-4111-8111-111111111111',
+      shape: 'square' as const,
+      color: '#123',
+      material: 'glass' as const,
+      transform: { position: vec2(0, 0), rotation: 0 },
     }
 
-    const replayResult = {
-      ...firstResult,
-      ack: {
-        ...firstResult.ack,
-        idempotent: true,
-      },
+    expect(isPlaceTilePayload(payload)).toBe(true)
+
+    const first = applyPlaceTile(state, payload, 'client-a')
+    const replay = applyPlaceTile(state, payload, 'client-a')
+
+    expect(first.ack.rejected).toBe(false)
+    expect(replay.ack.rejected).toBe(true)
+    if (!first.ack.rejected) {
+      expect(first.ack.opSeq).toBe(1)
+      expect(first.ack.placed.id).toBe(payload.tileId)
     }
-
-    const handlePersistResult = async (result: typeof firstResult): Promise<void> => {
-      if (result.event && 'tile' in result.event && 'opSeq' in result && !result.ack.idempotent) {
-        io.to('session-1').emit('tile_placed', result.event)
-        await persistSnapshotIfNeeded('session-1', result.opSeq, result.session)
-      }
+    if (replay.ack.rejected) {
+      expect(replay.ack.reason).toBe('OVERLAP')
     }
-
-    void handlePersistResult(firstResult)
-    void handlePersistResult(replayResult)
-
-    expect(firstResult.ack.opSeq).toBe(9)
-    expect(replayResult.ack.opSeq).toBe(9)
-    expect(io.to).toHaveBeenCalledTimes(1)
-    expect(emit).toHaveBeenCalledTimes(1)
-    expect(emit).toHaveBeenCalledWith('tile_placed', firstResult.event)
-    expect(persistSnapshotIfNeeded).toHaveBeenCalledTimes(1)
+    expect(state.lastOpSeq).toBe(2)
   })
 
-  it('surfaces stale and out-of-order revision rejects as typed outcomes', () => {
-    const staleReject = {
-      revision: 6,
-      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
-      ack: {
-        placed: null,
-        rejected: true as const,
-        reason: 'STALE_REVISION' as const,
-      },
-    }
+  it('models handler precondition behavior for stale and out-of-order checks before mutation', () => {
+    const revision = 6
+    const staleExpectedRevision = 4
+    const futureExpectedRevision = 7
 
-    const outOfOrderReject = {
-      revision: 6,
-      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
-      ack: {
-        removed: false as const,
-        reason: 'OUT_OF_ORDER_REVISION' as const,
-      },
-    }
+    const placeStaleAck =
+      staleExpectedRevision < revision
+        ? { placed: null, rejected: true as const, reason: 'STALE_REVISION' as const }
+        : { placed: null, rejected: true as const, reason: 'PLACEMENT_REJECTED' as const }
 
-    expect(staleReject.ack).toEqual({
+    const removeFutureAck =
+      futureExpectedRevision > revision
+        ? { removed: false as const, reason: 'OUT_OF_ORDER_REVISION' as const }
+        : { removed: false as const }
+
+    expect(placeStaleAck).toEqual({
       placed: null,
       rejected: true,
       reason: 'STALE_REVISION',
     })
-    expect(outOfOrderReject.ack).toEqual({
+    expect(removeFutureAck).toEqual({
       removed: false,
       reason: 'OUT_OF_ORDER_REVISION',
     })

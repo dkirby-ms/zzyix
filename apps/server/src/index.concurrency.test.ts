@@ -10,6 +10,7 @@ describe('deterministic concurrency convergence', () => {
       const first = applyPlaceTile(
         state,
         {
+          tileId: '11111111-1111-4111-8111-111111111111',
           shape: 'square',
           color: '#111',
           material: 'ceramic',
@@ -21,6 +22,7 @@ describe('deterministic concurrency convergence', () => {
       const second = applyPlaceTile(
         state,
         {
+          tileId: '22222222-2222-4222-8222-222222222222',
           shape: 'square',
           color: '#222',
           material: 'glass',
@@ -41,6 +43,7 @@ describe('deterministic concurrency convergence', () => {
     const first = applyPlaceTile(
       state,
       {
+        tileId: '33333333-3333-4333-8333-333333333333',
         shape: 'square',
         color: '#111',
         material: 'ceramic',
@@ -52,6 +55,7 @@ describe('deterministic concurrency convergence', () => {
     const second = applyPlaceTile(
       state,
       {
+        tileId: '44444444-4444-4444-8444-444444444444',
         shape: 'square',
         color: '#222',
         material: 'glass',
@@ -76,6 +80,7 @@ describe('deterministic concurrency convergence', () => {
     const first = applyPlaceTile(
       state,
       {
+        tileId: '55555555-5555-4555-8555-555555555555',
         shape: 'square',
         color: '#111',
         material: 'ceramic',
@@ -87,6 +92,7 @@ describe('deterministic concurrency convergence', () => {
     const second = applyPlaceTile(
       state,
       {
+        tileId: '66666666-6666-4666-8666-666666666666',
         shape: 'square',
         color: '#222',
         material: 'glass',
@@ -106,6 +112,7 @@ describe('deterministic concurrency convergence', () => {
     const place = applyPlaceTile(
       state,
       {
+        tileId: '77777777-7777-4777-8777-777777777777',
         shape: 'square',
         color: '#111',
         material: 'ceramic',
@@ -135,6 +142,7 @@ describe('deterministic concurrency convergence', () => {
     const place = applyPlaceTile(
       state,
       {
+        tileId: '88888888-8888-4888-8888-888888888888',
         shape: 'square',
         color: '#111',
         material: 'ceramic',
