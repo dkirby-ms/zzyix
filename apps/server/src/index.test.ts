@@ -125,7 +125,7 @@ describe('authoritative handler semantics', () => {
     const replayRemoveA = applyRemoveTile(state, { tileId: placed.ack.placed.id }, 'client-a')
     const replayRemoveB = applyRemoveTile(state, { tileId: placed.ack.placed.id }, 'client-a')
 
-    expect(firstRemove.ack).toEqual({ removed: true, opSeq: 2 })
+    expect(firstRemove.ack).toEqual({ removed: true, opSeq: 2, newRevision: 2 })
     expect(replayRemoveA.ack).toEqual({ removed: false })
     expect(replayRemoveB.ack).toEqual({ removed: false })
     expect(firstRemove.opSeq).toBe(2)

@@ -234,7 +234,7 @@ export type PlaceTileRejectReason =
   | 'OUT_OF_ORDER_REVISION'
 
 export type PlaceTileAck =
-  | { placed: TileInstance; rejected: false; opSeq: number; idempotent?: boolean }
+  | { placed: TileInstance; rejected: false; opSeq: number; newRevision: number; idempotent?: boolean }
   | { placed: null; rejected: true; reason: PlaceTileRejectReason }
 
 export type RemoveTileRejectReason =
@@ -254,7 +254,7 @@ export type RemoveTilePayload = {
 }
 
 export type RemoveTileAck =
-  | { removed: true; opSeq: number; idempotent?: boolean }
+  | { removed: true; opSeq: number; newRevision: number; idempotent?: boolean }
   | { removed: false; reason?: RemoveTileRejectReason }
 
 export type PointerMovePayload = {
@@ -265,6 +265,7 @@ export type SessionSnapshotPayload = {
   session: Session
   clients: ClientPresence[]
   lastOpSeq: number
+  revision: number
 }
 
 export type TilePlacedPayload = {
@@ -290,6 +291,12 @@ export type ClientJoinedPayload = {
 
 export type ClientLeftPayload = {
   clientId: string
+}
+
+export type ResyncRequiredPayload = {
+  /** The server's current authoritative opSeq at the time of the resync signal. */
+  currentOpSeq: number
+  reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
 }
 
 // ── Typed event maps ──────────────────────────────────────────────────────────
@@ -319,6 +326,8 @@ export interface ServerToClientEvents {
   client_joined: (payload: ClientJoinedPayload) => void
   /** Broadcast to all sockets in the session room when a peer disconnects. */
   client_left: (payload: ClientLeftPayload) => void
+  /** Emitted to a single socket when its placement/removal is rejected due to a stale revision. */
+  resync_required: (payload: ResyncRequiredPayload) => void
 }
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */

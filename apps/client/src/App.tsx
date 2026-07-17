@@ -21,6 +21,7 @@ import { useSocketConnection } from './network/useSocketConnection'
 import type {
   PlaceTileAck,
   PlaceTilePayload,
+  ResyncRequiredPayload,
   SessionSnapshotPayload,
   TilePlacedPayload,
   TileRemovedPayload,
@@ -88,6 +89,7 @@ function App() {
       applySequencedSnapshot({
         tiles: payload.session.tiles,
         lastOpSeq: payload.lastOpSeq,
+        revision: payload.revision,
       }),
     )
   }, [])
@@ -95,7 +97,7 @@ function App() {
   const onTilePlaced = useCallback((payload: TilePlacedPayload): void => {
     setSequencedState((prev) => {
       const next = reconcileSequencedTilePlaced(prev, {
-        tile: payload.tile,
+        tile: { ...payload.tile, placedBy: payload.placedBy },
         opSeq: payload.opSeq,
       })
 
@@ -122,6 +124,11 @@ function App() {
     })
   }, [requestSnapshot])
 
+  const onResyncRequired = useCallback((payload: ResyncRequiredPayload): void => {
+    console.warn('resync_required received:', { reason: payload.reason, currentOpSeq: payload.currentOpSeq })
+    requestSnapshot()
+  }, [requestSnapshot])
+
   const socketRef = useSocketConnection(
     serverUrl,
     sessionId,
@@ -129,6 +136,7 @@ function App() {
     onSnapshot,
     onTilePlaced,
     onTileRemoved,
+    onResyncRequired,
   )
 
   useEffect(() => {
@@ -166,24 +174,25 @@ function App() {
       }
 
       if (event.key.toLowerCase() === 'z') {
-        const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id))
+        const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
         if (!lastSettled) return
 
         const socket = socketRef.current
         if (!socket) return
 
-        socket.emit('remove_tile', { tileId: lastSettled.id }, (ack) => {
+        socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: sequencedState.revision }, (ack) => {
           if (!ack.removed) {
             requestSnapshot()
             return
           }
 
-          setSequencedState((prev) =>
-            reconcileSequencedTileRemoved(prev, {
+          setSequencedState((prev) => ({
+            ...reconcileSequencedTileRemoved(prev, {
               tileId: lastSettled.id,
               opSeq: ack.opSeq,
             }),
-          )
+            revision: ack.newRevision,
+          }))
         })
       }
     }
@@ -225,7 +234,7 @@ function App() {
       return
     }
 
-    const tempTile = result.placed
+    const tempTile = { ...result.placed, placedBy: clientId }
 
     setSequencedState((prev) => ({
       ...prev,
@@ -241,6 +250,7 @@ function App() {
       color: tempTile.color,
       material: tempTile.material,
       transform: tempTile.transform,
+      expectedRevision: sequencedState.revision,
     }
 
     socket.emit('place_tile', payload, (ack: PlaceTileAck) => {
@@ -255,24 +265,25 @@ function App() {
   }
 
   const handleUndo = (): void => {
-    const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id))
+    const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
     if (!lastSettled) return
 
     const socket = socketRef.current
     if (!socket) return
 
-    socket.emit('remove_tile', { tileId: lastSettled.id }, (ack) => {
+    socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: sequencedState.revision }, (ack) => {
       if (!ack.removed) {
         requestSnapshot()
         return
       }
 
-      setSequencedState((prev) =>
-        reconcileSequencedTileRemoved(prev, {
+      setSequencedState((prev) => ({
+        ...reconcileSequencedTileRemoved(prev, {
           tileId: lastSettled.id,
           opSeq: ack.opSeq,
         }),
-      )
+        revision: ack.newRevision,
+      }))
     })
   }
 
@@ -297,7 +308,7 @@ function App() {
         onRotateFine={() => setRotation((prev) => normalizeAngle(prev + Math.PI / 12))}
         onRotateFineCcw={() => setRotation((prev) => normalizeAngle(prev - Math.PI / 12))}
         onMirror={() => setMirrored((prev) => !prev)}
-        canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id))}
+        canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
         onUndo={handleUndo}
         clearDisabled
         onClear={() => {}}

@@ -4,6 +4,7 @@ import {
   applySequencedSnapshot,
   createServerTileId,
   createInitialGhost,
+  createInitialSequencedTilesState,
   isServerTileId,
   reconcileOptimisticPlacementAck,
   reconcileSequencedTilePlaced,
@@ -90,6 +91,7 @@ describe('interaction controller', () => {
     const snapshot = applySequencedSnapshot({
       tiles: [serverTile],
       lastOpSeq: 7,
+      revision: 3,
     })
 
     expect(snapshot.tiles).toEqual([serverTile])
@@ -101,6 +103,7 @@ describe('interaction controller', () => {
     const current = {
       tiles: [serverTile],
       lastOpSeq: 2,
+      revision: 0,
       requiresSnapshot: false,
     }
 
@@ -131,6 +134,7 @@ describe('interaction controller', () => {
     const current = {
       tiles: [serverTile],
       lastOpSeq: 5,
+      revision: 0,
       requiresSnapshot: false,
     }
 
@@ -165,6 +169,7 @@ describe('interaction controller', () => {
     const state = {
       tiles: [tempTile],
       lastOpSeq: 2,
+      revision: 1,
       requiresSnapshot: false,
     }
 
@@ -177,6 +182,7 @@ describe('interaction controller', () => {
       placed: ackedTile,
       rejected: false,
       opSeq: 3,
+      newRevision: 2,
     })
 
     expect(next.tiles).toHaveLength(1)
@@ -184,6 +190,7 @@ describe('interaction controller', () => {
     expect(next.tiles[0].settleFrom).toEqual(tempTile.settleFrom)
     expect(next.lastOpSeq).toBe(3)
     expect(next.requiresSnapshot).toBe(false)
+    expect(next.revision).toBe(2)
   })
 
   it('removes temp tile on rejected ack', () => {
@@ -195,6 +202,7 @@ describe('interaction controller', () => {
     const state = {
       tiles: [tempTile],
       lastOpSeq: 4,
+      revision: 5,
       requiresSnapshot: false,
     }
 
@@ -206,6 +214,7 @@ describe('interaction controller', () => {
     expect(next.tiles).toHaveLength(0)
     expect(next.lastOpSeq).toBe(4)
     expect(next.requiresSnapshot).toBe(false)
+    expect(next.revision).toBe(5)
   })
 
   it('reconciles optimistic placement acks when the broadcast already arrived', () => {
@@ -222,6 +231,7 @@ describe('interaction controller', () => {
     const state = {
       tiles: [tempTile, serverTile],
       lastOpSeq: 3,
+      revision: 2,
       requiresSnapshot: false,
     }
 
@@ -229,6 +239,7 @@ describe('interaction controller', () => {
       placed: serverTile,
       rejected: false,
       opSeq: 4,
+      newRevision: 3,
     })
 
     expect(next.tiles).toEqual([serverTile])
@@ -249,5 +260,98 @@ describe('interaction controller', () => {
     expect(isServerTileId(first)).toBe(true)
     expect(isServerTileId(second)).toBe(true)
     expect(first).not.toBe(second)
+  })
+
+  it('initializes revision to 0 in createInitialSequencedTilesState', () => {
+    const state = createInitialSequencedTilesState()
+    expect(state.revision).toBe(0)
+  })
+
+  it('applySequencedSnapshot sets revision from snapshot payload', () => {
+    const state = applySequencedSnapshot({
+      tiles: [serverTile],
+      lastOpSeq: 5,
+      revision: 7,
+    })
+    expect(state.revision).toBe(7)
+  })
+
+  it('reconcileOptimisticPlacementAck advances revision to newRevision on acceptance', () => {
+    const tempTile = { ...serverTile, id: 'temp-rev-accept' }
+    const state = {
+      tiles: [tempTile],
+      lastOpSeq: 1,
+      revision: 4,
+      requiresSnapshot: false,
+    }
+    const ackedTile = { ...serverTile, id: '55555555-5555-4555-8555-555555555555' }
+
+    const next = reconcileOptimisticPlacementAck(state, tempTile, {
+      placed: ackedTile,
+      rejected: false,
+      opSeq: 2,
+      newRevision: 5,
+    })
+
+    expect(next.revision).toBe(5)
+  })
+
+  it('reconcileOptimisticPlacementAck leaves revision unchanged on rejection', () => {
+    const tempTile = { ...serverTile, id: 'temp-rev-reject' }
+    const state = {
+      tiles: [tempTile],
+      lastOpSeq: 1,
+      revision: 4,
+      requiresSnapshot: false,
+    }
+
+    const next = reconcileOptimisticPlacementAck(state, tempTile, {
+      placed: null,
+      rejected: true,
+    })
+
+    expect(next.revision).toBe(4)
+  })
+
+  it('stores placedBy on tiles after reconcileSequencedTilePlaced', () => {
+    const state = createInitialSequencedTilesState()
+
+    const tileA = {
+      ...serverTile,
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      placedBy: 'client-a',
+    }
+
+    const tileB = {
+      ...serverTile,
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      placedBy: 'client-b',
+    }
+
+    const afterA = reconcileSequencedTilePlaced(state, { tile: tileA, opSeq: 1 })
+    const afterB = reconcileSequencedTilePlaced(afterA, { tile: tileB, opSeq: 2 })
+
+    expect(afterB.tiles[0].placedBy).toBe('client-a')
+    expect(afterB.tiles[1].placedBy).toBe('client-b')
+  })
+
+  it('filtering tiles by placedBy returns only that client\'s tiles', () => {
+    const tileA = {
+      ...serverTile,
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      placedBy: 'client-a',
+    }
+
+    const tileB = {
+      ...serverTile,
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      placedBy: 'client-b',
+    }
+
+    const tiles = [tileA, tileB]
+    const clientATiles = tiles.filter((t) => t.placedBy === 'client-a')
+
+    expect(clientATiles).toHaveLength(1)
+    expect(clientATiles[0].id).toBe(tileA.id)
   })
 })

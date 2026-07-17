@@ -10,6 +10,7 @@ import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeom
 export type SequencedSnapshot = {
   tiles: TileInstance[]
   lastOpSeq: number
+  revision: number
 }
 
 export type SequencedTilePlaced = {
@@ -25,12 +26,13 @@ export type SequencedTileRemoved = {
 export type SequencedTilesState = {
   tiles: TileInstance[]
   lastOpSeq: number
+  revision: number        // authoritative canvas revision from server acks/snapshot
   requiresSnapshot: boolean
 }
 
 export type OptimisticPlacementAck =
   | { placed: null; rejected: true }
-  | { placed: TileInstance; rejected: false; opSeq: number }
+  | { placed: TileInstance; rejected: false; opSeq: number; newRevision: number }
 
 export type ActiveTile = {
   shape: TileShape
@@ -63,12 +65,14 @@ export const createInitialGhost = (): GhostState => ({
 export const createInitialSequencedTilesState = (): SequencedTilesState => ({
   tiles: [],
   lastOpSeq: 0,
+  revision: 0,
   requiresSnapshot: false,
 })
 
 export const applySequencedSnapshot = (snapshot: SequencedSnapshot): SequencedTilesState => ({
   tiles: snapshot.tiles,
   lastOpSeq: snapshot.lastOpSeq,
+  revision: snapshot.revision,
   requiresSnapshot: false,
 })
 
@@ -93,13 +97,15 @@ export const reconcileOptimisticPlacementAck = (
       ...state,
       tiles: withoutTemp,
       lastOpSeq: Math.max(state.lastOpSeq, ack.opSeq),
+      revision: ack.newRevision,
     }
   }
 
   return {
     ...state,
-    tiles: [...withoutTemp, { ...ack.placed, settleFrom: tempTile.settleFrom }],
+    tiles: [...withoutTemp, { ...ack.placed, settleFrom: tempTile.settleFrom, placedBy: tempTile.placedBy }],
     lastOpSeq: Math.max(state.lastOpSeq, ack.opSeq),
+    revision: ack.newRevision,
   }
 }
 

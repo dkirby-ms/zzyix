@@ -4,6 +4,7 @@ import type { Socket } from 'socket.io-client'
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
+  ResyncRequiredPayload,
   SessionSnapshotPayload,
   TilePlacedPayload,
   TileRemovedPayload,
@@ -18,6 +19,7 @@ export const useSocketConnection = (
   onSnapshot: (payload: SessionSnapshotPayload) => void,
   onTilePlaced: (payload: TilePlacedPayload) => void,
   onTileRemoved: (payload: TileRemovedPayload) => void,
+  onResyncRequired?: (payload: ResyncRequiredPayload) => void,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
 
@@ -48,6 +50,9 @@ export const useSocketConnection = (
     socket.on('session_snapshot', onSnapshot)
     socket.on('tile_placed', onTilePlaced)
     socket.on('tile_removed', onTileRemoved)
+    if (onResyncRequired) {
+      socket.on('resync_required', onResyncRequired)
+    }
 
     socketRef.current = socket
 
@@ -55,10 +60,13 @@ export const useSocketConnection = (
       socket.off('session_snapshot', onSnapshot)
       socket.off('tile_placed', onTilePlaced)
       socket.off('tile_removed', onTileRemoved)
+      if (onResyncRequired) {
+        socket.off('resync_required', onResyncRequired)
+      }
       socket.disconnect()
       socketRef.current = null
     }
-  }, [serverUrl, sessionId, clientId, onSnapshot, onTilePlaced, onTileRemoved])
+  }, [serverUrl, sessionId, clientId, onSnapshot, onTilePlaced, onTileRemoved, onResyncRequired])
 
   return socketRef
 }

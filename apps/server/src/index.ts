@@ -323,6 +323,7 @@ export const initializeParticipantPresence = async (
     session: Session
     clients: ClientPresence[]
     lastOpSeq: number
+    revision: number
   }
 }> => {
   const joinedClient = await repository.markParticipantJoined(sessionId, clientId, joinedAt)
@@ -334,6 +335,7 @@ export const initializeParticipantPresence = async (
       session: record.session,
       clients: record.clients,
       lastOpSeq: record.lastOpSeq,
+      revision: record.revision,
     },
   }
 }
@@ -399,6 +401,7 @@ export const applyPlaceTile = (
       placed: tile,
       rejected: false,
       opSeq,
+      newRevision: opSeq,
     },
     event: {
       tile,
@@ -439,7 +442,7 @@ export const applyRemoveTile = (
 
   return {
     opSeq,
-    ack: { removed: true, opSeq },
+    ack: { removed: true, opSeq, newRevision: opSeq },
     event: {
       tileId: payload.tileId,
       removedBy,
@@ -677,6 +680,7 @@ io.on('connection', (socket) => {
             rejected: true,
             reason: 'STALE_REVISION',
           })
+          socket.emit('resync_required', { currentOpSeq: record.revision, reason: 'REVISION_MISMATCH' })
           return
         }
 
@@ -713,7 +717,9 @@ io.on('connection', (socket) => {
         placedBy: clientId,
       })
 
-      const placeAck = result.ack
+      const placeAck: PlaceTileAck = result.ack.rejected
+        ? result.ack
+        : { ...result.ack, newRevision: result.revision }
 
       writeLog('info', 'place_tile_processed', {
         sessionId,
@@ -764,11 +770,13 @@ io.on('connection', (socket) => {
       if (payload.expectedRevision !== undefined) {
         if (payload.expectedRevision < record.revision) {
           invokeAckSafely(ack, { removed: false, reason: 'STALE_REVISION' })
+          socket.emit('resync_required', { currentOpSeq: record.revision, reason: 'REVISION_MISMATCH' })
           return
         }
 
         if (payload.expectedRevision > record.revision) {
           invokeAckSafely(ack, { removed: false, reason: 'OUT_OF_ORDER_REVISION' })
+          socket.emit('resync_required', { currentOpSeq: record.revision, reason: 'REVISION_MISMATCH' })
           return
         }
       }
@@ -779,7 +787,9 @@ io.on('connection', (socket) => {
         removedBy: clientId,
       })
 
-      const removeAck = result.ack
+      const removeAck: RemoveTileAck = result.ack.removed
+        ? { ...result.ack, newRevision: result.revision }
+        : result.ack
 
       writeLog('info', 'remove_tile_processed', {
         sessionId,
