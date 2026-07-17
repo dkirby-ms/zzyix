@@ -80,7 +80,7 @@ function App() {
       socket.disconnect()
       socket.connect()
     }, 0)
-  }, [socketRef])
+  }, [])
 
   const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
     setSequencedState(

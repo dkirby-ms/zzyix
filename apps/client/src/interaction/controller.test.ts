@@ -3,7 +3,6 @@ import { vec2 } from '../domain/math2d'
 import {
   applySequencedSnapshot,
   createInitialGhost,
-  createInitialSequencedTilesState,
   isServerTileId,
   reconcileOptimisticPlacementAck,
   reconcileSequencedTilePlaced,
@@ -149,6 +148,63 @@ describe('interaction controller', () => {
     expect(gap.lastOpSeq).toBe(5)
     expect(gap.tiles).toBe(current.tiles)
     expect(gap.requiresSnapshot).toBe(true)
+  })
+
+  it('replaces temp tile with server tile on accepted ack', () => {
+    const tempTile = {
+      ...serverTile,
+      id: 'temp-accept',
+      settleFrom: {
+        position: vec2(0.25, 0.5),
+        rotation: 0,
+        mirrored: false,
+      },
+    }
+
+    const state = {
+      tiles: [tempTile],
+      lastOpSeq: 2,
+      requiresSnapshot: false,
+    }
+
+    const ackedTile = {
+      ...serverTile,
+      id: '22222222-2222-4222-8222-222222222222',
+    }
+
+    const next = reconcileOptimisticPlacementAck(state, tempTile, {
+      placed: ackedTile,
+      rejected: false,
+      opSeq: 3,
+    })
+
+    expect(next.tiles).toHaveLength(1)
+    expect(next.tiles[0].id).toBe(ackedTile.id)
+    expect(next.tiles[0].settleFrom).toEqual(tempTile.settleFrom)
+    expect(next.lastOpSeq).toBe(3)
+    expect(next.requiresSnapshot).toBe(false)
+  })
+
+  it('removes temp tile on rejected ack', () => {
+    const tempTile = {
+      ...serverTile,
+      id: 'temp-reject',
+    }
+
+    const state = {
+      tiles: [tempTile],
+      lastOpSeq: 4,
+      requiresSnapshot: false,
+    }
+
+    const next = reconcileOptimisticPlacementAck(state, tempTile, {
+      placed: null,
+      rejected: true,
+    })
+
+    expect(next.tiles).toHaveLength(0)
+    expect(next.lastOpSeq).toBe(4)
+    expect(next.requiresSnapshot).toBe(false)
   })
 
   it('reconciles optimistic placement acks when the broadcast already arrived', () => {

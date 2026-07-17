@@ -26,7 +26,17 @@ Phase 3 controller and pure-helper test coverage is complete.
 
 * `apps/client/src/interaction/controller.ts` gained a small pure helper for optimistic ack reconciliation so the broadcast-before-ack race can be covered without a browser-level test harness.
 * `apps/client/src/interaction/controller.test.ts` now covers snapshot reset, placement/removal deduplication and gap detection, server UUID identity checks, and the optimistic ack race case.
+* Added explicit ack-path tests for accepted and rejected outcomes so optimistic temp-tile swap and rollback behavior are both validated directly.
 * Validation passed with `cd apps/client && npm run test`.
+
+## Phase 4 Validation Note
+
+Phase 4 validation and cleanup is complete.
+
+* Full command chain `cd apps/client && npm run lint && npm run build && npm run test` now passes.
+* `apps/client/src/App.tsx` was adjusted to resolve socket-reference declaration-order build errors seen in prior review.
+* `apps/client/src/interaction/controller.test.ts` was updated to remove an unused import causing build failure under strict checks.
+* No blocking issues requiring additional server changes were found.
 
 ## Discrepancy Log
 
@@ -55,12 +65,6 @@ Gaps and differences identified between research findings and the implementation
   * Reason: Out of scope for Issue #12 per research scope section — no peer cursor UI exists yet
   * Impact: low — server handles `pointer_move` and emits `pointer_update`; client simply doesn't emit
   * Resolution in plan: WI-03 suggested follow-on work item tracks this
-
-* DR-04: No explicit implementation step to export `isServerTileId` for test compilability
-  * Source: `.copilot-tracking/details/2026-07-16/client-server-integration-details.md` (Step 3.1 — test case 6 note; Step 2.6 — definition site)
-  * Reason: Step 2.6 defines `isServerTileId` inline in `App.tsx`. Step 3.1 test case 6 calls it from `controller.test.ts`, which imports only from `./controller`. No numbered step relocates or exports the function to a testable module. The details say "consider exporting it from controller.ts" but this is advisory, not a required step.
-  * Impact: medium-high — without moving `isServerTileId` to `controller.ts` and exporting it, test case 6 will fail to compile; importing from App.tsx in a test file is non-idiomatic in a Vite/Vitest setup and may pull in CSS side-effects
-  * Resolution in plan: Missing — implementer must add a step to move `isServerTileId` to `controller.ts` and export it before implementing test case 6
 
 * DR-04: `isServerTileId` not exported from `controller.ts` in original plan
   * Source: `.copilot-tracking/research/2026-07-16/client-server-integration-research.md` (Scenario C) — function defined inline in App.tsx

@@ -90,24 +90,24 @@ Integrate the React/WebGL client with the authoritative Socket.IO server by addi
 * [x] Step 2.8: Validate phase changes
   * Run `npm run build` in `apps/client/` — type-check full App.tsx
 
-### [ ] Implementation Phase 3: Tests
+### [x] Implementation Phase 3: Tests
 
 <!-- parallelizable: false -->
 
-* [ ] Step 3.1: Add socket integration tests to `controller.test.ts`
+* [x] Step 3.1: Add socket integration tests to `controller.test.ts`
   * Details: .copilot-tracking/details/2026-07-16/client-server-integration-details.md (Lines 410–490)
-* [ ] Step 3.2: Validate test suite passes
+* [x] Step 3.2: Validate test suite passes
   * Run `npm run test` in `apps/client/` — all existing + new tests pass
 
-### [ ] Implementation Phase 4: Validation
+### [x] Implementation Phase 4: Validation
 
 <!-- parallelizable: false -->
 
-* [ ] Step 4.1: Run full project validation
+* [x] Step 4.1: Run full project validation
   * `cd apps/client && npm run lint && npm run build && npm run test`
-* [ ] Step 4.2: Fix minor validation issues
+* [x] Step 4.2: Fix minor validation issues
   * Iterate on lint errors and type errors; apply fixes directly
-* [ ] Step 4.3: Report blocking issues
+* [x] Step 4.3: Report blocking issues
   * Document issues requiring additional research or server changes
 
 ## Planning Log
