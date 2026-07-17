@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPlaceTile,
   applyRemoveTile,
+  buildListSessionsResponse,
   cleanupSessions,
   createAuthoritativeSessionState,
   getSessionState,
@@ -18,6 +19,30 @@ import {
 import { vec2 } from './domain/math2d'
 
 describe('authoritative handler semantics', () => {
+  it('builds lobby summary metadata with deterministic V1 fallbacks', () => {
+    const payload = buildListSessionsResponse([
+      { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', participantCount: 2 },
+      { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', participantCount: 0 },
+    ])
+
+    expect(payload).toEqual({
+      sessions: [
+        {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          displayName: 'Canvas aaaaaaaa',
+          participantCount: 2,
+          canvasSize: { width: 10.4, height: 6.8 },
+        },
+        {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          displayName: 'Canvas bbbbbbbb',
+          participantCount: 0,
+          canvasSize: { width: 10.4, height: 6.8 },
+        },
+      ],
+    })
+  })
+
   it('maps placement solver reject reasons to a closed deterministic set', () => {
     expect(toRejectReason('out-of-bounds (correction 0.123)')).toBe('OUT_OF_BOUNDS')
     expect(toRejectReason('overlap (depth 0.456)')).toBe('OVERLAP')

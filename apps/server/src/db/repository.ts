@@ -93,6 +93,11 @@ export type ReplaySessionRecord = AuthoritativeSessionRecord & {
   replayedOperations: PersistedOperationRecord[]
 }
 
+export type SessionSummaryRecord = {
+  id: string
+  participantCount: number
+}
+
 const toMillis = (value: Date): number => value.getTime()
 
 const mapTile = (row: typeof tiles.$inferSelect): TileInstance => ({
@@ -375,6 +380,26 @@ export const listActiveParticipants = async (sessionId: string): Promise<ClientP
     .orderBy(asc(participants.joinedAt))
 
   return rows.map(mapClient)
+}
+
+export const listSessionSummaries = async (): Promise<SessionSummaryRecord[]> => {
+  const { db } = getDatabaseBundle()
+
+  const rows = await db
+    .select({
+      id: canvases.id,
+      participantCount: sql<number>`count(${participants.clientId})`,
+      updatedAt: canvases.updatedAt,
+    })
+    .from(canvases)
+    .leftJoin(participants, and(eq(participants.canvasId, canvases.id), isNull(participants.leftAt)))
+    .groupBy(canvases.id, canvases.updatedAt)
+    .orderBy(desc(canvases.updatedAt), asc(canvases.id))
+
+  return rows.map((row) => ({
+    id: row.id,
+    participantCount: Number(row.participantCount),
+  }))
 }
 
 export const persistTilePlacement = async (params: {

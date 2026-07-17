@@ -18,10 +18,12 @@ import type {
   RemoveTileAck,
   TilePlacedPayload,
   TileRemovedPayload,
+  ListSessionsResponse,
 } from './contracts'
 import {
   closeDatabaseBundle,
   getDatabaseBundle,
+  listSessionSummaries,
   listActiveParticipants,
   loadSessionReplayRecord,
   loadSessionRecord,
@@ -31,6 +33,7 @@ import {
   persistTilePlacement,
   persistTileRemoval,
 } from './db'
+import type { SessionSummaryRecord } from './db/repository'
 import { defaultBounds, validatePlacement } from './domain/placementSolver'
 import { startRetentionJob } from './jobs/retention'
 
@@ -60,6 +63,20 @@ const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'gla
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_SESSION_STALE_MS = 30 * 60 * 1000
+const CANVAS_WIDTH = defaultBounds.maxX - defaultBounds.minX
+const CANVAS_HEIGHT = defaultBounds.maxY - defaultBounds.minY
+
+export const buildListSessionsResponse = (summaries: SessionSummaryRecord[]): ListSessionsResponse => ({
+  sessions: summaries.map((summary) => ({
+    id: summary.id,
+    displayName: `Canvas ${summary.id.slice(0, 8)}`,
+    participantCount: summary.participantCount,
+    canvasSize: {
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+    },
+  })),
+})
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -541,6 +558,18 @@ app.use((req, res, next) => {
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', version: '0.0.0' })
+})
+
+app.get('/sessions', async (_req, res) => {
+  try {
+    const summaries = await listSessionSummaries()
+    const response = buildListSessionsResponse(summaries)
+
+    res.status(200).json(response)
+  } catch (error) {
+    writeLog('error', 'session_list_failed', { error })
+    res.status(500).json({ error: 'Failed to list sessions' })
+  }
 })
 
 // Session creation endpoint

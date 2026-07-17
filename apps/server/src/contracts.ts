@@ -73,6 +73,7 @@ export type ClientPresence = {
 // ─── REST API ─────────────────────────────────────────────────────────────────
 //
 // POST   /sessions                          → CreateSessionResponse
+// GET    /sessions                          → ListSessionsResponse
 // GET    /sessions/:sessionId               → GetSessionResponse
 // POST   /sessions/:sessionId/tiles         → PlaceTileResponse
 // DELETE /sessions/:sessionId/tiles/:tileId → 204 No Content
@@ -139,6 +140,23 @@ export type ApiError = {
 // POST /sessions
 export type CreateSessionResponse = {
   session: Session
+}
+
+export type CanvasSize = {
+  width: number
+  height: number
+}
+
+export type SessionSummary = {
+  id: string
+  displayName: string
+  participantCount: number
+  canvasSize: CanvasSize
+}
+
+// GET /sessions
+export type ListSessionsResponse = {
+  sessions: SessionSummary[]
 }
 
 // GET /sessions/:sessionId

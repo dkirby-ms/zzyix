@@ -16,7 +16,14 @@ import {
   updateGhostTarget,
 } from './interaction/controller'
 import type { ActiveTile, SequencedTilesState } from './interaction/controller'
-import { ensureClientId, ensureSession } from './network/session'
+import { ensureClientId } from './network/session'
+import {
+  createSession,
+  getStoredSessionId,
+  listSessions,
+  setStoredSessionId,
+  type SessionSummary,
+} from './network/session'
 import { useSocketConnection } from './network/useSocketConnection'
 import type {
   PlaceTileAck,
@@ -28,6 +35,7 @@ import type {
 } from '../../server/src/contracts'
 import { MosaicScene } from './render/MosaicScene'
 import { ControlsPanel } from './ui/ControlsPanel'
+import { LobbyScreen } from './ui/LobbyScreen'
 import { palettes } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import './App.css'
@@ -47,6 +55,13 @@ function App() {
   const [invalidPulse, setInvalidPulse] = useState(false)
   const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 })
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [mode, setMode] = useState<'lobby' | 'canvas'>('lobby')
+  const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [lobbyLoading, setLobbyLoading] = useState(false)
+  const [lobbyError, setLobbyError] = useState<string | null>(null)
+  const [creatingSession, setCreatingSession] = useState(false)
+  const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
+  const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
   const clientId = useMemo(() => ensureClientId(), [])
   const serverUrl = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
 
@@ -61,13 +76,58 @@ function App() {
     [shape, color, material, rotation, mirrored],
   )
 
-  useEffect(() => {
-    ensureSession()
-      .then(setSessionId)
-      .catch((error: unknown) => {
-        console.error('Session bootstrap failed:', error)
-      })
+  const loadSessions = useCallback(async (): Promise<void> => {
+    setLobbyLoading(true)
+    setLobbyError(null)
+
+    try {
+      const listedSessions = await listSessions()
+      setSessions(listedSessions)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load canvases'
+      setLobbyError(message)
+    } finally {
+      setLobbyLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    setSessionId(null)
+    setMode('lobby')
+    setPreviousSessionId(getStoredSessionId())
+    void loadSessions()
+  }, [loadSessions])
+
+  const enterCanvas = useCallback((nextSessionId: string): void => {
+    setStoredSessionId(nextSessionId)
+    setPreviousSessionId(nextSessionId)
+    setSessionId(nextSessionId)
+    setMode('canvas')
+  }, [])
+
+  const handleJoinSession = useCallback((nextSessionId: string): void => {
+    setJoiningSessionId(nextSessionId)
+    try {
+      enterCanvas(nextSessionId)
+    } finally {
+      setJoiningSessionId(null)
+    }
+  }, [enterCanvas])
+
+  const handleCreateSession = useCallback(async (): Promise<void> => {
+    setCreatingSession(true)
+    setLobbyError(null)
+
+    try {
+      const nextSessionId = await createSession()
+      enterCanvas(nextSessionId)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to create canvas'
+      setLobbyError(message)
+    } finally {
+      setCreatingSession(false)
+    }
+  }, [enterCanvas])
 
   const triggerInvalidPulse = useCallback((): void => {
     setInvalidPulse(true)
@@ -79,7 +139,7 @@ function App() {
     if (!socket) return
 
     socket.emit('request_snapshot')
-  }, [])
+  }, [socketRef])
 
   const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
     setSequencedState(
@@ -294,6 +354,25 @@ function App() {
         revision: ack.newRevision,
       }))
     })
+  }
+
+  if (mode === 'lobby') {
+    return (
+      <main className="lobby-shell">
+        <div className="backdrop-gradient" />
+        <LobbyScreen
+          sessions={sessions}
+          loading={lobbyLoading}
+          error={lobbyError}
+          previousSessionId={previousSessionId}
+          creating={creatingSession}
+          joiningSessionId={joiningSessionId}
+          onRefresh={() => void loadSessions()}
+          onCreate={() => void handleCreateSession()}
+          onJoin={handleJoinSession}
+        />
+      </main>
+    )
   }
 
   return (
