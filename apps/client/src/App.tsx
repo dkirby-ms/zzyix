@@ -78,10 +78,7 @@ function App() {
     const socket = socketRef.current
     if (!socket) return
 
-    window.setTimeout(() => {
-      socket.disconnect()
-      socket.connect()
-    }, 0)
+    socket.emit('request_snapshot')
   }, [])
 
   const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
@@ -99,6 +96,7 @@ function App() {
       const next = reconcileSequencedTilePlaced(prev, {
         tile: { ...payload.tile, placedBy: payload.placedBy },
         opSeq: payload.opSeq,
+        revision: payload.revision,
       })
 
       if (next.requiresSnapshot) {
@@ -114,6 +112,7 @@ function App() {
       const next = reconcileSequencedTileRemoved(prev, {
         tileId: payload.tileId,
         opSeq: payload.opSeq,
+        revision: payload.revision,
       })
 
       if (next.requiresSnapshot) {
@@ -174,32 +173,41 @@ function App() {
       }
 
       if (event.key.toLowerCase() === 'z') {
-        const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
-        if (!lastSettled) return
-
         const socket = socketRef.current
         if (!socket) return
 
-        socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: sequencedState.revision }, (ack) => {
-          if (!ack.removed) {
-            requestSnapshot()
-            return
+        setSequencedState((prev) => {
+          const lastSettled = [...prev.tiles]
+            .reverse()
+            .find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
+          if (!lastSettled) {
+            return prev
           }
 
-          setSequencedState((prev) => ({
-            ...reconcileSequencedTileRemoved(prev, {
-              tileId: lastSettled.id,
-              opSeq: ack.opSeq,
-            }),
-            revision: ack.newRevision,
-          }))
+          socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: prev.revision }, (ack) => {
+            if (!ack.removed) {
+              requestSnapshot()
+              return
+            }
+
+            setSequencedState((current) => ({
+              ...reconcileSequencedTileRemoved(current, {
+                tileId: lastSettled.id,
+                opSeq: ack.opSeq,
+                revision: ack.newRevision,
+              }),
+              revision: ack.newRevision,
+            }))
+          })
+
+          return prev
         })
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [requestSnapshot, sequencedState.tiles, socketRef])
+  }, [clientId, requestSnapshot, socketRef])
 
   useEffect(() => {
     setGhost((prev) => ({
@@ -281,6 +289,7 @@ function App() {
         ...reconcileSequencedTileRemoved(prev, {
           tileId: lastSettled.id,
           opSeq: ack.opSeq,
+          revision: ack.newRevision,
         }),
         revision: ack.newRevision,
       }))

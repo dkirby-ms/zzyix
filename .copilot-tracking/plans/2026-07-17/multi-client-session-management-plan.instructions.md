@@ -47,69 +47,69 @@ Incrementally harden the existing server-authoritative session protocol so multi
 
 ## Implementation Checklist
 
-### [ ] Implementation Phase 1: Client revision tracking and expectedRevision wiring
+### [x] Implementation Phase 1: Client revision tracking and expectedRevision wiring
 
 <!-- parallelizable: false -->
 
-* [ ] Step 1.1: Add `revision` to `SequencedTilesState` and update all constructors and reconcile helpers in controller.ts
+* [x] Step 1.1: Add `revision` to `SequencedTilesState` and update all constructors and reconcile helpers in controller.ts
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 14-75)
-* [ ] Step 1.2: Extend `PlaceTileAck`, `RemoveTileAck`, and `SessionSnapshotPayload` contracts with `revision`/`newRevision`; update `onSnapshot` in App.tsx to pass `revision` (DR-03)
+* [x] Step 1.2: Extend `PlaceTileAck`, `RemoveTileAck`, and `SessionSnapshotPayload` contracts with `revision`/`newRevision`; update `onSnapshot` in App.tsx to pass `revision` (DR-03)
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 76-115)
-* [ ] Step 1.3: Update `apps/server/src/db/repository.ts` persistence functions to return `newRevision`; update `apps/server/src/index.ts` mutation handlers and snapshot emission to include revision (DR-04)
+* [x] Step 1.3: Update `apps/server/src/db/repository.ts` persistence functions to return `newRevision`; update `apps/server/src/index.ts` mutation handlers and snapshot emission to include revision (DR-04)
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 116-160)
-* [ ] Step 1.4: Wire `expectedRevision` from `sequencedState.revision` into `place_tile` and `remove_tile` emissions in App.tsx
+* [x] Step 1.4: Wire `expectedRevision` from `sequencedState.revision` into `place_tile` and `remove_tile` emissions in App.tsx
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 146-185)
-* [ ] Step 1.5: Update `reconcileOptimisticPlacementAck` to advance `revision` from ack `newRevision`
+* [x] Step 1.5: Update `reconcileOptimisticPlacementAck` to advance `revision` from ack `newRevision`
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 186-215)
-* [ ] Step 1.6: Add and update unit tests in controller.test.ts for revision progression
+* [x] Step 1.6: Add and update unit tests in controller.test.ts for revision progression
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 216-245)
-* [ ] Step 1.7: Validate Phase 1
+* [x] Step 1.7: Validate Phase 1
   * Run `npm run type-check` (or `tsc --noEmit`) in both apps/client and apps/server
   * Run `npm test` in apps/client
   * Run `npm test` in apps/server
 
-### [ ] Implementation Phase 2: Explicit resync protocol
+### [x] Implementation Phase 2: Explicit resync protocol
 
 <!-- parallelizable: false -->
 
-* [ ] Step 2.1: Add `resync_required` to `ServerToClientEvents` in contracts.ts and define its payload type
+* [x] Step 2.1: Add `resync_required` to `ServerToClientEvents` in contracts.ts and define its payload type
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 246-275)
-* [ ] Step 2.2: Emit `resync_required` from server when a gap is detected or revision enforcement fails (apps/server/src/index.ts)
+* [x] Step 2.2: Emit `resync_required` from server when a gap is detected or revision enforcement fails (apps/server/src/index.ts)
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 276-310)
-* [ ] Step 2.3: Subscribe to `resync_required` in `useSocketConnection.ts` and replace disconnect/reconnect in `requestSnapshot` (App.tsx)
+* [x] Step 2.3: Subscribe to `resync_required` in `useSocketConnection.ts` and replace disconnect/reconnect in `requestSnapshot` (App.tsx)
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 311-355)
-* [ ] Step 2.4: Add two-client integration tests in apps/server/src/index.integration.test.ts
+* [x] Step 2.4: Add two-client integration tests in apps/server/src/index.integration.test.ts
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 356-400)
-* [ ] Step 2.5: Validate Phase 2
+* [x] Step 2.5: Validate Phase 2
   * Run full test suite in apps/server (`npm test`)
   * Run full test suite in apps/client (`npm test`)
 
-### [ ] Implementation Phase 3: Per-author undo
+### [x] Implementation Phase 3: Per-author undo
 
 <!-- parallelizable: false -->
 
 > **Decision confirmed (PD-01 Option A):** Undo removes the calling client's most recent tile, filtered by `clientId` using `placedBy` already present in `TilePlacedPayload` (contracts.ts:273-277).
 
-* [ ] Step 3.1: Store `placedBy` on tiles in client state derived from `TilePlacedPayload.placedBy` field
+* [x] Step 3.1: Store `placedBy` on tiles in client state derived from `TilePlacedPayload.placedBy` field
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 401-435)
-* [ ] Step 3.2: Update `handleUndo` in App.tsx to filter by `clientId` for per-author undo
+* [x] Step 3.2: Update `handleUndo` in App.tsx to filter by `clientId` for per-author undo
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 436-460)
-* [ ] Step 3.3: Update controller.test.ts for per-author undo behavior
+* [x] Step 3.3: Update controller.test.ts for per-author undo behavior
   * Details: .copilot-tracking/details/2026-07-17/multi-client-session-management-details.md (Lines 461-480)
-* [ ] Step 3.4: Validate Phase 3
+* [x] Step 3.4: Validate Phase 3
   * Run `npm test` in apps/client
 
-### [ ] Implementation Phase 4: Final validation
+### [x] Implementation Phase 4: Final validation
 
 <!-- parallelizable: false -->
 
-* [ ] Step 4.1: Run full project validation
+* [x] Step 4.1: Run full project validation
   * `npm run test` in apps/client (unit + integration)
   * `npm run test` in apps/server (unit + integration)
   * `npm run build` in apps/client (TypeScript compilation check)
-* [ ] Step 4.2: Fix minor validation issues
+* [x] Step 4.2: Fix minor validation issues
   * Iterate on type errors, lint warnings, and test failures with straightforward fixes
-* [ ] Step 4.3: Report blocking issues
+* [x] Step 4.3: Report blocking issues
   * Document issues requiring additional research and provide next steps; avoid large-scale inline refactoring
 
 ## Planning Log

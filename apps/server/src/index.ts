@@ -407,6 +407,7 @@ export const applyPlaceTile = (
       tile,
       placedBy,
       opSeq,
+      revision: opSeq,
     },
   }
 }
@@ -447,6 +448,7 @@ export const applyRemoveTile = (
       tileId: payload.tileId,
       removedBy,
       opSeq,
+      revision: opSeq,
     },
   }
 }
@@ -631,6 +633,10 @@ io.on('connection', (socket) => {
 
     socket.join(sessionId)
     const connectionState = await initializeParticipantPresence(sessionId, clientId, joinedAt)
+    const sessionState = getSessionState(sessionId)
+    sessionState.session = connectionState.snapshot.session
+    sessionState.lastOpSeq = connectionState.snapshot.lastOpSeq
+    sessionState.clients = new Map(connectionState.snapshot.clients.map((client) => [client.clientId, client]))
 
     writeLog('info', 'socket_joined', {
       clientId,
@@ -834,6 +840,31 @@ io.on('connection', (socket) => {
       clientId,
       position: payload.position,
     })
+  })
+
+  socket.on('request_snapshot', async () => {
+    try {
+      const record = await loadSessionReplayRecord(sessionId)
+      const snapshot = {
+        session: record.session,
+        clients: record.clients,
+        lastOpSeq: record.lastOpSeq,
+        revision: record.revision,
+      }
+
+      const sessionState = getSessionState(sessionId)
+      sessionState.session = snapshot.session
+      sessionState.lastOpSeq = snapshot.lastOpSeq
+      sessionState.clients = new Map(snapshot.clients.map((client) => [client.clientId, client]))
+
+      socket.emit('session_snapshot', snapshot)
+    } catch (error) {
+      writeLog('error', 'request_snapshot_failed', {
+        sessionId,
+        clientId,
+        error,
+      })
+    }
   })
 
   // ── Disconnection ──────────────────────────────────────────────────────────

@@ -54,6 +54,23 @@ Gaps and differences identified between research findings and the implementation
   * Plan implements: Phase 3 is gated by a product decision (PD-01) recorded in the plan.
   * Rationale: Incorrect undo semantics in a multi-user canvas are user-visible and hard to reverse; better to defer than ship the wrong behavior.
 
+### Implementation Deviations
+
+* DD-04: Broadcast payloads now include authoritative `revision`
+  * Plan specifies: Broadcast reconcilers retain existing revision because delta events do not carry revision.
+  * Implementation differs: `TilePlacedPayload` and `TileRemovedPayload` now include `revision`, and client reconcilers advance revision on sequenced broadcasts.
+  * Rationale: Fixes passive-client stale revision issue discovered in review; removes avoidable resync round-trip on next local mutation.
+
+* DD-05: Snapshot refresh switched from reconnect side effect to explicit `request_snapshot`
+  * Plan specifies: Replace reconnect path in explicit resync protocol phase.
+  * Implementation differs: Added first-class client event `request_snapshot` and server handler to emit authoritative `session_snapshot` without disconnect/connect churn.
+  * Rationale: Eliminates false `client_left`/`client_joined` churn and aligns with explicit protocol objective.
+
+* DD-06: Snapshot/replay tile shape extended to preserve `placedBy`
+  * Plan specifies: Per-author undo based on `placedBy` from placement events.
+  * Implementation differs: Server snapshot/replay mapping now preserves `placedBy` directly in tile state to keep undo attribution durable across reconnect/resync.
+  * Rationale: Addresses review finding where attribution was lost after snapshot boundaries.
+
 ## Implementation Paths Considered
 
 ### Selected: IP-B — Operation-log + monotonic revision + ack/rebase completion
@@ -87,3 +104,12 @@ Gaps and differences identified between research findings and the implementation
 * WI-03: Presence/pointer multi-client hardening — The `pointer_update` broadcast and `ClientPresence` presence model exist in contracts but are not surfaced in the React layer. Wire `client_joined`, `client_left`, and `pointer_update` events into the client state for real cursor presence. (medium priority)
   * Source: .copilot-tracking/research/2026-07-17/multi-client-session-management-research.md (API and Schema Documentation)
   * Dependency: Phase 1 complete.
+
+* WI-04: Add end-to-end socket protocol test for `request_snapshot` event path (medium priority)
+  * Source: Implementation validation rework notes (post-review)
+  * Dependency: None
+
+## User Decisions
+
+* ID-01: Per-author undo semantics — Option A selected
+  * Rationale: Preserves intuitive author-local undo and matches existing `placedBy` data model.

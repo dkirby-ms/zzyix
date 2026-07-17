@@ -109,6 +109,7 @@ describe('interaction controller', () => {
 
     const duplicate = reconcileSequencedTilePlaced(current, {
       opSeq: 2,
+      revision: 1,
       tile: {
         ...serverTile,
         id: '33333333-3333-4333-8333-333333333333',
@@ -119,6 +120,7 @@ describe('interaction controller', () => {
 
     const gap = reconcileSequencedTilePlaced(current, {
       opSeq: 4,
+      revision: 2,
       tile: {
         ...serverTile,
         id: '44444444-4444-4444-8444-444444444444',
@@ -141,6 +143,7 @@ describe('interaction controller', () => {
     const duplicate = reconcileSequencedTileRemoved(current, {
       tileId: serverTile.id,
       opSeq: 5,
+      revision: 1,
     })
 
     expect(duplicate).toBe(current)
@@ -148,6 +151,7 @@ describe('interaction controller', () => {
     const gap = reconcileSequencedTileRemoved(current, {
       tileId: serverTile.id,
       opSeq: 8,
+      revision: 2,
     })
 
     expect(gap.lastOpSeq).toBe(5)
@@ -328,11 +332,60 @@ describe('interaction controller', () => {
       placedBy: 'client-b',
     }
 
-    const afterA = reconcileSequencedTilePlaced(state, { tile: tileA, opSeq: 1 })
-    const afterB = reconcileSequencedTilePlaced(afterA, { tile: tileB, opSeq: 2 })
+    const afterA = reconcileSequencedTilePlaced(state, { tile: tileA, opSeq: 1, revision: 1 })
+    const afterB = reconcileSequencedTilePlaced(afterA, { tile: tileB, opSeq: 2, revision: 2 })
 
     expect(afterB.tiles[0].placedBy).toBe('client-a')
     expect(afterB.tiles[1].placedBy).toBe('client-b')
+  })
+
+  it('advances revision on sequenced tile_placed broadcasts for passive clients', () => {
+    const state = {
+      tiles: [],
+      lastOpSeq: 0,
+      revision: 0,
+      requiresSnapshot: false,
+    }
+
+    const next = reconcileSequencedTilePlaced(state, {
+      tile: { ...serverTile, placedBy: 'client-a' },
+      opSeq: 1,
+      revision: 1,
+    })
+
+    expect(next.lastOpSeq).toBe(1)
+    expect(next.revision).toBe(1)
+    expect(next.tiles[0].placedBy).toBe('client-a')
+  })
+
+  it('advances revision on sequenced tile_removed broadcasts for passive clients', () => {
+    const state = {
+      tiles: [{ ...serverTile, placedBy: 'client-a' }],
+      lastOpSeq: 1,
+      revision: 1,
+      requiresSnapshot: false,
+    }
+
+    const next = reconcileSequencedTileRemoved(state, {
+      tileId: serverTile.id,
+      opSeq: 2,
+      revision: 2,
+    })
+
+    expect(next.tiles).toHaveLength(0)
+    expect(next.lastOpSeq).toBe(2)
+    expect(next.revision).toBe(2)
+  })
+
+  it('keeps placedBy through snapshot application for reconnect/resync undo attribution', () => {
+    const snapshotTile = { ...serverTile, placedBy: 'client-a' }
+    const state = applySequencedSnapshot({
+      tiles: [snapshotTile],
+      lastOpSeq: 5,
+      revision: 5,
+    })
+
+    expect(state.tiles[0].placedBy).toBe('client-a')
   })
 
   it('filtering tiles by placedBy returns only that client\'s tiles', () => {

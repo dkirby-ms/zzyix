@@ -16,11 +16,13 @@ export type SequencedSnapshot = {
 export type SequencedTilePlaced = {
   tile: TileInstance
   opSeq: number
+  revision: number
 }
 
 export type SequencedTileRemoved = {
   tileId: string
   opSeq: number
+  revision: number
 }
 
 export type SequencedTilesState = {
@@ -127,7 +129,7 @@ export const reconcileSequencedTilePlaced = (
   return {
     tiles: [...state.tiles.filter((tile) => tile.id !== payload.tile.id), payload.tile],
     lastOpSeq: payload.opSeq,
-    revision: state.revision,
+    revision: payload.revision,
     requiresSnapshot: false,
   }
 }
@@ -150,7 +152,7 @@ export const reconcileSequencedTileRemoved = (
   return {
     tiles: state.tiles.filter((tile) => tile.id !== payload.tileId),
     lastOpSeq: payload.opSeq,
-    revision: state.revision,
+    revision: payload.revision,
     requiresSnapshot: false,
   }
 }

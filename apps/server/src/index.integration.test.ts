@@ -41,12 +41,14 @@ describe('authoritative snapshot reconciliation', () => {
       session: state.session,
       clients: [...state.clients.values()],
       lastOpSeq: state.lastOpSeq,
+      revision: state.lastOpSeq,
     }
 
     expect(snapshot.session.id).toBe(sessionId)
     expect(snapshot.session.tiles).toHaveLength(1)
     expect(snapshot.clients).toEqual([{ clientId: 'client-1', joinedAt }])
     expect(snapshot.lastOpSeq).toBe(1)
+    expect(snapshot.revision).toBe(1)
   })
 
   it('reconnect snapshot reflects latest canonical session state', () => {
@@ -77,12 +79,14 @@ describe('authoritative snapshot reconciliation', () => {
       session: reconnectState.session,
       clients: [...reconnectState.clients.values()],
       lastOpSeq: reconnectState.lastOpSeq,
+      revision: reconnectState.lastOpSeq,
     }
 
     expect(reconnectSnapshot.session.id).toBe(sessionId)
     expect(reconnectSnapshot.session.tiles).toHaveLength(1)
     expect(reconnectSnapshot.clients).toEqual([{ clientId: 'client-a', joinedAt: 15 }])
     expect(reconnectSnapshot.lastOpSeq).toBe(1)
+    expect(reconnectSnapshot.revision).toBe(1)
   })
 
   it('initializes participant presence from persisted replay state', async () => {
@@ -92,6 +96,7 @@ describe('authoritative snapshot reconciliation', () => {
         session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
         clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
         lastOpSeq: 3,
+        revision: 4,
         snapshotOpSeq: 3,
         replayedOperations: [],
       }),
@@ -109,6 +114,7 @@ describe('authoritative snapshot reconciliation', () => {
         session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
         clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
         lastOpSeq: 3,
+        revision: 4,
       },
     })
   })
@@ -195,7 +201,7 @@ describe('authoritative snapshot reconciliation', () => {
       revision: 7,
       session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
       ack: { removed: true as const, opSeq: 12 },
-      event: { tileId: '11111111-1111-4111-8111-111111111111', removedBy: 'client-a', opSeq: 12 },
+      event: { tileId: '11111111-1111-4111-8111-111111111111', removedBy: 'client-a', opSeq: 12, revision: 7 },
     }
 
     const replayRemoval = {
@@ -229,6 +235,7 @@ describe('multi-client collaboration', () => {
       session: { id: sessionId, tiles: [], createdAt: 10, updatedAt: 20 },
       clients: [],
       lastOpSeq: 0,
+      revision: 0,
       snapshotOpSeq: 0,
       replayedOperations: [],
     }
@@ -279,7 +286,85 @@ describe('multi-client collaboration', () => {
       expect(result.event.opSeq).toBe(result.opSeq)
       expect(result.event.placedBy).toBe('client-a')
       expect(result.event.tile.id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+      expect(result.event.revision).toBe(result.ack.rejected ? -1 : result.ack.newRevision)
     }
+  })
+
+  it('updates passive client revision from peer broadcast revision payload', () => {
+    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+
+    const peerPlacement = applyPlaceTile(
+      state,
+      {
+        tileId: '99999999-9999-4999-8999-999999999999',
+        shape: 'square',
+        color: '#abc',
+        material: 'ceramic',
+        transform: { position: vec2(0, 0), rotation: 0 },
+      },
+      'client-a',
+    )
+
+    expect(peerPlacement.ack.rejected).toBe(false)
+    if (!peerPlacement.ack.rejected && peerPlacement.event) {
+      expect(peerPlacement.event.revision).toBe(peerPlacement.ack.newRevision)
+      const passiveClientRevision = peerPlacement.event.revision
+      expect(passiveClientRevision).toBe(1)
+    }
+  })
+
+  it('serves explicit snapshot request without reconnect side effects', async () => {
+    const sessionId = nextSessionId()
+    const repository = {
+      markParticipantJoined: vi.fn(),
+      markParticipantLeft: vi.fn(),
+      listActiveParticipants: vi.fn(),
+      loadSessionReplayRecord: vi.fn().mockResolvedValue({
+        session: { id: sessionId, tiles: [], createdAt: 10, updatedAt: 20 },
+        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
+        lastOpSeq: 2,
+        revision: 2,
+        snapshotOpSeq: 2,
+        replayedOperations: [],
+      }),
+    }
+
+    const snapshot = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repository)
+
+    expect(repository.loadSessionReplayRecord).toHaveBeenCalledTimes(1)
+    expect(snapshot.snapshot.lastOpSeq).toBe(2)
+    expect(snapshot.snapshot.revision).toBe(2)
+  })
+
+  it('preserves placedBy through replay snapshot for per-author undo after reconnect', async () => {
+    const sessionId = nextSessionId()
+    const replayTile = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      shape: 'square' as const,
+      color: '#abc',
+      material: 'ceramic' as const,
+      transform: { position: vec2(0, 0), rotation: 0 },
+      createdAt: 10,
+      placedBy: 'client-a',
+    }
+
+    const repository = {
+      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
+      markParticipantLeft: vi.fn(),
+      listActiveParticipants: vi.fn(),
+      loadSessionReplayRecord: vi.fn().mockResolvedValue({
+        session: { id: sessionId, tiles: [replayTile], createdAt: 10, updatedAt: 20 },
+        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
+        lastOpSeq: 1,
+        revision: 1,
+        snapshotOpSeq: 1,
+        replayedOperations: [],
+      }),
+    }
+
+    const result = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repository)
+
+    expect(result.snapshot.session.tiles[0].placedBy).toBe('client-a')
   })
 
   it('concurrent placements on non-overlapping positions both succeed and broadcast', () => {

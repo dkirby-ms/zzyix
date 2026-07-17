@@ -52,6 +52,7 @@ export type TileInstance = {
   material: MaterialVariant
   transform: Transform2D
   createdAt: number
+  placedBy?: string
 }
 
 // ─── Session ──────────────────────────────────────────────────────────────────
@@ -272,12 +273,14 @@ export type TilePlacedPayload = {
   tile: TileInstance
   placedBy: string
   opSeq: number
+  revision: number
 }
 
 export type TileRemovedPayload = {
   tileId: string
   removedBy: string
   opSeq: number
+  revision: number
 }
 
 export type PointerUpdatePayload = {
@@ -308,6 +311,8 @@ export interface ClientToServerEvents {
   place_tile: (payload: PlaceTilePayload, ack: (response: PlaceTileAck) => void) => void
   /** Remove by authoritative tileId; server responds via acknowledgement. */
   remove_tile: (payload: RemoveTilePayload, ack: (response: RemoveTileAck) => void) => void
+  /** Request an authoritative snapshot without reconnecting the socket. */
+  request_snapshot: () => void
   /** Fire-and-forget cursor position for collaborative presence. */
   pointer_move: (payload: PointerMovePayload) => void
 }

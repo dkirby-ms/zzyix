@@ -105,6 +105,7 @@ const mapTile = (row: typeof tiles.$inferSelect): TileInstance => ({
     rotation: row.rotation,
     mirrored: row.mirrored,
   },
+  placedBy: row.placedBy ?? undefined,
   createdAt: toMillis(row.createdAt),
 })
 
@@ -153,7 +154,8 @@ const isTileInstance = (value: unknown): value is TileInstance => {
     typeof position.x === 'number' &&
     typeof position.y === 'number' &&
     typeof transform.rotation === 'number' &&
-    (transform.mirrored === undefined || typeof transform.mirrored === 'boolean')
+    (transform.mirrored === undefined || typeof transform.mirrored === 'boolean') &&
+    (value.placedBy === undefined || typeof value.placedBy === 'string')
   )
 }
 
@@ -195,6 +197,7 @@ const applyOperationToTiles = (tilesState: TileInstance[], operation: PersistedO
       color: operation.payload.color,
       material: operation.payload.material,
       transform: operation.payload.transform,
+      placedBy: operation.clientId,
       createdAt: operation.createdAt,
     }
 
@@ -480,6 +483,7 @@ export const persistTilePlacement = async (params: {
           tile: mapTile(replayedTile),
           placedBy,
           opSeq: replayResponse.opSeq,
+          revision: currentRevision,
         },
       }
     }
@@ -536,7 +540,7 @@ export const persistTilePlacement = async (params: {
         revision: currentRevision,
         session: mapSession(canvas, tileRows),
         ack: { ...replayAck, idempotent: true },
-        event: { tile: replayedTile, placedBy, opSeq: priorPlacement.opSeq },
+        event: { tile: replayedTile, placedBy, opSeq: priorPlacement.opSeq, revision: currentRevision },
       }
     }
 
@@ -595,7 +599,7 @@ export const persistTilePlacement = async (params: {
       revision: canvas.version,
       session,
       ack: { placed: placedTile, rejected: false, opSeq },
-      event: { tile: placedTile, placedBy, opSeq },
+      event: { tile: placedTile, placedBy, opSeq, revision: canvas.version },
     }
   })
 }
@@ -685,7 +689,7 @@ export const persistTileRemoval = async (params: {
         revision: currentRevision,
         session: mapSession(canvas, tileRows),
         ack: { removed: true, opSeq: existingIdempotency.response.opSeq, idempotent: true },
-        event: { tileId: payload.tileId, removedBy, opSeq: existingIdempotency.response.opSeq },
+        event: { tileId: payload.tileId, removedBy, opSeq: existingIdempotency.response.opSeq, revision: currentRevision },
       }
     }
 
@@ -728,7 +732,7 @@ export const persistTileRemoval = async (params: {
           revision: currentRevision,
           session: mapSession(canvas, tileRows),
           ack: { ...replayAck, idempotent: true },
-          event: { tileId: payload.tileId, removedBy, opSeq: priorRemoval.opSeq },
+          event: { tileId: payload.tileId, removedBy, opSeq: priorRemoval.opSeq, revision: currentRevision },
         }
       }
 
@@ -784,7 +788,7 @@ export const persistTileRemoval = async (params: {
       revision: canvas.version,
       session: mapSession(canvas, tileRows),
       ack: { removed: true, opSeq },
-      event: { tileId: payload.tileId, removedBy, opSeq },
+      event: { tileId: payload.tileId, removedBy, opSeq, revision: canvas.version },
     }
   })
 }
