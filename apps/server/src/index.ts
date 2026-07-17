@@ -2,7 +2,6 @@ import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
-import { randomUUID } from 'node:crypto'
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -74,8 +73,22 @@ export const isPlaceTilePayload = (payload: unknown): payload is PlaceTilePayloa
     return false
   }
 
+  if (typeof payload.tileId !== 'string' || !isValidTileId(payload.tileId)) {
+    return false
+  }
+
   if (typeof payload.color !== 'string') {
     return false
+  }
+
+  if (payload.expectedRevision !== undefined) {
+    if (!isFiniteNumber(payload.expectedRevision) || !Number.isInteger(payload.expectedRevision)) {
+      return false
+    }
+
+    if (payload.expectedRevision < 0) {
+      return false
+    }
   }
 
   if (!TILE_SHAPES.has(payload.shape as PlaceTilePayload['shape'])) {
@@ -112,7 +125,21 @@ export const isRemoveTilePayload = (payload: unknown): payload is RemoveTilePayl
     return false
   }
 
-  return typeof payload.tileId === 'string'
+  if (typeof payload.tileId !== 'string') {
+    return false
+  }
+
+  if (payload.expectedRevision !== undefined) {
+    if (!isFiniteNumber(payload.expectedRevision) || !Number.isInteger(payload.expectedRevision)) {
+      return false
+    }
+
+    if (payload.expectedRevision < 0) {
+      return false
+    }
+  }
+
+  return true
 }
 
 const isPointerMovePayload = (payload: unknown): payload is { position: { x: number; y: number } } => {
@@ -296,7 +323,7 @@ export const applyPlaceTile = (
   }
 
   const tile = {
-    id: randomUUID(),
+    id: payload.tileId,
     ...payload,
     createdAt: Date.now(),
   }
@@ -502,6 +529,27 @@ io.on('connection', (socket) => {
 
     try {
       const record = await loadSessionRecord(sessionId)
+
+      if (payload.expectedRevision !== undefined) {
+        if (payload.expectedRevision < record.revision) {
+          invokeAckSafely(ack, {
+            placed: null,
+            rejected: true,
+            reason: 'STALE_REVISION',
+          })
+          return
+        }
+
+        if (payload.expectedRevision > record.revision) {
+          invokeAckSafely(ack, {
+            placed: null,
+            rejected: true,
+            reason: 'OUT_OF_ORDER_REVISION',
+          })
+          return
+        }
+      }
+
       const validation = validatePlacement(payload.shape, payload.transform, record.session.tiles, defaultBounds)
 
       if (!validation.valid) {
@@ -521,7 +569,9 @@ io.on('connection', (socket) => {
 
       invokeAckSafely(ack, result.ack)
 
-      if (result.event && 'tile' in result.event && 'opSeq' in result) {
+      // Retries should acknowledge deterministically but must not rebroadcast
+      // already applied operations.
+      if (result.event && 'tile' in result.event && 'opSeq' in result && !result.ack.idempotent) {
         io.to(sessionId).emit('tile_placed', result.event)
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }
@@ -544,6 +594,20 @@ io.on('connection', (socket) => {
     }
 
     try {
+      const record = await loadSessionRecord(sessionId)
+
+      if (payload.expectedRevision !== undefined) {
+        if (payload.expectedRevision < record.revision) {
+          invokeAckSafely(ack, { removed: false, reason: 'STALE_REVISION' })
+          return
+        }
+
+        if (payload.expectedRevision > record.revision) {
+          invokeAckSafely(ack, { removed: false, reason: 'OUT_OF_ORDER_REVISION' })
+          return
+        }
+      }
+
       const result = await persistTileRemoval({
         sessionId,
         payload,
@@ -552,7 +616,9 @@ io.on('connection', (socket) => {
 
       invokeAckSafely(ack, result.ack)
 
-      if (result.event && 'tileId' in result.event && 'opSeq' in result) {
+      // Duplicate remove replays reuse opSeq and ack, but should not emit a
+      // second tile_removed broadcast.
+      if (result.event && 'tileId' in result.event && 'opSeq' in result && !result.ack.idempotent) {
         io.to(sessionId).emit('tile_removed', result.event)
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }

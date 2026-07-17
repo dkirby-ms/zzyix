@@ -5,7 +5,12 @@ const DEFAULT_RETENTION_CRON = process.env.RETENTION_CRON ?? '0 * * * *'
 const DEFAULT_OPERATION_RETENTION_MS = Number(process.env.OPERATION_RETENTION_MS ?? 7 * 24 * 60 * 60 * 1000)
 const DEFAULT_SNAPSHOT_RETENTION_MS = Number(process.env.SNAPSHOT_RETENTION_MS ?? 30 * 24 * 60 * 60 * 1000)
 
-export const runRetentionPass = async (): Promise<{ deletedOperations: number; deletedSnapshots: number }> =>
+export const runRetentionPass = async (): Promise<{
+  deletedOperations: number
+  deletedSnapshots: number
+  deletedIdempotencyKeys: number
+}> =>
+  // Retention prunes snapshots, operation logs, and expired idempotency keys.
   pruneRetention({
     operationCutoffMs: DEFAULT_OPERATION_RETENTION_MS,
     snapshotCutoffMs: DEFAULT_SNAPSHOT_RETENTION_MS,

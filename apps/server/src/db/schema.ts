@@ -37,6 +37,7 @@ export const canvases = pgTable(
   'canvases',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    version: integer('version').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -109,6 +110,24 @@ export const operationLog = pgTable(
       'operation_log_op_type_check',
       sql`${table.opType} in (${asSqlLiteralList(operationTypeValues)})`,
     ),
+  }),
+)
+
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    key: text('key').notNull(),
+    clientId: text('client_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    statusCode: integer('status_code').notNull(),
+    response: jsonb('response').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.key, table.clientId], name: 'idempotency_keys_pk' }),
+    expiresAtIndex: index('idempotency_keys_expires_at_idx').on(table.expiresAt),
+    clientKeyUnique: unique('idempotency_keys_client_id_key_unique').on(table.clientId, table.key),
   }),
 )
 
