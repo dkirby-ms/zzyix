@@ -4,7 +4,7 @@ param location string
 @description('Name prefix for network resources.')
 param namePrefix string
 
-resource virtualNetwork 'Microsoft.Network/virtualNetworks@2022-07-01' = {
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2025-07-01' = {
   name: '${namePrefix}-vnet'
   location: location
   properties: {

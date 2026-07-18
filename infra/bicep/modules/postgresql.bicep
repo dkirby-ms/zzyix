@@ -21,13 +21,13 @@ var serverName = '${namePrefix}-psql'
 
 // Private DNS zone is required for PostgreSQL Flexible Server VNet integration.
 // Name must be in the form <unique>.private.postgres.database.azure.com.
-resource privateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
+resource privateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
   name: '${serverName}.private.postgres.database.azure.com'
   location: 'global'
 }
 
 // Link the DNS zone to the VNet so ACA containers can resolve the server hostname
-resource privateDnsZoneVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+resource privateDnsZoneVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
   parent: privateDnsZone
   name: '${namePrefix}-dns-vnet-link'
   location: 'global'
@@ -46,7 +46,7 @@ resource privateDnsZoneVnetLink 'Microsoft.Network/privateDnsZones/virtualNetwor
 //   HA: Disabled (no standby replica)
 //   Geo-backup: Disabled (dev environment only)
 //   Network: Private access via VNet delegation — no public endpoint
-resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2022-12-01' = {
+resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2025-08-01' = {
   name: serverName
   location: location
   sku: {
