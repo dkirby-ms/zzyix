@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPlaceTile,
   applyRemoveTile,
+  buildListSessionsResponse,
   cleanupSessions,
   createAuthoritativeSessionState,
   getSessionState,
@@ -11,6 +12,7 @@ import {
   invokeAckSafely,
   isPlaceTilePayload,
   isRemoveTilePayload,
+  isOriginAllowed,
   resolveCorsOrigin,
   shouldCleanupSession,
   toRejectReason,
@@ -18,6 +20,30 @@ import {
 import { vec2 } from './domain/math2d'
 
 describe('authoritative handler semantics', () => {
+  it('builds lobby summary metadata with deterministic V1 fallbacks', () => {
+    const payload = buildListSessionsResponse([
+      { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', participantCount: 2 },
+      { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', participantCount: 0 },
+    ])
+
+    expect(payload).toEqual({
+      sessions: [
+        {
+          id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          displayName: 'Canvas aaaaaaaa',
+          participantCount: 2,
+          canvasSize: { width: 10.4, height: 6.8 },
+        },
+        {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          displayName: 'Canvas bbbbbbbb',
+          participantCount: 0,
+          canvasSize: { width: 10.4, height: 6.8 },
+        },
+      ],
+    })
+  })
+
   it('maps placement solver reject reasons to a closed deterministic set', () => {
     expect(toRejectReason('out-of-bounds (correction 0.123)')).toBe('OUT_OF_BOUNDS')
     expect(toRejectReason('overlap (depth 0.456)')).toBe('OVERLAP')
@@ -273,6 +299,26 @@ describe('authoritative handler semantics', () => {
       'https://b.example.com',
     ])
     expect(resolveCorsOrigin('*, https://b.example.com')).toBe('https://b.example.com')
+  })
+
+  it('parses multiple configured CORS origins for request-origin matching', () => {
+    const allowed = resolveCorsOrigin('https://a.example.com, https://b.example.com')
+
+    expect(Array.isArray(allowed)).toBe(true)
+    expect(allowed).toEqual(['https://a.example.com', 'https://b.example.com'])
+  })
+
+  it('matches request origin only when present in allow-list', () => {
+    const allowList = resolveCorsOrigin('https://a.example.com, https://b.example.com')
+
+    expect(isOriginAllowed('https://a.example.com', allowList)).toBe(true)
+    expect(isOriginAllowed('https://b.example.com', allowList)).toBe(true)
+    expect(isOriginAllowed('https://c.example.com', allowList)).toBe(false)
+  })
+
+  it('does not match partial origin strings', () => {
+    expect(isOriginAllowed('https://good.example.com.evil.net', 'https://good.example.com')).toBe(false)
+    expect(isOriginAllowed('https://good.example.com', 'https://good.example.com')).toBe(true)
   })
 
   it('cleans up empty sessions immediately and stale sessions deterministically', () => {

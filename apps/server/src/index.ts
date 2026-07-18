@@ -18,10 +18,12 @@ import type {
   RemoveTileAck,
   TilePlacedPayload,
   TileRemovedPayload,
+  ListSessionsResponse,
 } from './contracts'
 import {
   closeDatabaseBundle,
   getDatabaseBundle,
+  listSessionSummaries,
   listActiveParticipants,
   loadSessionReplayRecord,
   loadSessionRecord,
@@ -31,6 +33,7 @@ import {
   persistTilePlacement,
   persistTileRemoval,
 } from './db'
+import type { SessionSummaryRecord } from './db/repository'
 import { defaultBounds, validatePlacement } from './domain/placementSolver'
 import { startRetentionJob } from './jobs/retention'
 
@@ -60,6 +63,20 @@ const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'gla
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_SESSION_STALE_MS = 30 * 60 * 1000
+const CANVAS_WIDTH = defaultBounds.maxX - defaultBounds.minX
+const CANVAS_HEIGHT = defaultBounds.maxY - defaultBounds.minY
+
+export const buildListSessionsResponse = (summaries: SessionSummaryRecord[]): ListSessionsResponse => ({
+  sessions: summaries.map((summary) => ({
+    id: summary.id,
+    displayName: `Canvas ${summary.id.slice(0, 8)}`,
+    participantCount: summary.participantCount,
+    canvasSize: {
+      width: CANVAS_WIDTH,
+      height: CANVAS_HEIGHT,
+    },
+  })),
+})
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -238,6 +255,14 @@ export const resolveCorsOrigin = (rawOrigin: string | undefined): string | strin
   }
 
   return configured
+}
+
+export const isOriginAllowed = (requestOrigin: string, allowedOrigin: string | string[]): boolean => {
+  if (Array.isArray(allowedOrigin)) {
+    return allowedOrigin.includes(requestOrigin)
+  }
+
+  return allowedOrigin === requestOrigin
 }
 
 export const toRejectReason = (reason: string): PlaceTileRejectReason => {
@@ -506,16 +531,24 @@ const httpServer = createServer(app)
 app.use(express.json())
 
 // CORS middleware for HTTP endpoints
-app.use((_req, res, next) => {
-  const origin = resolveCorsOrigin(process.env.CORS_ORIGIN)
-  const corsOrigin = Array.isArray(origin) ? origin[0] : origin
+app.use((req, res, next) => {
+  const configuredOrigin = resolveCorsOrigin(process.env.CORS_ORIGIN)
+  const requestOrigin = req.header('origin')
+  const corsOrigin = requestOrigin
+    && requestOrigin !== 'null'
+    && isOriginAllowed(requestOrigin, configuredOrigin)
+    ? requestOrigin
+    : null
 
-  res.header('Access-Control-Allow-Origin', corsOrigin)
+  if (corsOrigin) {
+    res.header('Access-Control-Allow-Origin', corsOrigin)
+    res.header('Vary', 'Origin')
+    res.header('Access-Control-Allow-Credentials', 'true')
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.header('Access-Control-Allow-Headers', 'Content-Type')
-  res.header('Access-Control-Allow-Credentials', 'true')
 
-  if (_req.method === 'OPTIONS') {
+  if (req.method === 'OPTIONS') {
     return res.sendStatus(200)
   }
 
@@ -541,6 +574,18 @@ app.use((req, res, next) => {
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', version: '0.0.0' })
+})
+
+app.get('/sessions', async (_req, res) => {
+  try {
+    const summaries = await listSessionSummaries()
+    const response = buildListSessionsResponse(summaries)
+
+    res.status(200).json(response)
+  } catch (error) {
+    writeLog('error', 'session_list_failed', { error })
+    res.status(500).json({ error: 'Failed to list sessions' })
+  }
 })
 
 // Session creation endpoint
@@ -593,16 +638,19 @@ configureRealtimeAdapter()
 io.use((socket, next) => {
   const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
 
-  console.log('[Socket.IO] Incoming connection:', {
-    auth: auth,
+  writeLog('debug', 'socket_auth_received', {
     authType: typeof auth,
-    hasSessionId: !!auth?.sessionId,
-    hasClientId: !!auth?.clientId,
+    hasSessionId: Boolean(auth?.sessionId),
+    hasClientId: Boolean(auth?.clientId),
   })
 
   if (!auth || !auth.sessionId || !auth.clientId) {
-    const errorMsg = `Missing sessionId or clientId in auth: ${JSON.stringify(auth)}`
-    console.error('[Socket.IO] Auth validation failed:', errorMsg)
+    const errorMsg = 'Missing sessionId or clientId in auth payload'
+    writeLog('warn', 'socket_auth_validation_failed', {
+      authType: typeof auth,
+      hasSessionId: Boolean(auth?.sessionId),
+      hasClientId: Boolean(auth?.clientId),
+    })
     return next(new Error(errorMsg))
   }
 
@@ -613,11 +661,6 @@ io.use((socket, next) => {
   writeLog('info', 'socket_connecting', {
     clientId: auth.clientId,
     sessionId: auth.sessionId,
-  })
-
-  console.log('[Socket.IO] Auth validated successfully:', {
-    sessionId: auth.sessionId,
-    clientId: auth.clientId,
   })
 
   next()

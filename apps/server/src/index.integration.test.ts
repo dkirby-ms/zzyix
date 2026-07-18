@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyPlaceTile,
+  buildListSessionsResponse,
   createAuthoritativeSessionState,
   finalizeParticipantPresence,
   getSessionState,
@@ -229,6 +230,39 @@ describe('authoritative snapshot reconciliation', () => {
 })
 
 describe('multi-client collaboration', () => {
+  it('maps repository session summaries into lobby metadata with canonical canvas size', () => {
+    const payload = buildListSessionsResponse([
+      { id: '11111111-1111-4111-8111-111111111111', participantCount: 3 },
+      { id: '22222222-2222-4222-8222-222222222222', participantCount: 1 },
+    ])
+
+    expect(payload).toEqual({
+      sessions: [
+        {
+          id: '11111111-1111-4111-8111-111111111111',
+          displayName: 'Canvas 11111111',
+          participantCount: 3,
+          canvasSize: { width: 10.4, height: 6.8 },
+        },
+        {
+          id: '22222222-2222-4222-8222-222222222222',
+          displayName: 'Canvas 22222222',
+          participantCount: 1,
+          canvasSize: { width: 10.4, height: 6.8 },
+        },
+      ],
+    })
+  })
+
+  it('preserves participant counts from summary source records', () => {
+    const payload = buildListSessionsResponse([
+      { id: '33333333-3333-4333-8333-333333333333', participantCount: 0 },
+      { id: '44444444-4444-4444-8444-444444444444', participantCount: 7 },
+    ])
+
+    expect(payload.sessions.map((session) => session.participantCount)).toEqual([0, 7])
+  })
+
   it('two clients joining the same session receive identical snapshot tiles and revision', async () => {
     const sessionId = nextSessionId()
     const replayRecord = {
