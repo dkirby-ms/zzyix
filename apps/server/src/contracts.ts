@@ -74,9 +74,6 @@ export type ClientPresence = {
 //
 // POST   /sessions                          → CreateSessionResponse
 // GET    /sessions                          → ListSessionsResponse
-// GET    /sessions/:sessionId               → GetSessionResponse
-// POST   /sessions/:sessionId/tiles         → PlaceTileResponse
-// DELETE /sessions/:sessionId/tiles/:tileId → 204 No Content
 //
 // All error responses use ApiError.
 
@@ -139,7 +136,9 @@ export type ApiError = {
 
 // POST /sessions
 export type CreateSessionResponse = {
-  session: Session
+  session: {
+    id: string
+  }
 }
 
 export type CanvasSize = {
@@ -158,16 +157,6 @@ export type SessionSummary = {
 export type ListSessionsResponse = {
   sessions: SessionSummary[]
 }
-
-// GET /sessions/:sessionId
-export type GetSessionResponse = {
-  session: Session
-  clients: ClientPresence[]
-}
-
-// POST /sessions/:sessionId/tiles
-// Uses PlaceTilePayload (request body) and PlaceTileAck (response) — defined
-// in the Socket.IO event payload types below, shared between REST and WS.
 
 // ─── Socket.IO event contracts ────────────────────────────────────────────────
 //

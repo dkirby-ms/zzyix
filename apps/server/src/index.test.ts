@@ -12,6 +12,7 @@ import {
   invokeAckSafely,
   isPlaceTilePayload,
   isRemoveTilePayload,
+  isOriginAllowed,
   resolveCorsOrigin,
   shouldCleanupSession,
   toRejectReason,
@@ -298,6 +299,26 @@ describe('authoritative handler semantics', () => {
       'https://b.example.com',
     ])
     expect(resolveCorsOrigin('*, https://b.example.com')).toBe('https://b.example.com')
+  })
+
+  it('parses multiple configured CORS origins for request-origin matching', () => {
+    const allowed = resolveCorsOrigin('https://a.example.com, https://b.example.com')
+
+    expect(Array.isArray(allowed)).toBe(true)
+    expect(allowed).toEqual(['https://a.example.com', 'https://b.example.com'])
+  })
+
+  it('matches request origin only when present in allow-list', () => {
+    const allowList = resolveCorsOrigin('https://a.example.com, https://b.example.com')
+
+    expect(isOriginAllowed('https://a.example.com', allowList)).toBe(true)
+    expect(isOriginAllowed('https://b.example.com', allowList)).toBe(true)
+    expect(isOriginAllowed('https://c.example.com', allowList)).toBe(false)
+  })
+
+  it('does not match partial origin strings', () => {
+    expect(isOriginAllowed('https://good.example.com.evil.net', 'https://good.example.com')).toBe(false)
+    expect(isOriginAllowed('https://good.example.com', 'https://good.example.com')).toBe(true)
   })
 
   it('cleans up empty sessions immediately and stale sessions deterministically', () => {

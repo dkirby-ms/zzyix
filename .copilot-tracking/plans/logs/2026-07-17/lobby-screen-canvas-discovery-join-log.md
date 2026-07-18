@@ -16,7 +16,7 @@ None.
   * Implementation differs: Ran `corepack pnpm ...` inside `apps/client`
   * Rationale: repository has no `pnpm-workspace.yaml`, so root filter selection returns no matching project
 
-* DD-02: Client build did not complete due to pre-existing render layer TypeScript errors
+* DD-02: Client build remains blocked by pre-existing render layer TypeScript errors
   * Plan specifies: Validate client build in Phase 1 validation step
   * Implementation differs: Validation run completed with known non-phase blockers remaining
   * Rationale: errors are outside lobby scope and predate phase implementation
@@ -25,6 +25,11 @@ None.
   * Plan specifies: Run pnpm-based validation commands (`pnpm --filter server ...` and `pnpm lint/test`)
   * Implementation differs: Ran npm workspace equivalents from repository root
   * Rationale: `pnpm` binary is unavailable in environment; npm workspace scripts are functionally equivalent for current package setup
+
+* DD-04: Workspace test command with forwarded `--run` emits npm warning
+  * Plan specifies: Execute workspace tests as part of full validation
+  * Implementation differs: `npm run test -- --run` is accepted but npm prints `Unknown cli config "--run"` warning
+  * Rationale: npm forwards unknown flag while workspace package tests still execute successfully
 
 ## Implementation Paths Considered
 

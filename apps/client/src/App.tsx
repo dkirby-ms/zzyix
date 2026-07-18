@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { vec2 } from './domain/math2d'
 import { normalizeAngle, quantizeRotation } from './domain/tileGeometry'
 import type { TileShape } from './domain/tileGeometry'
@@ -62,6 +62,7 @@ function App() {
   const [creatingSession, setCreatingSession] = useState(false)
   const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
+  const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
   const clientId = useMemo(() => ensureClientId(), [])
   const serverUrl = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
 
@@ -135,11 +136,11 @@ function App() {
   }, [])
 
   const requestSnapshot = useCallback((): void => {
-    const socket = socketRef.current
+    const socket = socketActionRef.current
     if (!socket) return
 
     socket.emit('request_snapshot')
-  }, [socketRef])
+  }, [])
 
   const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
     setSequencedState(
@@ -196,6 +197,7 @@ function App() {
     onTilePlaced,
     onTileRemoved,
     onResyncRequired,
+    socketActionRef,
   )
 
   useEffect(() => {

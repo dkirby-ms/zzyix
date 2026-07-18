@@ -47,7 +47,7 @@ Implement a lobby-first entry flow that lists available canvases with metadata a
 
 ## Implementation Checklist
 
-### [ ] Implementation Phase 1: Client Lobby Gating and UI
+### [x] Implementation Phase 1: Client Lobby Gating and UI
 
 <!-- parallelizable: true -->
 
@@ -57,7 +57,7 @@ Implement a lobby-first entry flow that lists available canvases with metadata a
   * Details: .copilot-tracking/details/2026-07-17/lobby-screen-canvas-discovery-join-details.md (Lines 32-48)
 * [x] Step 1.3: Implement `LobbyScreen` component and lobby styles
   * Details: .copilot-tracking/details/2026-07-17/lobby-screen-canvas-discovery-join-details.md (Lines 50-67)
-* [ ] Step 1.4: Validate phase changes
+* [x] Step 1.4: Validate phase changes
   * Run lint and build commands for modified files
 
 ### [x] Implementation Phase 2: Server Session Listing and Contract Alignment
@@ -73,7 +73,7 @@ Implement a lobby-first entry flow that lists available canvases with metadata a
 * [x] Step 2.4: Validate phase changes
   * Run lint and build commands for modified files
 
-### [ ] Implementation Phase 3: Validation
+### [x] Implementation Phase 3: Validation
 
 <!-- parallelizable: false -->
 

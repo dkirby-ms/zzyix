@@ -257,6 +257,14 @@ export const resolveCorsOrigin = (rawOrigin: string | undefined): string | strin
   return configured
 }
 
+export const isOriginAllowed = (requestOrigin: string, allowedOrigin: string | string[]): boolean => {
+  if (Array.isArray(allowedOrigin)) {
+    return allowedOrigin.includes(requestOrigin)
+  }
+
+  return allowedOrigin === requestOrigin
+}
+
 export const toRejectReason = (reason: string): PlaceTileRejectReason => {
   if (reason.startsWith('out-of-bounds')) {
     return 'OUT_OF_BOUNDS'
@@ -523,16 +531,22 @@ const httpServer = createServer(app)
 app.use(express.json())
 
 // CORS middleware for HTTP endpoints
-app.use((_req, res, next) => {
-  const origin = resolveCorsOrigin(process.env.CORS_ORIGIN)
-  const corsOrigin = Array.isArray(origin) ? origin[0] : origin
+app.use((req, res, next) => {
+  const configuredOrigin = resolveCorsOrigin(process.env.CORS_ORIGIN)
+  const requestOrigin = req.header('origin')
+  const corsOrigin = requestOrigin && isOriginAllowed(requestOrigin, configuredOrigin)
+    ? requestOrigin
+    : null
 
-  res.header('Access-Control-Allow-Origin', corsOrigin)
+  if (corsOrigin) {
+    res.header('Access-Control-Allow-Origin', corsOrigin)
+    res.header('Vary', 'Origin')
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.header('Access-Control-Allow-Headers', 'Content-Type')
   res.header('Access-Control-Allow-Credentials', 'true')
 
-  if (_req.method === 'OPTIONS') {
+  if (req.method === 'OPTIONS') {
     return res.sendStatus(200)
   }
 
@@ -622,16 +636,19 @@ configureRealtimeAdapter()
 io.use((socket, next) => {
   const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
 
-  console.log('[Socket.IO] Incoming connection:', {
-    auth: auth,
+  writeLog('debug', 'socket_auth_received', {
     authType: typeof auth,
-    hasSessionId: !!auth?.sessionId,
-    hasClientId: !!auth?.clientId,
+    hasSessionId: Boolean(auth?.sessionId),
+    hasClientId: Boolean(auth?.clientId),
   })
 
   if (!auth || !auth.sessionId || !auth.clientId) {
-    const errorMsg = `Missing sessionId or clientId in auth: ${JSON.stringify(auth)}`
-    console.error('[Socket.IO] Auth validation failed:', errorMsg)
+    const errorMsg = 'Missing sessionId or clientId in auth payload'
+    writeLog('warn', 'socket_auth_validation_failed', {
+      authType: typeof auth,
+      hasSessionId: Boolean(auth?.sessionId),
+      hasClientId: Boolean(auth?.clientId),
+    })
     return next(new Error(errorMsg))
   }
 
@@ -642,11 +659,6 @@ io.use((socket, next) => {
   writeLog('info', 'socket_connecting', {
     clientId: auth.clientId,
     sessionId: auth.sessionId,
-  })
-
-  console.log('[Socket.IO] Auth validated successfully:', {
-    sessionId: auth.sessionId,
-    clientId: auth.clientId,
   })
 
   next()

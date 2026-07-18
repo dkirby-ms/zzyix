@@ -20,6 +20,7 @@ export const useSocketConnection = (
   onTilePlaced: (payload: TilePlacedPayload) => void,
   onTileRemoved: (payload: TileRemovedPayload) => void,
   onResyncRequired?: (payload: ResyncRequiredPayload) => void,
+  socketActionRef?: React.MutableRefObject<AppSocket | null>,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
 
@@ -55,6 +56,9 @@ export const useSocketConnection = (
     }
 
     socketRef.current = socket
+    if (socketActionRef) {
+      socketActionRef.current = socket
+    }
 
     return () => {
       socket.off('session_snapshot', onSnapshot)
@@ -65,8 +69,11 @@ export const useSocketConnection = (
       }
       socket.disconnect()
       socketRef.current = null
+      if (socketActionRef) {
+        socketActionRef.current = null
+      }
     }
-  }, [serverUrl, sessionId, clientId, onSnapshot, onTilePlaced, onTileRemoved, onResyncRequired])
+  }, [serverUrl, sessionId, clientId, onSnapshot, onTilePlaced, onTileRemoved, onResyncRequired, socketActionRef])
 
   return socketRef
 }
