@@ -24,6 +24,7 @@ import {
   setStoredSessionId,
   type SessionSummary,
 } from './network/session'
+import { resolveServerUrl } from './network/serverUrl'
 import { useSocketConnection } from './network/useSocketConnection'
 import type {
   PlaceTileAck,
@@ -64,7 +65,7 @@ function App() {
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
   const clientId = useMemo(() => ensureClientId(), [])
-  const serverUrl = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
+  const serverUrl = useMemo(() => resolveServerUrl(), [])
 
   const activeTile: ActiveTile = useMemo(
     () => ({

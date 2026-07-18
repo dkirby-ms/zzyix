@@ -1,4 +1,6 @@
-const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001'
+import { resolveServerUrl } from './serverUrl'
+
+const SERVER_URL = resolveServerUrl()
 const SESSION_STORAGE_KEY = 'zzyix_session_id'
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
 
