@@ -36,15 +36,15 @@ jobs:
 
     steps:
       - name: Check Out
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set Up Docker Buildx
-        uses: docker/setup-buildx-action@v4.2.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
 
       - name: Log In To GHCR
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -52,7 +52,7 @@ jobs:
 
       - name: Extract Docker Metadata
         id: meta
-        uses: docker/metadata-action@v6.2.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
           images: ghcr.io/${{ github.repository }}-${{ matrix.app }}
           tags: |
@@ -63,7 +63,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build And Push Image
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
@@ -106,25 +106,25 @@ jobs:
 
     steps:
       - name: Check Out
-        uses: actions/checkout@v7
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Azure Login
-        uses: azure/login@v3.0.0
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install Container Apps CLI Extension
-        uses: azure/cli@v3.0.0
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
         with:
           inlineScript: |
             az extension add --name containerapp --upgrade --allow-preview true
 
       - name: Deploy Client Container App
-        uses: azure/cli@v3.0.0
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
         with:
           inlineScript: |
             set -euo pipefail
@@ -177,7 +177,7 @@ jobs:
             fi
 
       - name: Resolve Server CORS Origin
-        uses: azure/cli@v3.0.0
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
         with:
           inlineScript: |
             set -euo pipefail
@@ -206,7 +206,7 @@ jobs:
             echo "Resolved SERVER_CORS_ORIGIN from client app ingress FQDN."
 
       - name: Deploy Server Container App
-        uses: azure/cli@v3.0.0
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
         with:
           inlineScript: |
             set -euo pipefail
