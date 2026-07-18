@@ -20,6 +20,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "lint:client": "npm run lint --workspace=apps/client",
     "lint:server": "npm run lint --workspace=apps/server",
+    "lint:commits": "commitlint --from HEAD~20 --to HEAD --verbose",
     "test": "npm run test --workspaces --if-present",
     "test:client": "npm run test --workspace=apps/client",
     "test:server": "npm run test --workspace=apps/server",
@@ -30,6 +31,8 @@
     "release:server": "semantic-release --extends ./.releaserc.server.cjs"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.1.0",
+    "@commitlint/config-conventional": "^20.0.0",
     "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/github": "^11.0.6",
     "@semantic-release/release-notes-generator": "^14.1.0",
