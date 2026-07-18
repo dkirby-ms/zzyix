@@ -181,7 +181,7 @@ jobs:
           inlineScript: |
             set -euo pipefail
 
-            if [[ -n "${CONFIGURED_CORS_ORIGIN}" ]]; then
+            if [[ -n "${CONFIGURED_CORS_ORIGIN:-}" ]]; then
               echo "SERVER_CORS_ORIGIN_EFFECTIVE=${CONFIGURED_CORS_ORIGIN}" >> "${GITHUB_ENV}"
               echo "Using configured SERVER_CORS_ORIGIN from GitHub environment variable."
               exit 0
@@ -232,11 +232,11 @@ jobs:
 
             if az containerapp show \
               --resource-group "${RESOURCE_GROUP}" \
-              --name "${CLIENT_CONTAINER_APP_NAME}" >/dev/null 2>&1; then
+              --name "${SERVER_CONTAINER_APP_NAME}" >/dev/null 2>&1; then
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
                 az containerapp registry set \
                   --resource-group "${RESOURCE_GROUP}" \
-                  --name "${CLIENT_CONTAINER_APP_NAME}" \
+                  --name "${SERVER_CONTAINER_APP_NAME}" \
                   --server "ghcr.io" \
                   --username "${{ secrets.AZURE_GHCR_USERNAME }}" \
                   --password "${{ secrets.AZURE_GHCR_PASSWORD }}"
