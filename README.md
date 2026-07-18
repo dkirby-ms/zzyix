@@ -64,3 +64,40 @@ npm test
 This is a learning-first repository, not a production system.
 
 Expect rough edges, experiments, and occasional pivots in architecture or workflow as we test ideas and improve both product and process.
+
+## Staging CD Environment Bootstrap
+
+Use the GH CLI helper to create/update GitHub Environment variables and
+secrets required by `.github/workflows/cd.yml`.
+
+1. Fill in values in `scripts/gh-vars.env`.
+2. Run:
+
+```bash
+./scripts/bootstrap-cd-environment.sh --repo dkirby-ms/zzyix --environment staging
+```
+
+By default the script reads `scripts/gh-vars.env`. You can override with
+`--env-file <path>`.
+
+Required keys in the env file:
+
+```bash
+AZURE_CLIENT_ID
+AZURE_TENANT_ID
+AZURE_SUBSCRIPTION_ID
+AZURE_RESOURCE_GROUP
+AZURE_CONTAINERAPPS_ENVIRONMENT
+AZURE_LOCATION
+SERVER_CONTAINER_APP_NAME
+CLIENT_CONTAINER_APP_NAME
+SERVER_CORS_ORIGIN
+SERVER_DATABASE_URL
+```
+
+Optional keys in the env file:
+
+```bash
+AZURE_GHCR_USERNAME
+AZURE_GHCR_PASSWORD
+```
