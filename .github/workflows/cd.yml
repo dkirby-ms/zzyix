@@ -269,8 +269,7 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
                 --image "${SERVER_IMAGE}" \
-                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
+                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -288,7 +287,16 @@ jobs:
                 --image "${SERVER_IMAGE}" \
                 --target-port "${SERVER_TARGET_PORT}" \
                 --ingress external \
-                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
+                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
+
+            az containerapp secret set \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${SERVER_CONTAINER_APP_NAME}" \
+              --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
+
+            az containerapp update \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${SERVER_CONTAINER_APP_NAME}" \
+              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url"
