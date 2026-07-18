@@ -169,7 +169,6 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${CLIENT_CONTAINER_APP_NAME}" \
                 --environment "${CONTAINERAPPS_ENVIRONMENT}" \
-                --location "${AZURE_LOCATION}" \
                 --image "${CLIENT_IMAGE}" \
                 --target-port "${CLIENT_TARGET_PORT}" \
                 --ingress external \
@@ -263,7 +262,6 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
                 --environment "${CONTAINERAPPS_ENVIRONMENT}" \
-                --location "${AZURE_LOCATION}" \
                 --image "${SERVER_IMAGE}" \
                 --target-port "${SERVER_TARGET_PORT}" \
                 --ingress external \
