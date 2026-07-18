@@ -19,6 +19,14 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2025-07-01' = {
         name: 'aca-infrastructure'
         properties: {
           addressPrefix: '10.0.0.0/21'
+          delegations: [
+            {
+              name: 'aca-delegation'
+              properties: {
+                serviceName: 'Microsoft.App/environments'
+              }
+            }
+          ]
         }
       }
       {
