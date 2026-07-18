@@ -27,6 +27,7 @@ resource privateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
 }
 
 // Link the DNS zone to the VNet so ACA containers can resolve the server hostname
+// Note: We reference vnetId parameter which implicitly depends on network module completion
 resource privateDnsZoneVnetLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
   parent: privateDnsZone
   name: '${namePrefix}-dns-vnet-link'

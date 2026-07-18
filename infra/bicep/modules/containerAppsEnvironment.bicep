@@ -23,7 +23,7 @@ resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2025-07
 // Note: logAnalyticsConfiguration requires the workspace shared key because the
 // Microsoft.App/managedEnvironments API has no Managed Identity path for this property.
 // listKeys() is called inline and is never surfaced in deployment outputs.
-resource acaEnvironment 'Microsoft.App/managedEnvironments@2026-01-01' = {
+resource acaEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: '${namePrefix}-aca-env'
   location: location
   properties: {
