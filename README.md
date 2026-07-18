@@ -91,13 +91,17 @@ AZURE_CONTAINERAPPS_ENVIRONMENT
 AZURE_LOCATION
 SERVER_CONTAINER_APP_NAME
 CLIENT_CONTAINER_APP_NAME
-SERVER_CORS_ORIGIN
 SERVER_DATABASE_URL
 ```
 
 Optional keys in the env file:
 
 ```bash
+SERVER_CORS_ORIGIN
 AZURE_GHCR_USERNAME
 AZURE_GHCR_PASSWORD
 ```
+
+If `SERVER_CORS_ORIGIN` is not set, CD will deploy the client app first,
+resolve its Container App ingress URL, and use that URL as the server CORS
+origin automatically.

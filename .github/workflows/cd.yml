@@ -102,7 +102,7 @@ jobs:
       CLIENT_IMAGE: ghcr.io/${{ github.repository }}-client:${{ github.event.workflow_run.head_sha || github.sha }}
       SERVER_TARGET_PORT: '3001'
       CLIENT_TARGET_PORT: '80'
-      CORS_ORIGIN: ${{ vars.SERVER_CORS_ORIGIN }}
+      CONFIGURED_CORS_ORIGIN: ${{ vars.SERVER_CORS_ORIGIN }}
 
     steps:
       - name: Check Out
@@ -122,68 +122,6 @@ jobs:
         with:
           inlineScript: |
             az extension add --name containerapp --upgrade --allow-preview true
-
-      - name: Deploy Server Container App
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -euo pipefail
-
-            if [[ -z "${RESOURCE_GROUP}" || -z "${CONTAINERAPPS_ENVIRONMENT}" || -z "${SERVER_CONTAINER_APP_NAME}" ]]; then
-              echo "Missing required environment variables for server deploy."
-              exit 1
-            fi
-
-            if [[ -z "${{ secrets.SERVER_DATABASE_URL }}" ]]; then
-              echo "Missing required secret: SERVER_DATABASE_URL"
-              exit 1
-            fi
-
-            HAS_GHCR_CREDS=false
-            if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
-              HAS_GHCR_CREDS=true
-            fi
-
-            if az containerapp show \
-              --resource-group "${RESOURCE_GROUP}" \
-              --name "${SERVER_CONTAINER_APP_NAME}" >/dev/null 2>&1; then
-              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
-                az containerapp registry set \
-                  --resource-group "${RESOURCE_GROUP}" \
-                  --name "${SERVER_CONTAINER_APP_NAME}" \
-                  --server "ghcr.io" \
-                  --username "${{ secrets.AZURE_GHCR_USERNAME }}" \
-                  --password "${{ secrets.AZURE_GHCR_PASSWORD }}"
-              fi
-
-              az containerapp update \
-                --resource-group "${RESOURCE_GROUP}" \
-                --name "${SERVER_CONTAINER_APP_NAME}" \
-                --image "${SERVER_IMAGE}" \
-                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${CORS_ORIGIN}" "DATABASE_URL=secretref:database-url" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
-            else
-              CREATE_REGISTRY_ARGS=()
-              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
-                CREATE_REGISTRY_ARGS=(
-                  --registry-server "ghcr.io"
-                  --registry-username "${{ secrets.AZURE_GHCR_USERNAME }}"
-                  --registry-password "${{ secrets.AZURE_GHCR_PASSWORD }}"
-                )
-              fi
-
-              az containerapp create \
-                --resource-group "${RESOURCE_GROUP}" \
-                --name "${SERVER_CONTAINER_APP_NAME}" \
-                --environment "${CONTAINERAPPS_ENVIRONMENT}" \
-                --location "${AZURE_LOCATION}" \
-                --image "${SERVER_IMAGE}" \
-                --target-port "${SERVER_TARGET_PORT}" \
-                --ingress external \
-                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${CORS_ORIGIN}" "DATABASE_URL=secretref:database-url" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
-                ${CREATE_REGISTRY_ARGS[@]}
-            fi
 
       - name: Deploy Client Container App
         uses: azure/cli@v2
@@ -235,5 +173,101 @@ jobs:
                 --image "${CLIENT_IMAGE}" \
                 --target-port "${CLIENT_TARGET_PORT}" \
                 --ingress external \
+                ${CREATE_REGISTRY_ARGS[@]}
+            fi
+
+      - name: Resolve Server CORS Origin
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -n "${CONFIGURED_CORS_ORIGIN}" ]]; then
+              echo "SERVER_CORS_ORIGIN_EFFECTIVE=${CONFIGURED_CORS_ORIGIN}" >> "${GITHUB_ENV}"
+              echo "Using configured SERVER_CORS_ORIGIN from GitHub environment variable."
+              exit 0
+            fi
+
+            client_fqdn="$({
+              az containerapp show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${CLIENT_CONTAINER_APP_NAME}" \
+                --query properties.configuration.ingress.fqdn \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ -z "${client_fqdn}" || "${client_fqdn}" == "null" ]]; then
+              echo "Could not resolve client FQDN for CORS origin."
+              echo "Set vars.SERVER_CORS_ORIGIN manually and rerun."
+              exit 1
+            fi
+
+            echo "SERVER_CORS_ORIGIN_EFFECTIVE=https://${client_fqdn}" >> "${GITHUB_ENV}"
+            echo "Resolved SERVER_CORS_ORIGIN from client app ingress FQDN."
+
+      - name: Deploy Server Container App
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${RESOURCE_GROUP}" || -z "${CONTAINERAPPS_ENVIRONMENT}" || -z "${SERVER_CONTAINER_APP_NAME}" ]]; then
+              echo "Missing required environment variables for server deploy."
+              exit 1
+            fi
+
+            if [[ -z "${SERVER_CORS_ORIGIN_EFFECTIVE:-}" ]]; then
+              echo "Effective server CORS origin was not set."
+              exit 1
+            fi
+
+            if [[ -z "${{ secrets.SERVER_DATABASE_URL }}" ]]; then
+              echo "Missing required secret: SERVER_DATABASE_URL"
+              exit 1
+            fi
+
+            HAS_GHCR_CREDS=false
+            if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
+              HAS_GHCR_CREDS=true
+            fi
+
+            if az containerapp show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${CLIENT_CONTAINER_APP_NAME}" >/dev/null 2>&1; then
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                az containerapp registry set \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --name "${CLIENT_CONTAINER_APP_NAME}" \
+                  --server "ghcr.io" \
+                  --username "${{ secrets.AZURE_GHCR_USERNAME }}" \
+                  --password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+              fi
+
+              az containerapp update \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${SERVER_CONTAINER_APP_NAME}" \
+                --image "${SERVER_IMAGE}" \
+                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" \
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
+            else
+              CREATE_REGISTRY_ARGS=()
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                CREATE_REGISTRY_ARGS=(
+                  --registry-server "ghcr.io"
+                  --registry-username "${{ secrets.AZURE_GHCR_USERNAME }}"
+                  --registry-password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+                )
+              fi
+
+              az containerapp create \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${SERVER_CONTAINER_APP_NAME}" \
+                --environment "${CONTAINERAPPS_ENVIRONMENT}" \
+                --location "${AZURE_LOCATION}" \
+                --image "${SERVER_IMAGE}" \
+                --target-port "${SERVER_TARGET_PORT}" \
+                --ingress external \
+                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" \
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi

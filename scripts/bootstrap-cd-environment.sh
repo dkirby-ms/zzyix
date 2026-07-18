@@ -31,10 +31,10 @@ Required environment variables:
   AZURE_LOCATION
   SERVER_CONTAINER_APP_NAME
   CLIENT_CONTAINER_APP_NAME
-  SERVER_CORS_ORIGIN
   SERVER_DATABASE_URL
 
 Optional environment variables:
+  SERVER_CORS_ORIGIN
   AZURE_GHCR_USERNAME
   AZURE_GHCR_PASSWORD
 
@@ -48,8 +48,9 @@ Examples:
   AZURE_LOCATION=eastus
   SERVER_CONTAINER_APP_NAME=zzyix-staging-server
   CLIENT_CONTAINER_APP_NAME=zzyix-staging-client
-  SERVER_CORS_ORIGIN=https://client.example.com
   SERVER_DATABASE_URL=postgres://...
+  # Optional: override auto-resolved CORS origin
+  # SERVER_CORS_ORIGIN=https://client.example.com
   EOF
   ./scripts/bootstrap-cd-environment.sh --repo dkirby-ms/zzyix
 USAGE
@@ -208,7 +209,6 @@ main() {
   require_value "AZURE_LOCATION"
   require_value "SERVER_CONTAINER_APP_NAME"
   require_value "CLIENT_CONTAINER_APP_NAME"
-  require_value "SERVER_CORS_ORIGIN"
   require_value "SERVER_DATABASE_URL"
 
   create_environment_if_missing "${repo}" "${environment_name}"
@@ -229,8 +229,10 @@ main() {
     "SERVER_CONTAINER_APP_NAME" "${SERVER_CONTAINER_APP_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
     "CLIENT_CONTAINER_APP_NAME" "${CLIENT_CONTAINER_APP_NAME}"
-  set_environment_variable "${repo}" "${environment_name}" "SERVER_CORS_ORIGIN" \
-    "${SERVER_CORS_ORIGIN}"
+  if [[ -n "${SERVER_CORS_ORIGIN:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "SERVER_CORS_ORIGIN" "${SERVER_CORS_ORIGIN}"
+  fi
 
   set_environment_secret "${repo}" "${environment_name}" "SERVER_DATABASE_URL" \
     "${SERVER_DATABASE_URL}"
