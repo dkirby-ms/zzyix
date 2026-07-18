@@ -534,17 +534,19 @@ app.use(express.json())
 app.use((req, res, next) => {
   const configuredOrigin = resolveCorsOrigin(process.env.CORS_ORIGIN)
   const requestOrigin = req.header('origin')
-  const corsOrigin = requestOrigin && isOriginAllowed(requestOrigin, configuredOrigin)
+  const corsOrigin = requestOrigin
+    && requestOrigin !== 'null'
+    && isOriginAllowed(requestOrigin, configuredOrigin)
     ? requestOrigin
     : null
 
   if (corsOrigin) {
     res.header('Access-Control-Allow-Origin', corsOrigin)
     res.header('Vary', 'Origin')
+    res.header('Access-Control-Allow-Credentials', 'true')
   }
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.header('Access-Control-Allow-Headers', 'Content-Type')
-  res.header('Access-Control-Allow-Credentials', 'true')
 
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200)
