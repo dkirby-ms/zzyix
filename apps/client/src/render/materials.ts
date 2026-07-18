@@ -1,6 +1,7 @@
 import { Color, MeshPhysicalMaterial } from 'three'
 import { useMemo } from 'react'
 import type { MaterialVariant } from '../domain/tileGeometry'
+import type { WebGLProgramParametersWithUniforms } from 'three/src/renderers/webgl/WebGLPrograms.js'
 
 const variantProps: Record<MaterialVariant, { roughness: number; metalness: number; clearcoat: number; transmission: number }> = {
   ceramic: { roughness: 0.44, metalness: 0.06, clearcoat: 0.32, transmission: 0 },
@@ -9,7 +10,7 @@ const variantProps: Record<MaterialVariant, { roughness: number; metalness: numb
 }
 
 const withCraftShader = (material: MeshPhysicalMaterial): void => {
-  material.onBeforeCompile = (shader) => {
+  material.onBeforeCompile = (shader: WebGLProgramParametersWithUniforms) => {
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
