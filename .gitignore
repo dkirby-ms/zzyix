@@ -4,3 +4,4 @@ node_modules/
 apps/client/coverage/
 .env
 /.vscode
+infra/bicep/host.main.bicepparam
