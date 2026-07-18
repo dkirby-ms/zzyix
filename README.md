@@ -1,3 +1,8 @@
+---
+title: zzyix
+description: Learning-first monorepo for a collaborative mosaic web app, including setup, workflow, and release practices.
+---
+
 ## What This Is
 
 zzyix is a casual project for learning agentic software development lifecycle (SDLC) practices while building a collaborative mosaic web app.
@@ -64,6 +69,53 @@ npm test
 This is a learning-first repository, not a production system.
 
 Expect rough edges, experiments, and occasional pivots in architecture or workflow as we test ideas and improve both product and process.
+
+## Commit Conventions
+
+This repository enforces Conventional Commits in CI.
+
+Use commit messages in this shape:
+
+```text
+type(scope): subject
+```
+
+Supported types include `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, and `perf`.
+
+Supported scopes include:
+
+* `client`
+* `server`
+* `ui`
+* `render`
+* `interaction`
+* `domain-client`
+* `domain-server`
+* `db`
+* `jobs`
+* `api`
+* `deps`
+* `deps-dev`
+* `deps-client`
+* `deps-server`
+* `repo`
+* `ci`
+* `infra`
+* `docs`
+* `scripts`
+* `release`
+
+Examples:
+
+```text
+feat(client): add palette keyboard shortcuts
+fix(server): reject stale operation sequence
+chore(release): configure app-specific semantic-release channels
+docs(repo): clarify commit and release workflow
+```
+
+> [!IMPORTANT]
+> Commit messages that do not match these rules will fail CI.
 
 ## Staging CD Environment Bootstrap
 
