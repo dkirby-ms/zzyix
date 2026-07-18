@@ -10,6 +10,7 @@
     "dev": "npm run dev:server & npm run dev:client",
     "dev:client": "npm run dev --workspace=apps/client",
     "dev:server": "npm run dev --workspace=apps/server",
+    "db:purge": "./scripts/database-purge.sh",
     "audit": "npm audit --audit-level=high --workspaces --if-present",
     "audit:client": "npm audit --audit-level=high --workspace=apps/client",
     "audit:server": "npm audit --audit-level=high --workspace=apps/server",
@@ -23,6 +24,15 @@
     "test:client": "npm run test --workspace=apps/client",
     "test:server": "npm run test --workspace=apps/server",
     "test:watch:client": "npm run test:watch --workspace=apps/client",
-    "test:watch:server": "npm run test:watch --workspace=apps/server"
+    "test:watch:server": "npm run test:watch --workspace=apps/server",
+    "release": "npm run release:client && npm run release:server",
+    "release:client": "semantic-release --extends ./.releaserc.client.cjs",
+    "release:server": "semantic-release --extends ./.releaserc.server.cjs"
+  },
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/github": "^11.0.6",
+    "@semantic-release/release-notes-generator": "^14.1.0",
+    "semantic-release": "^24.2.7"
   }
 }
