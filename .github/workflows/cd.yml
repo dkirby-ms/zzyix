@@ -159,6 +159,8 @@ jobs:
 
             # Server's internal ACA DNS hostname
             BACKEND_SERVICE_HOSTNAME="${SERVER_CONTAINER_APP_NAME}.internal"
+            echo "DEBUG: SERVER_CONTAINER_APP_NAME=${SERVER_CONTAINER_APP_NAME}"
+            echo "DEBUG: BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}"
 
             HAS_GHCR_CREDS=false
             if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
@@ -177,6 +179,7 @@ jobs:
                   --password "${{ secrets.AZURE_GHCR_PASSWORD }}"
               fi
 
+              echo "DEBUG: Updating existing client app with BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}"
               az containerapp update \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${CLIENT_CONTAINER_APP_NAME}" \
@@ -192,6 +195,7 @@ jobs:
                 )
               fi
 
+              echo "DEBUG: Creating new client app with BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}"
               az containerapp create \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${CLIENT_CONTAINER_APP_NAME}" \

@@ -31,8 +31,14 @@ COPY --from=build /app/apps/client/dist /usr/share/nginx/html
 # Create entrypoint script to substitute environment variables and start nginx
 RUN echo '#!/bin/sh' > /entrypoint.sh && \
     echo 'set -e' >> /entrypoint.sh && \
-    echo 'export BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME:-localhost}' >> /entrypoint.sh && \
+    echo 'echo "[entrypoint] Starting nginx entrypoint..."' >> /entrypoint.sh && \
+    echo 'BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME:-localhost}' >> /entrypoint.sh && \
+    echo 'echo "[entrypoint] BACKEND_SERVICE_HOSTNAME=$BACKEND_SERVICE_HOSTNAME"' >> /entrypoint.sh && \
+    echo 'echo "[entrypoint] Substituting nginx config template..."' >> /entrypoint.sh && \
     echo 'envsubst "\${BACKEND_SERVICE_HOSTNAME}" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \
+    echo 'echo "[entrypoint] Generated nginx config:"' >> /entrypoint.sh && \
+    echo 'cat /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \
+    echo 'echo "[entrypoint] Starting nginx..."' >> /entrypoint.sh && \
     echo 'exec nginx -g "daemon off;"' >> /entrypoint.sh && \
     chmod +x /entrypoint.sh
 
