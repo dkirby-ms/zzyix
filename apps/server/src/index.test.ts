@@ -16,8 +16,8 @@ import {
   resolveCorsOrigin,
   shouldCleanupSession,
   toRejectReason,
-} from './index'
-import { vec2 } from './domain/math2d'
+} from './index.js'
+import { vec2 } from './domain/math2d.js'
 
 describe('authoritative handler semantics', () => {
   it('builds lobby summary metadata with deterministic V1 fallbacks', () => {

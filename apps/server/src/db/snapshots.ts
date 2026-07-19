@@ -1,5 +1,5 @@
-import type { Session } from '../contracts'
-import { getLatestSnapshot, listOperationsAfter, saveSnapshot } from './repository'
+import type { Session } from '../contracts.js'
+import { getLatestSnapshot, listOperationsAfter, saveSnapshot } from './repository.js'
 
 const SNAPSHOT_EVERY_OPS = Number(process.env.SNAPSHOT_EVERY_OPS ?? 25)
 

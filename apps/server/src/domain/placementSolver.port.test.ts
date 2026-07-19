@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { defaultBounds, validatePlacement, type TileInstance } from './placementSolver'
-import { vec2 } from './math2d'
+import { defaultBounds, validatePlacement, type TileInstance } from './placementSolver.js'
+import { vec2 } from './math2d.js'
 
 describe('placementSolver server parity', () => {
   it('rejects overlap against existing settled tiles', () => {

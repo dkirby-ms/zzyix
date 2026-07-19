@@ -15,7 +15,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import { materialVariantValues, operationTypeValues, tileShapeValues } from './types'
+import { materialVariantValues, operationTypeValues, tileShapeValues } from './types.js'
 
 const asSqlLiteralList = (values: readonly string[]) =>
   sql.raw(values.map((value) => `'${value}'`).join(', '))

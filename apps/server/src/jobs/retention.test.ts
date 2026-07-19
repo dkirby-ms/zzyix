@@ -4,8 +4,8 @@ vi.mock('../db', () => ({
   pruneRetention: vi.fn(),
 }))
 
-import { pruneRetention } from '../db'
-import { runRetentionPass } from './retention'
+import { pruneRetention } from '../db/index.js'
+import { runRetentionPass } from './retention.js'
 
 describe('retention job', () => {
   it('returns idempotency key cleanup counts from pruneRetention', async () => {

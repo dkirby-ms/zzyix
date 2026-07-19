@@ -1,9 +1,9 @@
-import { dot, len, normalize, perp, sub, vec2 } from './math2d'
+import { dot, len, normalize, perp, sub, vec2 } from './math2d.js'
 import {
   transformTile,
-} from './tileGeometry'
-import type { Vec2 } from './math2d'
-import type { ConfidenceState, TileShape, Transform2D } from './tileGeometry'
+} from './tileGeometry.js'
+import type { Vec2 } from './math2d.js'
+import type { ConfidenceState, TileShape, Transform2D } from './tileGeometry.js'
 
 export type MosaicBounds = {
   minX: number

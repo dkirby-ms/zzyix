@@ -19,7 +19,7 @@ import type {
   TilePlacedPayload,
   TileRemovedPayload,
   ListSessionsResponse,
-} from './contracts'
+} from './contracts.js'
 import {
   closeDatabaseBundle,
   getDatabaseBundle,
@@ -33,9 +33,9 @@ import {
   persistTilePlacement,
   persistTileRemoval,
 } from './db/index.js'
-import type { SessionSummaryRecord } from './db/repository'
-import { defaultBounds, validatePlacement } from './domain/placementSolver'
-import { startRetentionJob } from './jobs/retention'
+import type { SessionSummaryRecord } from './db/repository.js'
+import { defaultBounds, validatePlacement } from './domain/placementSolver.js'
+import { startRetentionJob } from './jobs/retention.js'
 
 type AuthoritativeSessionState = {
   session: Session

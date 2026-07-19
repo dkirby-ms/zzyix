@@ -7,8 +7,8 @@ import {
   getSessionState,
   initializeParticipantPresence,
   isPlaceTilePayload,
-} from './index'
-import { vec2 } from './domain/math2d'
+} from './index.js'
+import { vec2 } from './domain/math2d.js'
 
 let sessionCounter = 0
 

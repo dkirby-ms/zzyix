@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { applyPlaceTile, applyRemoveTile, createAuthoritativeSessionState } from './index'
-import { vec2 } from './domain/math2d'
+import { applyPlaceTile, applyRemoveTile, createAuthoritativeSessionState } from './index.js'
+import { vec2 } from './domain/math2d.js'
 
 describe('deterministic concurrency convergence', () => {
   it('produces stable first-write-wins outcomes across repeated runs', () => {

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, lte, max, sql } from 'drizzle-orm'
-import type { ClientPresence, Session, TileInstance } from '../contracts'
-import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts'
-import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema'
-import { getDatabaseBundle, type DatabaseClient } from './client'
+import type { ClientPresence, Session, TileInstance } from '../contracts.js'
+import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
+import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema.js'
+import { getDatabaseBundle, type DatabaseClient } from './client.js'
 
 export type AuthoritativeSessionRecord = {
   session: Session

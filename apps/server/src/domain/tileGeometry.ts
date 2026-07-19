@@ -1,5 +1,5 @@
-import { rotate, vec2 } from './math2d'
-import type { Vec2 } from './math2d'
+import { rotate, vec2 } from './math2d.js'
+import type { Vec2 } from './math2d.js'
 
 export type TileShape = 'square' | 'triangle' | 'rectangle' | 'l-shape'
 export type MaterialVariant = 'ceramic' | 'glass' | 'stone'
