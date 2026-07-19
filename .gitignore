@@ -5,3 +5,4 @@ apps/client/coverage/
 .env
 /.vscode
 infra/bicep/host.main.bicepparam
+scripts/gh-vars.env
