@@ -152,10 +152,13 @@ jobs:
           inlineScript: |
             set -euo pipefail
 
-            if [[ -z "${RESOURCE_GROUP}" || -z "${CONTAINERAPPS_ENVIRONMENT}" || -z "${CLIENT_CONTAINER_APP_NAME}" ]]; then
+            if [[ -z "${RESOURCE_GROUP}" || -z "${CONTAINERAPPS_ENVIRONMENT}" || -z "${CLIENT_CONTAINER_APP_NAME}" || -z "${SERVER_CONTAINER_APP_NAME}" ]]; then
               echo "Missing required environment variables for client deploy."
               exit 1
             fi
+
+            # Server's internal ACA DNS hostname
+            BACKEND_SERVICE_HOSTNAME="${SERVER_CONTAINER_APP_NAME}.internal"
 
             HAS_GHCR_CREDS=false
             if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
@@ -177,7 +180,8 @@ jobs:
               az containerapp update \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${CLIENT_CONTAINER_APP_NAME}" \
-                --image "${CLIENT_IMAGE}"
+                --image "${CLIENT_IMAGE}" \
+                --set-env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -195,6 +199,7 @@ jobs:
                 --image "${CLIENT_IMAGE}" \
                 --target-port "${CLIENT_TARGET_PORT}" \
                 --ingress external \
+                --env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
 
