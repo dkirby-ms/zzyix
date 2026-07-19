@@ -21,9 +21,20 @@ RUN npm run build --workspace=apps/client
 
 FROM nginx:1.27-alpine AS runtime
 
-# Replace default nginx config to support SPA routing.
-COPY apps/client/nginx.conf /etc/nginx/conf.d/default.conf
+# Install envsubst (gettext) for environment variable substitution in nginx config
+RUN apk add --no-cache gettext
+
+# Copy nginx config template
+COPY apps/client/nginx.conf /etc/nginx/nginx.conf.template
 COPY --from=build /app/apps/client/dist /usr/share/nginx/html
 
+# Create entrypoint script to substitute environment variables and start nginx
+RUN echo '#!/bin/sh' > /entrypoint.sh && \
+    echo 'set -e' >> /entrypoint.sh && \
+    echo 'export BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME:-localhost}' >> /entrypoint.sh && \
+    echo 'envsubst "\${BACKEND_SERVICE_HOSTNAME}" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \
+    echo 'exec nginx -g "daemon off;"' >> /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
 EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/entrypoint.sh"]
