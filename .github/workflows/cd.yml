@@ -157,7 +157,7 @@ jobs:
               exit 1
             fi
 
-            # Get the server app's FQDN from ACA
+            # Get the server app's internal FQDN (works for both internal and external ingress)
             SERVER_FQDN="$({
               az containerapp show \
                 --resource-group "${RESOURCE_GROUP}" \
@@ -271,6 +271,11 @@ jobs:
               exit 1
             fi
 
+            if [[ ! "${{ secrets.SERVER_DATABASE_URL }}" =~ ^postgres(ql)?:// ]]; then
+              echo "SERVER_DATABASE_URL must be a full Postgres connection string (postgres://... or postgresql://...)."
+              exit 1
+            fi
+
             HAS_GHCR_CREDS=false
             if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
               HAS_GHCR_CREDS=true
@@ -323,3 +328,9 @@ jobs:
               --resource-group "${RESOURCE_GROUP}" \
               --name "${SERVER_CONTAINER_APP_NAME}" \
               --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url"
+
+            az containerapp ingress update \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${SERVER_CONTAINER_APP_NAME}" \
+              --type internal \
+              --target-port "${SERVER_TARGET_PORT}"
