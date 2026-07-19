@@ -1,5 +1,5 @@
 import cron, { type ScheduledTask } from 'node-cron'
-import { pruneRetention } from '../db'
+import { pruneRetention } from '../db/index.js'
 
 const DEFAULT_RETENTION_CRON = process.env.RETENTION_CRON ?? '0 * * * *'
 const DEFAULT_OPERATION_RETENTION_MS = Number(process.env.OPERATION_RETENTION_MS ?? 7 * 24 * 60 * 60 * 1000)
