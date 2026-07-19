@@ -132,8 +132,8 @@ jobs:
               status="$({
                 az containerapp job execution show \
                   --resource-group "${RESOURCE_GROUP}" \
-                  --job-name "${DB_BOOTSTRAP_JOB_NAME}" \
-                  --name "${execution_name}" \
+                  --name "${DB_BOOTSTRAP_JOB_NAME}" \
+                  --job-execution-name "${execution_name}" \
                   --query properties.status \
                   --output tsv
               } | tr -d '\r')"
