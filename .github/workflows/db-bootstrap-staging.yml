@@ -1,0 +1,157 @@
+name: Bootstrap Staging Database
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: GitHub Environment containing Azure vars/secrets
+        required: true
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  bootstrap-db:
+    name: Bootstrap DB (Staging)
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment_name || 'staging' }}
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      CONTAINERAPPS_ENVIRONMENT: ${{ vars.AZURE_CONTAINERAPPS_ENVIRONMENT }}
+      SERVER_CONTAINER_APP_NAME: ${{ vars.SERVER_CONTAINER_APP_NAME }}
+      DB_BOOTSTRAP_JOB_NAME: ${{ vars.SERVER_CONTAINER_APP_NAME }}-db-bootstrap
+
+    steps:
+      - name: Azure Login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Container Apps CLI Extension
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        with:
+          inlineScript: |
+            az extension add --name containerapp --upgrade --allow-preview true
+
+      - name: Create/Update and Run Migration Job
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${RESOURCE_GROUP}" || -z "${CONTAINERAPPS_ENVIRONMENT}" || -z "${SERVER_CONTAINER_APP_NAME}" ]]; then
+              echo "Missing required Azure deployment variables in selected environment."
+              exit 1
+            fi
+
+            if [[ -z "${{ secrets.SERVER_DATABASE_URL }}" ]]; then
+              echo "Missing required secret: SERVER_DATABASE_URL"
+              exit 1
+            fi
+
+            if [[ ! "${{ secrets.SERVER_DATABASE_URL }}" =~ ^postgres(ql)?:// ]]; then
+              echo "SERVER_DATABASE_URL must be a full Postgres connection string."
+              exit 1
+            fi
+
+            SERVER_IMAGE="$({
+              az containerapp show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${SERVER_CONTAINER_APP_NAME}" \
+                --query properties.template.containers[0].image \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ -z "${SERVER_IMAGE}" || "${SERVER_IMAGE}" == "null" ]]; then
+              echo "Unable to resolve current server image from Container App ${SERVER_CONTAINER_APP_NAME}."
+              exit 1
+            fi
+
+            echo "Using server image for migration job: ${SERVER_IMAGE}"
+
+            if az containerapp job show --resource-group "${RESOURCE_GROUP}" --name "${DB_BOOTSTRAP_JOB_NAME}" >/dev/null 2>&1; then
+              echo "Deleting existing job ${DB_BOOTSTRAP_JOB_NAME} before recreate."
+              az containerapp job delete \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${DB_BOOTSTRAP_JOB_NAME}" \
+                --yes
+            fi
+
+            has_ghcr_creds=false
+            if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
+              has_ghcr_creds=true
+            fi
+
+            echo "Creating job ${DB_BOOTSTRAP_JOB_NAME}."
+            create_registry_args=()
+            if [[ "${has_ghcr_creds}" == "true" ]]; then
+              create_registry_args=(
+                --registry-server "ghcr.io"
+                --registry-username "${{ secrets.AZURE_GHCR_USERNAME }}"
+                --registry-password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+              )
+            fi
+
+            az containerapp job create \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${DB_BOOTSTRAP_JOB_NAME}" \
+              --environment "${CONTAINERAPPS_ENVIRONMENT}" \
+              --trigger-type Manual \
+              --replica-timeout 1800 \
+              --replica-retry-limit 0 \
+              --parallelism 1 \
+              --cpu "0.5" \
+              --memory "1.0Gi" \
+              --image "${SERVER_IMAGE}" \
+              --command "node" \
+              --args "dist/db/migrate.js" \
+              --env-vars "NODE_ENV=production" "DATABASE_URL=secretref:database-url" \
+              --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
+              ${create_registry_args[@]}
+
+            execution_name="$({
+              az containerapp job start \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${DB_BOOTSTRAP_JOB_NAME}" \
+                --query name \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ -z "${execution_name}" || "${execution_name}" == "null" ]]; then
+              echo "Failed to start bootstrap job execution."
+              exit 1
+            fi
+
+            echo "Started bootstrap job execution: ${execution_name}"
+
+            for attempt in {1..60}; do
+              status="$({
+                az containerapp job execution show \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --job-name "${DB_BOOTSTRAP_JOB_NAME}" \
+                  --name "${execution_name}" \
+                  --query properties.status \
+                  --output tsv
+              } | tr -d '\r')"
+
+              echo "Execution status [${attempt}/60]: ${status}"
+
+              if [[ "${status}" == "Succeeded" ]]; then
+                echo "Database bootstrap completed successfully."
+                exit 0
+              fi
+
+              if [[ "${status}" == "Failed" ]]; then
+                echo "Database bootstrap failed."
+                exit 1
+              fi
+
+              sleep 10
+            done
+
+            echo "Timed out waiting for bootstrap job execution to finish."
+            exit 1

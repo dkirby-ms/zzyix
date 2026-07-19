@@ -8,6 +8,7 @@
     "build": "tsc",
     "lint": "oxlint",
     "start": "node dist/index.js",
+    "db:apply": "node dist/db/migrate.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:rollback": "echo 'Rollback uses authored reverse SQL migrations; no automatic rollback command is configured.'",
