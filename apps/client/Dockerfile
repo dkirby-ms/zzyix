@@ -23,6 +23,8 @@ FROM nginx:1.27-alpine AS runtime
 
 # Replace default nginx config to support SPA routing.
 COPY apps/client/nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/client/docker-entrypoint.d/30-runtime-config.sh /docker-entrypoint.d/30-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/30-runtime-config.sh
 COPY --from=build /app/apps/client/dist /usr/share/nginx/html
 
 EXPOSE 80

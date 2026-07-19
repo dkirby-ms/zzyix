@@ -126,6 +126,7 @@ jobs:
       SERVER_TARGET_PORT: '3001'
       CLIENT_TARGET_PORT: '80'
       CONFIGURED_CORS_ORIGIN: ${{ vars.SERVER_CORS_ORIGIN }}
+      CONFIGURED_CLIENT_SERVER_URL: ${{ vars.CLIENT_VITE_SERVER_URL }}
 
     steps:
       - name: Check Out
@@ -300,3 +301,48 @@ jobs:
               --resource-group "${RESOURCE_GROUP}" \
               --name "${SERVER_CONTAINER_APP_NAME}" \
               --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url"
+
+      - name: Resolve Client Runtime Server URL
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -n "${CONFIGURED_CLIENT_SERVER_URL:-}" ]]; then
+              echo "CLIENT_VITE_SERVER_URL_EFFECTIVE=${CONFIGURED_CLIENT_SERVER_URL}" >> "${GITHUB_ENV}"
+              echo "Using configured CLIENT_VITE_SERVER_URL from GitHub environment variable."
+              exit 0
+            fi
+
+            server_fqdn="$({
+              az containerapp show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${SERVER_CONTAINER_APP_NAME}" \
+                --query properties.configuration.ingress.fqdn \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ -z "${server_fqdn}" || "${server_fqdn}" == "null" ]]; then
+              echo "Could not resolve server FQDN for client runtime VITE_SERVER_URL."
+              echo "Set vars.CLIENT_VITE_SERVER_URL manually and rerun."
+              exit 1
+            fi
+
+            echo "CLIENT_VITE_SERVER_URL_EFFECTIVE=https://${server_fqdn}" >> "${GITHUB_ENV}"
+            echo "Resolved client runtime server URL from server app ingress FQDN."
+
+      - name: Configure Client Runtime Server URL
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${CLIENT_VITE_SERVER_URL_EFFECTIVE:-}" ]]; then
+              echo "Client runtime server URL was not set."
+              exit 1
+            fi
+
+            az containerapp update \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${CLIENT_CONTAINER_APP_NAME}" \
+              --set-env-vars "VITE_SERVER_URL=${CLIENT_VITE_SERVER_URL_EFFECTIVE}"

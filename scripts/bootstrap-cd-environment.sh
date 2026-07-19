@@ -35,6 +35,7 @@ Required environment variables:
 
 Optional environment variables:
   SERVER_CORS_ORIGIN
+  CLIENT_VITE_SERVER_URL
   AZURE_GHCR_USERNAME
   AZURE_GHCR_PASSWORD
 
@@ -51,6 +52,8 @@ Examples:
   SERVER_DATABASE_URL=postgres://...
   # Optional: override auto-resolved CORS origin
   # SERVER_CORS_ORIGIN=https://client.example.com
+  # Optional: override auto-resolved client runtime API URL
+  # CLIENT_VITE_SERVER_URL=https://server.example.com
   EOF
   ./scripts/bootstrap-cd-environment.sh --repo dkirby-ms/zzyix
 USAGE
@@ -232,6 +235,11 @@ main() {
   if [[ -n "${SERVER_CORS_ORIGIN:-}" ]]; then
     set_environment_variable "${repo}" "${environment_name}" \
       "SERVER_CORS_ORIGIN" "${SERVER_CORS_ORIGIN}"
+  fi
+
+  if [[ -n "${CLIENT_VITE_SERVER_URL:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "CLIENT_VITE_SERVER_URL" "${CLIENT_VITE_SERVER_URL}"
   fi
 
   set_environment_secret "${repo}" "${environment_name}" "SERVER_DATABASE_URL" \
