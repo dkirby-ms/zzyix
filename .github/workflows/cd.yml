@@ -157,9 +157,23 @@ jobs:
               exit 1
             fi
 
-            # Server's internal ACA DNS hostname
-            BACKEND_SERVICE_HOSTNAME="${SERVER_CONTAINER_APP_NAME}.internal"
+            # Get the server app's FQDN from ACA
+            SERVER_FQDN="$({
+              az containerapp show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${SERVER_CONTAINER_APP_NAME}" \
+                --query properties.configuration.ingress.fqdn \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ -z "${SERVER_FQDN}" || "${SERVER_FQDN}" == "null" ]]; then
+              echo "ERROR: Could not resolve server app FQDN."
+              exit 1
+            fi
+
+            BACKEND_SERVICE_HOSTNAME="${SERVER_FQDN}"
             echo "DEBUG: SERVER_CONTAINER_APP_NAME=${SERVER_CONTAINER_APP_NAME}"
+            echo "DEBUG: SERVER_FQDN=${SERVER_FQDN}"
             echo "DEBUG: BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}"
 
             HAS_GHCR_CREDS=false
