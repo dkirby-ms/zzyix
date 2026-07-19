@@ -523,6 +523,15 @@ export const handleRemoveTileRequest = (
 const PORT = Number(process.env.PORT ?? 3001)
 const HOST = process.env.HOST ?? '0.0.0.0'
 
+const resolveRequestIp = (req: express.Request): string => {
+  const forwardedFor = req.header('x-forwarded-for')
+  if (forwardedFor) {
+    return forwardedFor.split(',')[0]?.trim() ?? req.ip ?? 'unknown'
+  }
+
+  return req.ip ?? 'unknown'
+}
+
 // ─── Initialize Express ──────────────────────────────────────────────────────
 
 const app = express()
@@ -557,14 +566,37 @@ app.use((req, res, next) => {
 
 app.use((req, res, next) => {
   const startedAt = Date.now()
+  let requestCompleted = false
+
+  writeLog('debug', 'http_request_started', {
+    method: req.method,
+    path: req.originalUrl,
+    ip: resolveRequestIp(req),
+    userAgent: req.header('user-agent') ?? null,
+  })
 
   res.on('finish', () => {
+    requestCompleted = true
     writeLog('info', 'http_request', {
       method: req.method,
       path: req.originalUrl,
       statusCode: res.statusCode,
       durationMs: Date.now() - startedAt,
-      ip: req.ip,
+      ip: resolveRequestIp(req),
+      contentLength: res.getHeader('content-length') ?? null,
+    })
+  })
+
+  res.on('close', () => {
+    if (requestCompleted) {
+      return
+    }
+
+    writeLog('warn', 'http_request_aborted', {
+      method: req.method,
+      path: req.originalUrl,
+      durationMs: Date.now() - startedAt,
+      ip: resolveRequestIp(req),
     })
   })
 
@@ -622,16 +654,39 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEve
 const configureRealtimeAdapter = (): void => {
   if (!process.env.DATABASE_URL) {
     if (process.env.NODE_ENV === 'test') {
+      writeLog('debug', 'realtime_adapter_skipped', { reason: 'test_without_database_url' })
       return
     }
 
     throw new Error('DATABASE_URL is required for Postgres-backed persistence')
   }
 
-  io.adapter(createAdapter(getDatabaseBundle().pool))
+  writeLog('info', 'realtime_adapter_configuring', { adapter: 'postgres' })
+
+  const { pool } = getDatabaseBundle()
+  pool.on('error', (error) => {
+    writeLog('error', 'database_pool_error', { error })
+  })
+
+  io.adapter(createAdapter(pool))
+
+  writeLog('info', 'realtime_adapter_configured', {
+    adapter: 'postgres',
+  })
 }
 
-configureRealtimeAdapter()
+const warmDatabaseConnection = async (): Promise<void> => {
+  if (!process.env.DATABASE_URL) {
+    return
+  }
+
+  writeLog('info', 'database_connection_initializing')
+
+  const { pool } = getDatabaseBundle()
+  await pool.query('select 1')
+
+  writeLog('info', 'database_connection_ready')
+}
 
 // ─── Connection Middleware ───────────────────────────────────────────────────
 
@@ -933,7 +988,7 @@ io.on('connection', (socket) => {
 
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
 
-const retentionJob = process.env.NODE_ENV === 'test' ? null : startRetentionJob()
+let retentionJob: ReturnType<typeof startRetentionJob> | null = null
 
 const shutdown = async (signal: string): Promise<void> => {
   writeLog('info', 'shutdown_signal_received', { signal })
@@ -960,15 +1015,51 @@ process.on('SIGINT', () => {
   void shutdown('SIGINT')
 })
 
+process.on('unhandledRejection', (reason) => {
+  writeLog('error', 'unhandled_rejection', {
+    reason,
+  })
+})
+
+process.on('uncaughtException', (error) => {
+  writeLog('error', 'uncaught_exception', {
+    error,
+  })
+})
+
 // ─── Start Server ────────────────────────────────────────────────────────────
 
-if (process.env.NODE_ENV !== 'test') {
-  httpServer.listen(PORT, HOST, () => {
-    writeLog('info', 'server_listening', {
-      host: HOST,
-      port: PORT,
-      corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
-      logLevel: ACTIVE_LOG_LEVEL,
-    })
+const startServer = async (): Promise<void> => {
+  writeLog('info', 'server_starting', {
+    host: HOST,
+    port: PORT,
+    corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
+    logLevel: ACTIVE_LOG_LEVEL,
   })
+
+  try {
+    await warmDatabaseConnection()
+    configureRealtimeAdapter()
+
+    if (process.env.NODE_ENV !== 'test') {
+      retentionJob = startRetentionJob()
+      writeLog('info', 'retention_job_started')
+    }
+
+    httpServer.listen(PORT, HOST, () => {
+      writeLog('info', 'server_listening', {
+        host: HOST,
+        port: PORT,
+        corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
+        logLevel: ACTIVE_LOG_LEVEL,
+      })
+    })
+  } catch (error) {
+    writeLog('error', 'server_startup_failed', { error })
+    process.exit(1)
+  }
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  void startServer()
 }
