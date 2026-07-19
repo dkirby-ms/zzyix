@@ -32,7 +32,7 @@ import {
   persistSnapshotIfNeeded,
   persistTilePlacement,
   persistTileRemoval,
-} from './db'
+} from './db/index.js'
 import type { SessionSummaryRecord } from './db/repository'
 import { defaultBounds, validatePlacement } from './domain/placementSolver'
 import { startRetentionJob } from './jobs/retention'
