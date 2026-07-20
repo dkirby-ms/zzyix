@@ -233,6 +233,7 @@ jobs:
                 --ingress internal \
                 --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" \
                 --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
+                --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
 
@@ -326,6 +327,7 @@ jobs:
                 --target-port "${CLIENT_TARGET_PORT}" \
                 --ingress external \
                 --env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" \
+                --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
 
