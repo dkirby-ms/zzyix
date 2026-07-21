@@ -8,10 +8,12 @@ import {
   getSessionState,
   handlePlaceTileRequest,
   handleRemoveTileRequest,
+  isCreateSessionRequest,
   isValidTileId,
   invokeAckSafely,
   isPlaceTilePayload,
   isRemoveTilePayload,
+  resolveCanvasConfigFromPreset,
   isSelectionUpdatePayload,
   isOriginAllowed,
   resolveCorsOrigin,
@@ -291,6 +293,40 @@ describe('authoritative handler semantics', () => {
     expect(isRemoveTilePayload(null)).toBe(false)
     expect(isRemoveTilePayload({ tileId: 123 })).toBe(false)
     expect(isRemoveTilePayload({ tileId: 'abc' })).toBe(true)
+  })
+
+  it('validates create session request presets', () => {
+    expect(isCreateSessionRequest({})).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'classic' })).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'expanded' })).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'vast' })).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'invalid' })).toBe(false)
+    expect(isCreateSessionRequest(null)).toBe(false)
+  })
+
+  it('resolves larger bounded canvas config for expanded and vast presets', () => {
+    const classic = resolveCanvasConfigFromPreset('classic')
+    const expanded = resolveCanvasConfigFromPreset('expanded')
+    const vast = resolveCanvasConfigFromPreset('vast')
+
+    expect(classic.canvasSize.width).toBe(10.4)
+    expect(classic.canvasSize.height).toBe(6.8)
+
+    expect(expanded.canvasSize.width).toBe(20.8)
+    expect(expanded.canvasSize.height).toBe(13.6)
+    if (expanded.boundsPolicy.mode !== 'bounded') {
+      throw new Error('expected bounded policy for expanded preset')
+    }
+    expect(expanded.boundsPolicy.bounds.maxX).toBe(10.4)
+    expect(expanded.boundsPolicy.bounds.maxY).toBe(6.8)
+
+    expect(vast.canvasSize.width).toBe(31.2)
+    expect(vast.canvasSize.height).toBe(20.4)
+    if (vast.boundsPolicy.mode !== 'bounded') {
+      throw new Error('expected bounded policy for vast preset')
+    }
+    expect(vast.boundsPolicy.bounds.minX).toBe(-15.6)
+    expect(vast.boundsPolicy.bounds.minY).toBe(-10.2)
   })
 
   it('accepts only non-negative integer expectedRevision values in payload guards', () => {

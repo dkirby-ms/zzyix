@@ -29,12 +29,15 @@ import {
   getStoredSessionId,
   listSessions,
   setStoredSessionId,
+  type CreateSessionOptions,
   type SessionSummary,
 } from './network/session'
 import { resolveServerUrl } from './network/serverUrl'
 import { useSocketConnection } from './network/useSocketConnection'
-import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
+import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
+  BoundsPolicy,
+  CanvasSizePreset,
   ClientJoinedPayload,
   ClientLeftPayload,
   PlaceTileAck,
@@ -125,6 +128,18 @@ const worldToChunkId = (x: number, y: number, chunkSize: number): ChunkId =>
 
 const shouldReplaceChunkTilesForSnapshot = (payloadMode: ChunkPayloadMode): boolean => payloadMode === 'fine'
 
+const DEFAULT_WORLD_BOUNDS = DEFAULT_BOUNDED_WORLD_BOUNDS
+
+const resolveWorldBounds = (canvasPolicy: BoundsPolicy | undefined, sessionPolicy: BoundsPolicy | undefined) => {
+  const policy = canvasPolicy ?? sessionPolicy
+
+  if (policy?.mode === 'bounded') {
+    return policy.bounds
+  }
+
+  return DEFAULT_WORLD_BOUNDS
+}
+
 function App() {
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
@@ -150,12 +165,14 @@ function App() {
   const [lobbyLoading, setLobbyLoading] = useState(false)
   const [lobbyError, setLobbyError] = useState<string | null>(null)
   const [creatingSession, setCreatingSession] = useState(false)
+  const [selectedCanvasPreset, setSelectedCanvasPreset] = useState<CanvasSizePreset>('expanded')
   const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
+  const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
   const pointerEmitThrottleRef = useRef<{
     lastSentAt: number
@@ -238,7 +255,10 @@ function App() {
     setLobbyError(null)
 
     try {
-      const nextSessionId = await createSession()
+      const createOptions: CreateSessionOptions = {
+        canvasPreset: selectedCanvasPreset,
+      }
+      const nextSessionId = await createSession(createOptions)
       enterCanvas(nextSessionId)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create canvas'
@@ -246,7 +266,7 @@ function App() {
     } finally {
       setCreatingSession(false)
     }
-  }, [enterCanvas])
+  }, [enterCanvas, selectedCanvasPreset])
 
   const triggerInvalidPulse = useCallback((): void => {
     setInvalidPulse(true)
@@ -262,6 +282,7 @@ function App() {
 
   const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
     setRealtimeCapabilities(payload.realtimeCapabilities ?? null)
+    setWorldBounds(resolveWorldBounds(payload.canvasConfig?.boundsPolicy, payload.session.boundsPolicy))
     setSequencedState(
       applySequencedSnapshot({
         tiles: payload.session.tiles,
@@ -784,7 +805,7 @@ function App() {
 
   const updatePointer = (x: number, y: number): void => {
     emitPointerMove({ x, y })
-    const updated = updateGhostTarget(vec2(x, y), activeTile, sequencedState.tiles)
+    const updated = updateGhostTarget(vec2(x, y), activeTile, sequencedState.tiles, worldBounds)
     emitSelectionUpdate(findHoveredTileId(x, y, sequencedState.tiles))
     setGhostVisible(true)
     setGhost((prev) => ({
@@ -873,6 +894,8 @@ function App() {
           creating={creatingSession}
           joiningSessionId={joiningSessionId}
           onRefresh={() => void loadSessions()}
+          selectedCanvasPreset={selectedCanvasPreset}
+          onCanvasPresetChange={setSelectedCanvasPreset}
           onCreate={() => void handleCreateSession()}
           onJoin={handleJoinSession}
         />
@@ -913,6 +936,10 @@ function App() {
           <span>{sequencedState.tiles.length} placed</span>
           <span>{activeCollaborators.length} active</span>
           <span>{zoomTier} zoom</span>
+          <span>
+            bounds {worldBounds.minX.toFixed(1)}..{worldBounds.maxX.toFixed(1)} / {worldBounds.minY.toFixed(1)}..
+            {worldBounds.maxY.toFixed(1)}
+          </span>
         </div>
 
         {activeCollaborators.length > 0 && (
@@ -943,6 +970,7 @@ function App() {
           }
           remoteCursors={remoteCursors}
           remoteSelections={remoteSelections}
+          worldBounds={worldBounds}
           cameraPan={cameraPan}
           cameraPolicy={cameraPolicy}
           onCameraPan={(deltaX, deltaY) => {

@@ -44,6 +44,7 @@ vi.mock('./render/MosaicScene', () => ({
   MosaicScene: ({
     remoteCursors,
     remoteSelections,
+    worldBounds,
     onPointerMove,
     cameraPolicy,
     cameraPan,
@@ -53,6 +54,7 @@ vi.mock('./render/MosaicScene', () => ({
   }: {
     remoteCursors?: Array<{ clientId: string }>
     remoteSelections?: Array<{ clientId: string; tileId: string }>
+    worldBounds?: { minX: number; maxX: number; minY: number; maxY: number }
     onPointerMove?: (x: number, y: number) => void
     cameraPolicy?: { minZoom: number; maxZoom: number; panSensitivity: number }
     cameraPan?: { x: number; y: number }
@@ -72,6 +74,7 @@ vi.mock('./render/MosaicScene', () => ({
       data-max-zoom={cameraPolicy?.maxZoom ?? -1}
       data-pan-sensitivity={cameraPolicy?.panSensitivity ?? -1}
       data-camera-pan={`${cameraPan?.x ?? 0},${cameraPan?.y ?? 0}`}
+      data-world-bounds={worldBounds ? `${worldBounds.minX},${worldBounds.maxX},${worldBounds.minY},${worldBounds.maxY}` : 'unset'}
     >
       scene
       <button type="button" onClick={() => onPointerMove?.(0, 0)}>
@@ -158,6 +161,7 @@ describe('App lobby-first behavior', () => {
     render(<App />)
 
     await screen.findByRole('button', { name: 'Create Canvas' })
+    fireEvent.click(screen.getByRole('button', { name: /Vast/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Create Canvas' }))
 
     await waitFor(() => {
@@ -165,6 +169,7 @@ describe('App lobby-first behavior', () => {
     })
 
     expect(createSessionMock).toHaveBeenCalledTimes(1)
+    expect(createSessionMock).toHaveBeenCalledWith({ canvasPreset: 'vast' })
     const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
     expect(lastSocketCall?.[1]).toBe('created-session-1')
   })
@@ -413,10 +418,97 @@ describe('App lobby-first behavior', () => {
     expect(scene).toHaveAttribute('data-max-zoom', '140')
     expect(scene).toHaveAttribute('data-pan-sensitivity', '0.02')
     expect(scene).toHaveAttribute('data-camera-pan', '0,0')
+    expect(scene).toHaveAttribute('data-world-bounds', '-5.2,5.2,-3.4,3.4')
 
     fireEvent.click(screen.getByRole('button', { name: 'Pan Camera' }))
 
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '-0.2,-0.1')
+  })
+
+  it('maps bounded snapshot policy to scene world bounds', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onSnapshot = socketCall[3] as (payload: any) => void
+
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        canvasConfig: {
+          canvasSize: { width: 31.2, height: 20.4 },
+          boundsPolicy: {
+            mode: 'bounded',
+            bounds: {
+              minX: -15.6,
+              maxX: 15.6,
+              minY: -10.2,
+              maxY: 10.2,
+            },
+          },
+        },
+        clients: [{ clientId: 'client-1', joinedAt: Date.now() - 10 }],
+        lastOpSeq: 1,
+        revision: 1,
+      })
+    })
+
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-world-bounds', '-15.6,15.6,-10.2,10.2')
+  })
+
+  it('uses snapshot world bounds for pointer validation feedback in app flow', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onSnapshot = socketCall[3] as (payload: any) => void
+
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        canvasConfig: {
+          canvasSize: { width: 31.2, height: 20.4 },
+          boundsPolicy: {
+            mode: 'bounded',
+            bounds: {
+              minX: -15.6,
+              maxX: 15.6,
+              minY: -10.2,
+              maxY: 10.2,
+            },
+          },
+        },
+        clients: [{ clientId: 'client-1', joinedAt: Date.now() - 10 }],
+        lastOpSeq: 1,
+        revision: 1,
+      })
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Far' }))
+
+    expect(screen.getByText('0 placed').closest('.status-strip')).toHaveAttribute('data-state', 'valid')
   })
 
   it('keeps existing fine tiles when aggregate chunk snapshots arrive, then replaces with fine chunk snapshot', async () => {

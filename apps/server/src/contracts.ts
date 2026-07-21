@@ -49,6 +49,13 @@ export type MosaicBounds = {
   maxY: number
 }
 
+export const DEFAULT_BOUNDED_WORLD_BOUNDS: MosaicBounds = {
+  minX: -5.2,
+  maxX: 5.2,
+  minY: -3.4,
+  maxY: 3.4,
+}
+
 export type BoundsPolicy =
   | {
       mode: 'bounded'
@@ -153,11 +160,7 @@ export type ApiError = {
 //                   refreshing the page.
 
 // POST /sessions
-export type CreateSessionResponse = {
-  session: {
-    id: string
-  }
-}
+export type CanvasSizePreset = 'classic' | 'expanded' | 'vast'
 
 export type CanvasSize = {
   width: number
@@ -167,6 +170,17 @@ export type CanvasSize = {
 export type SessionCanvasConfig = {
   canvasSize: CanvasSize
   boundsPolicy: BoundsPolicy
+}
+
+export type CreateSessionRequest = {
+  canvasPreset?: CanvasSizePreset
+}
+
+export type CreateSessionResponse = {
+  session: {
+    id: string
+    canvasConfig?: SessionCanvasConfig
+  }
 }
 
 export type SessionSummary = {

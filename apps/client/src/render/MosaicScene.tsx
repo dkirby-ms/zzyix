@@ -44,6 +44,12 @@ type MosaicSceneProps = {
   ghost: Ghost
   remoteCursors: RemoteCursor[]
   remoteSelections: RemoteSelection[]
+  worldBounds?: {
+    minX: number
+    maxX: number
+    minY: number
+    maxY: number
+  }
   onPointerMove: (x: number, y: number) => void
   onPointerDown: (x: number, y: number) => void
   onPointerUp: () => void
@@ -67,6 +73,13 @@ const DEFAULT_CAMERA_POLICY = {
   minZoom: 20,
   maxZoom: 140,
   panSensitivity: 0.02,
+}
+
+const DEFAULT_WORLD_BOUNDS = {
+  minX: -5.2,
+  maxX: 5.2,
+  minY: -3.4,
+  maxY: 3.4,
 }
 
 const confidenceColor = (base: string, confidence: ConfidenceState): string => {
@@ -198,7 +211,8 @@ const InteractionPlane = ({
   onPointerUp,
   onRotateDrag,
   onCameraPan,
-}: Pick<MosaicSceneProps, 'onPointerMove' | 'onPointerDown' | 'onPointerUp' | 'onRotateDrag' | 'onCameraPan'>) => {
+  worldBounds,
+}: Pick<MosaicSceneProps, 'onPointerMove' | 'onPointerDown' | 'onPointerUp' | 'onRotateDrag' | 'onCameraPan' | 'worldBounds'>) => {
   const lastRightX = useRef<number | null>(null)
   const lastMiddlePos = useRef<{ x: number; y: number } | null>(null)
 
@@ -259,24 +273,36 @@ const InteractionPlane = ({
     onPointerUp()
   }
 
+  const bounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
+  const width = (bounds.maxX - bounds.minX) + 6
+  const height = (bounds.maxY - bounds.minY) + 6
+  const centerX = (bounds.minX + bounds.maxX) / 2
+  const centerY = (bounds.minY + bounds.maxY) / 2
+
   return (
     <mesh
-      position={[0, 0, -0.02]}
+      position={[centerX, centerY, -0.02]}
       onPointerMove={handleMove}
       onPointerDown={handleDown}
       onPointerUp={handleUp}
       receiveShadow={false}
     >
-      <planeGeometry args={[20, 14]} />
+      <planeGeometry args={[width, height]} />
       <meshBasicMaterial transparent opacity={0} />
     </mesh>
   )
 }
 
-const CanvasBounds = () => {
-  const geometry = useMemo(() => new PlaneGeometry(10.5, 7), [])
+const CanvasBounds = ({ worldBounds }: { worldBounds?: MosaicSceneProps['worldBounds'] }) => {
+  const bounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
+  const width = (bounds.maxX - bounds.minX) + 0.2
+  const height = (bounds.maxY - bounds.minY) + 0.2
+  const centerX = (bounds.minX + bounds.maxX) / 2
+  const centerY = (bounds.minY + bounds.maxY) / 2
+  const geometry = useMemo(() => new PlaneGeometry(width, height), [width, height])
+
   return (
-    <mesh geometry={geometry} position={[0, 0, -0.12]} receiveShadow>
+    <mesh geometry={geometry} position={[centerX, centerY, -0.12]} receiveShadow>
       <meshStandardMaterial color="#f6f1e7" roughness={0.9} metalness={0.05} />
     </mesh>
   )
@@ -335,6 +361,7 @@ const SceneContents = ({
   ghost,
   remoteCursors,
   remoteSelections,
+  worldBounds,
   onPointerMove,
   onPointerDown,
   onPointerUp,
@@ -369,7 +396,7 @@ const SceneContents = ({
       <directionalLight intensity={0.38} color="#c8e1ff" position={[-4, 4, 6]} />
 
       <group position={[0, 0, 0]}>
-        <CanvasBounds />
+        <CanvasBounds worldBounds={worldBounds} />
         {tiles.map((tile) => (
           <TileMesh key={tile.id} tile={tile} />
         ))}
@@ -400,10 +427,22 @@ const SceneContents = ({
         onPointerUp={onPointerUp}
         onRotateDrag={onRotateDrag}
         onCameraPan={onCameraPan}
+        worldBounds={worldBounds}
       />
 
-      <mesh position={[0, 0, -0.8]}>
-        <planeGeometry args={[26, 20]} />
+      <mesh
+        position={[
+          ((worldBounds ?? DEFAULT_WORLD_BOUNDS).minX + (worldBounds ?? DEFAULT_WORLD_BOUNDS).maxX) / 2,
+          ((worldBounds ?? DEFAULT_WORLD_BOUNDS).minY + (worldBounds ?? DEFAULT_WORLD_BOUNDS).maxY) / 2,
+          -0.8,
+        ]}
+      >
+        <planeGeometry
+          args={[
+            ((worldBounds ?? DEFAULT_WORLD_BOUNDS).maxX - (worldBounds ?? DEFAULT_WORLD_BOUNDS).minX) + 20,
+            ((worldBounds ?? DEFAULT_WORLD_BOUNDS).maxY - (worldBounds ?? DEFAULT_WORLD_BOUNDS).minY) + 20,
+          ]}
+        />
         <meshStandardMaterial color="#d5cfbf" roughness={1} metalness={0} />
       </mesh>
 
@@ -429,6 +468,7 @@ export const MosaicScene = ({
   ghost,
   remoteCursors,
   remoteSelections,
+  worldBounds,
   onPointerMove,
   onPointerDown,
   onPointerUp,
@@ -439,12 +479,23 @@ export const MosaicScene = ({
   onViewportChanged,
   onZoomTierChanged,
 }: MosaicSceneProps) => {
+  const resolvedBounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
+  const width = resolvedBounds.maxX - resolvedBounds.minX
+  const height = resolvedBounds.maxY - resolvedBounds.minY
+  const centerX = (resolvedBounds.minX + resolvedBounds.maxX) / 2
+  const centerY = (resolvedBounds.minY + resolvedBounds.maxY) / 2
+  const maxDimension = Math.max(width, height)
+  const initialZoom = Math.max(
+    cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom,
+    Math.min(cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom, 58 * (10.4 / Math.max(10.4, maxDimension))),
+  )
+
   return (
     <Canvas
       shadows="percentage"
       camera={{
-        position: [0, 0, 8],
-        zoom: 58,
+        position: [centerX, centerY, 8],
+        zoom: initialZoom,
         near: 0.1,
         far: 100,
       }}
@@ -457,6 +508,7 @@ export const MosaicScene = ({
       <SceneContents
         tiles={tiles}
         activeShape={activeShape}
+        worldBounds={resolvedBounds}
         onRotateDrag={onRotateDrag}
         onCameraPan={onCameraPan}
         cameraPan={cameraPan}

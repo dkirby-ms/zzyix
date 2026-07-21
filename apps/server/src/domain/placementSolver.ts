@@ -1,4 +1,5 @@
 import { dot, len, normalize, perp, sub, vec2 } from './math2d.js'
+import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
 import {
   transformTile,
 } from './tileGeometry.js'
@@ -283,12 +284,7 @@ export const solveGuidedPlacement = (
   }
 }
 
-export const defaultBounds: MosaicBounds = {
-  minX: -5.2,
-  maxX: 5.2,
-  minY: -3.4,
-  maxY: 3.4,
-}
+export const defaultBounds: MosaicBounds = DEFAULT_BOUNDED_WORLD_BOUNDS
 
 export const defaultBoundsPolicy: BoundsPolicy = {
   mode: 'bounded',

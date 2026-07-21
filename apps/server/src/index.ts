@@ -5,6 +5,8 @@ import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
 import { RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
 import type {
+  CanvasSizePreset,
+  CreateSessionRequest,
   ClientToServerEvents,
   ServerToClientEvents,
   InterServerEvents,
@@ -90,6 +92,12 @@ const DEFAULT_CANVAS_CONFIG: SessionCanvasConfig = {
     height: CANVAS_HEIGHT,
   },
   boundsPolicy: DEFAULT_BOUNDS_POLICY,
+}
+
+const CANVAS_PRESET_MULTIPLIER: Record<CanvasSizePreset, number> = {
+  classic: 1,
+  expanded: 2,
+  vast: 3,
 }
 
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
@@ -371,10 +379,10 @@ export const buildListSessionsResponse = (summaries: SessionSummaryRecord[]): Li
     displayName: `Canvas ${summary.id.slice(0, 8)}`,
     participantCount: summary.participantCount,
     canvasSize: {
-      width: DEFAULT_CANVAS_CONFIG.canvasSize.width,
-      height: DEFAULT_CANVAS_CONFIG.canvasSize.height,
+      width: (sessions.get(summary.id)?.canvasConfig.canvasSize.width ?? DEFAULT_CANVAS_CONFIG.canvasSize.width),
+      height: (sessions.get(summary.id)?.canvasConfig.canvasSize.height ?? DEFAULT_CANVAS_CONFIG.canvasSize.height),
     },
-    canvasConfig: cloneCanvasConfig(DEFAULT_CANVAS_CONFIG),
+    canvasConfig: cloneCanvasConfig(sessions.get(summary.id)?.canvasConfig ?? DEFAULT_CANVAS_CONFIG),
   })),
 })
 
@@ -490,6 +498,42 @@ export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tile
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+const isCanvasSizePreset = (value: unknown): value is CanvasSizePreset =>
+  value === 'classic' || value === 'expanded' || value === 'vast'
+
+export const isCreateSessionRequest = (value: unknown): value is CreateSessionRequest => {
+  if (!isObjectRecord(value)) {
+    return false
+  }
+
+  if (value.canvasPreset === undefined) {
+    return true
+  }
+
+  return isCanvasSizePreset(value.canvasPreset)
+}
+
+export const resolveCanvasConfigFromPreset = (preset: CanvasSizePreset | undefined): SessionCanvasConfig => {
+  const normalizedPreset: CanvasSizePreset = preset ?? 'expanded'
+  const multiplier = CANVAS_PRESET_MULTIPLIER[normalizedPreset] ?? CANVAS_PRESET_MULTIPLIER.expanded
+
+  return {
+    canvasSize: {
+      width: Number((CANVAS_WIDTH * multiplier).toFixed(4)),
+      height: Number((CANVAS_HEIGHT * multiplier).toFixed(4)),
+    },
+    boundsPolicy: {
+      mode: 'bounded',
+      bounds: {
+        minX: Number((defaultBounds.minX * multiplier).toFixed(4)),
+        maxX: Number((defaultBounds.maxX * multiplier).toFixed(4)),
+        minY: Number((defaultBounds.minY * multiplier).toFixed(4)),
+        maxY: Number((defaultBounds.maxY * multiplier).toFixed(4)),
+      },
+    },
+  }
+}
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value)
@@ -691,10 +735,15 @@ export const shouldCleanupSession = (
 export const cleanupSessions = (
   now: number = Date.now(),
   staleAfterMs: number = DEFAULT_SESSION_STALE_MS,
+  preserveSessionId?: string,
 ): string[] => {
   const removedSessionIds: string[] = []
 
   for (const [sessionId, state] of sessions) {
+    if (preserveSessionId && sessionId === preserveSessionId) {
+      continue
+    }
+
     if (shouldCleanupSession(state, now, staleAfterMs)) {
       sessions.delete(sessionId)
       removedSessionIds.push(sessionId)
@@ -705,7 +754,7 @@ export const cleanupSessions = (
 }
 
 export const getSessionState = (sessionId: string): AuthoritativeSessionState => {
-  cleanupSessions()
+  cleanupSessions(Date.now(), DEFAULT_SESSION_STALE_MS, sessionId)
 
   const existing = sessions.get(sessionId)
   if (existing) {
@@ -1027,17 +1076,33 @@ app.get('/sessions', async (_req, res) => {
 })
 
 // Session creation endpoint
-app.post('/sessions', async (_req, res) => {
+app.post('/sessions', async (req, res) => {
+  if (!isCreateSessionRequest(req.body ?? {})) {
+    res.status(400).json({ error: 'Invalid session creation payload' })
+    return
+  }
+
   try {
     const sessionId = crypto.randomUUID()
-    getSessionState(sessionId)
+    const canvasConfig = resolveCanvasConfigFromPreset(req.body?.canvasPreset)
+    const sessionState = createAuthoritativeSessionState(sessionId, Date.now(), canvasConfig)
+    sessions.set(sessionId, sessionState)
 
     // Initialize canvas in database to satisfy foreign key constraints
     await loadSessionRecord(sessionId)
 
-    writeLog('info', 'session_created', { sessionId })
+    writeLog('info', 'session_created', {
+      sessionId,
+      canvasPreset: req.body?.canvasPreset ?? 'expanded',
+      canvasSize: canvasConfig.canvasSize,
+    })
 
-    res.status(200).json({ session: { id: sessionId } })
+    res.status(200).json({
+      session: {
+        id: sessionId,
+        canvasConfig,
+      },
+    })
   } catch (error) {
     writeLog('error', 'session_creation_failed', { error })
     res.status(500).json({ error: 'Failed to create session' })

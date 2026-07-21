@@ -51,6 +51,36 @@ describe('interaction controller', () => {
     expect(stepped.current.position.x).not.toBe(combined.current.position.x)
   })
 
+  it('honors provided bounds when computing ghost validity', () => {
+    const active = {
+      shape: 'square' as const,
+      color: '#fff',
+      material: 'ceramic' as const,
+      rotation: 0,
+      mirrored: false,
+    }
+
+    const narrowBounds = {
+      minX: -1,
+      maxX: 1,
+      minY: -1,
+      maxY: 1,
+    }
+
+    const ghostOutsideNarrowBounds = updateGhostTarget(vec2(4, 0), active, [], narrowBounds)
+    expect(ghostOutsideNarrowBounds.valid).toBe(false)
+
+    const wideBounds = {
+      minX: -8,
+      maxX: 8,
+      minY: -4,
+      maxY: 4,
+    }
+
+    const ghostInsideWideBounds = updateGhostTarget(vec2(4, 0), active, [], wideBounds)
+    expect(ghostInsideWideBounds.valid).toBe(true)
+  })
+
   it('rejects invalid release and accepts valid release', () => {
     const active = {
       shape: 'square' as const,
