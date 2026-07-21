@@ -99,6 +99,21 @@ const resolveLogLevel = (rawLevel: string | undefined): LogLevel => {
 
 const ACTIVE_LOG_LEVEL = resolveLogLevel(process.env.LOG_LEVEL)
 
+const describeDatabaseTarget = (databaseUrl: string | undefined): string | undefined => {
+  if (!databaseUrl) {
+    return undefined
+  }
+
+  try {
+    const parsed = new URL(databaseUrl)
+    const port = parsed.port || '5432'
+    const databaseName = parsed.pathname.replace(/^\//, '') || '(default)'
+    return `${parsed.hostname}:${port}/${databaseName}`
+  } catch {
+    return 'unparseable-database-url'
+  }
+}
+
 const serializeLogValue = (value: unknown): string => {
   if (typeof value === 'string') {
     return value
@@ -137,6 +152,38 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
   }
 
   console.log(line)
+}
+
+const verifyDatabaseConnectivity = async (): Promise<void> => {
+  const databaseTarget = describeDatabaseTarget(process.env.DATABASE_URL)
+
+  writeLog('info', 'database_connectivity_check_started', {
+    databaseTarget,
+  })
+
+  const startedAt = Date.now()
+
+  try {
+    const client = await getDatabaseBundle().pool.connect()
+
+    try {
+      await client.query('SELECT 1 AS ok')
+    } finally {
+      client.release()
+    }
+
+    writeLog('info', 'database_connectivity_check_succeeded', {
+      databaseTarget,
+      durationMs: Date.now() - startedAt,
+    })
+  } catch (error) {
+    writeLog('error', 'database_connectivity_check_failed', {
+      databaseTarget,
+      durationMs: Date.now() - startedAt,
+      error,
+    })
+    throw error
+  }
 }
 
 export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tileId)
@@ -558,6 +605,14 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   const startedAt = Date.now()
 
+  writeLog('debug', 'http_request_received', {
+    method: req.method,
+    path: req.originalUrl,
+    ip: req.ip,
+    origin: req.header('origin') ?? null,
+    userAgent: req.header('user-agent') ?? null,
+  })
+
   res.on('finish', () => {
     writeLog('info', 'http_request', {
       method: req.method,
@@ -622,6 +677,9 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEve
 const configureRealtimeAdapter = (): void => {
   if (!process.env.DATABASE_URL) {
     if (process.env.NODE_ENV === 'test') {
+      writeLog('debug', 'socket_adapter_skipped', {
+        reason: 'DATABASE_URL missing in test mode',
+      })
       return
     }
 
@@ -629,6 +687,11 @@ const configureRealtimeAdapter = (): void => {
   }
 
   io.adapter(createAdapter(getDatabaseBundle().pool))
+
+  writeLog('info', 'socket_adapter_configured', {
+    adapter: '@socket.io/postgres-adapter',
+    databaseTarget: describeDatabaseTarget(process.env.DATABASE_URL),
+  })
 }
 
 configureRealtimeAdapter()
@@ -670,6 +733,15 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const { sessionId, clientId } = socket.data
+
+  socket.onAny((eventName, ...args) => {
+    writeLog('debug', 'socket_event_received', {
+      sessionId,
+      clientId,
+      eventName,
+      argCount: args.length,
+    })
+  })
 
   const initializeConnection = async (): Promise<void> => {
     const joinedAt = Date.now()
@@ -963,12 +1035,28 @@ process.on('SIGINT', () => {
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 if (process.env.NODE_ENV !== 'test') {
-  httpServer.listen(PORT, HOST, () => {
-    writeLog('info', 'server_listening', {
-      host: HOST,
-      port: PORT,
-      corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
-      logLevel: ACTIVE_LOG_LEVEL,
-    })
+  writeLog('info', 'server_startup_begin', {
+    host: HOST,
+    port: PORT,
+    nodeEnv: process.env.NODE_ENV ?? 'development',
+    corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
+    logLevel: ACTIVE_LOG_LEVEL,
+    databaseTarget: describeDatabaseTarget(process.env.DATABASE_URL),
   })
+
+  void verifyDatabaseConnectivity()
+    .then(() => {
+      httpServer.listen(PORT, HOST, () => {
+        writeLog('info', 'server_listening', {
+          host: HOST,
+          port: PORT,
+          corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
+          logLevel: ACTIVE_LOG_LEVEL,
+        })
+      })
+    })
+    .catch((error) => {
+      writeLog('error', 'server_startup_failed', { error })
+      process.exit(1)
+    })
 }
