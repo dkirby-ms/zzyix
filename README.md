@@ -146,6 +146,12 @@ CLIENT_CONTAINER_APP_NAME
 SERVER_DATABASE_URL
 ```
 
+For `SERVER_DATABASE_URL`, use explicit TLS mode in production and staging:
+
+```bash
+SERVER_DATABASE_URL=postgresql://<user>:<password>@<server>.postgres.database.azure.com:5432/zzyix?sslmode=verify-full
+```
+
 Optional keys in the env file:
 
 ```bash

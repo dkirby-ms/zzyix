@@ -67,6 +67,34 @@ log() {
   printf "%s\n" "${message}"
 }
 
+warn() {
+  local message="$1"
+  printf "WARNING: %s\n" "${message}" >&2
+}
+
+warn_if_non_explicit_sslmode() {
+  local database_url="$1"
+  local sslmode=""
+
+  if [[ "${database_url}" =~ ([\?\&])sslmode=([^\&\#]+) ]]; then
+    sslmode="${BASH_REMATCH[2]}"
+  fi
+
+  local normalized_sslmode
+  normalized_sslmode="$(printf '%s' "${sslmode}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ -z "${normalized_sslmode}" ]]; then
+    warn "SERVER_DATABASE_URL has no sslmode parameter. For production/staging, use sslmode=verify-full."
+    return
+  fi
+
+  case "${normalized_sslmode}" in
+    require|prefer|verify-ca)
+      warn "SERVER_DATABASE_URL uses sslmode=${sslmode}. Use sslmode=verify-full to keep strong TLS verification and avoid pg v9 behavior changes."
+      ;;
+  esac
+}
+
 require_command() {
   local command_name="$1"
   if ! command -v "${command_name}" >/dev/null 2>&1; then
@@ -210,6 +238,7 @@ main() {
   require_value "SERVER_CONTAINER_APP_NAME"
   require_value "CLIENT_CONTAINER_APP_NAME"
   require_value "SERVER_DATABASE_URL"
+  warn_if_non_explicit_sslmode "${SERVER_DATABASE_URL}"
 
   create_environment_if_missing "${repo}" "${environment_name}"
 
