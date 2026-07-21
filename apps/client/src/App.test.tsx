@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import App, { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from './App'
+import App from './App'
+import { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from './domain/collaboratorUtils'
 import type { SessionSummary } from './network/session'
 
 const { createSessionMock, listSessionsMock, useSocketConnectionMock } = vi.hoisted(() => ({
