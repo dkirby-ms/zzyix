@@ -124,6 +124,29 @@ Scale the collaborative mosaic canvas from bounded small-world assumptions to la
   * Document blockers that require additional research or design changes and defer large refactors.
   * Details: .copilot-tracking/details/2026-07-21/canvas-scaling-camera-controls-details.md (Lines 339-343)
 
+### [x] Implementation Phase 6: Post-review correctness and rollout confidence rework
+
+<!-- parallelizable: false -->
+
+* [x] Step 6.1: Fix aggregate chunk snapshot merge semantics in client state reconciliation.
+  * Ensure aggregate payload snapshots do not clear visible fine tiles unexpectedly and remain mode-coherent with resync flows.
+  * Details: .copilot-tracking/details/2026-07-21/canvas-scaling-camera-controls-details.md (Phase 6 section)
+* [x] Step 6.2: Add direct App-level tests for aggregate and fine payload transitions and chunk resync behavior.
+  * Add deterministic tests for fine-to-aggregate and aggregate-to-fine state transitions and chunk resync snapshot requests.
+  * Details: .copilot-tracking/details/2026-07-21/canvas-scaling-camera-controls-details.md (Phase 6 section)
+* [x] Step 6.3: Consolidate chunk-size runtime configuration across client and server runtime paths.
+  * Remove duplicated runtime constants where feasible and ensure a single configuration source drives mapping behavior.
+  * Details: .copilot-tracking/details/2026-07-21/canvas-scaling-camera-controls-details.md (Phase 6 section)
+* [x] Step 6.4: Gate client chunk streaming until server capabilities are known.
+  * Avoid default-enabled subscription behavior prior to capability readiness to reduce startup churn.
+  * Details: .copilot-tracking/details/2026-07-21/canvas-scaling-camera-controls-details.md (Phase 6 section)
+* [x] Step 6.5: Align server README CORS default documentation with runtime behavior.
+  * Update operational docs to match effective defaults from server runtime.
+  * Details: .copilot-tracking/details/2026-07-21/canvas-scaling-camera-controls-details.md (Phase 6 section)
+* [x] Step 6.6: Validate rework changes.
+  * Run full project validation commands and capture pass/fail outcomes in tracking artifacts.
+  * Details: .copilot-tracking/details/2026-07-21/canvas-scaling-camera-controls-details.md (Phase 6 section)
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-21/canvas-scaling-camera-controls-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.

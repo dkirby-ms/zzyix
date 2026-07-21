@@ -33,6 +33,7 @@ import {
 } from './network/session'
 import { resolveServerUrl } from './network/serverUrl'
 import { useSocketConnection } from './network/useSocketConnection'
+import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
   ClientJoinedPayload,
   ClientLeftPayload,
@@ -67,7 +68,7 @@ import {
 } from './domain/collaboratorUtils'
 import './App.css'
 
-const CHUNK_WORLD_SIZE = 8
+const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
 const CHUNK_PREFETCH_RING = 1
 const CHUNK_SOFT_SUBSCRIPTION_LIMIT = 64
 const CHUNK_HARD_SUBSCRIPTION_LIMIT = 128
@@ -121,6 +122,8 @@ const findHoveredTileId = (x: number, y: number, tiles: SequencedTilesState['til
 
 const worldToChunkId = (x: number, y: number, chunkSize: number): ChunkId =>
   `${Math.floor(x / chunkSize)}:${Math.floor(y / chunkSize)}`
+
+const shouldReplaceChunkTilesForSnapshot = (payloadMode: ChunkPayloadMode): boolean => payloadMode === 'fine'
 
 function App() {
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
@@ -309,8 +312,11 @@ function App() {
   const onChunkSnapshot = useCallback((payload: ChunkSnapshotPayload): void => {
     setSequencedState((prev) => {
       const incomingChunkIds = new Set(payload.chunks.map((chunk) => chunk.chunkId))
-      const keptTiles = prev.tiles.filter((tile) =>
-        !incomingChunkIds.has(worldToChunkId(tile.transform.position.x, tile.transform.position.y, CHUNK_WORLD_SIZE)))
+      const replaceChunkTiles = shouldReplaceChunkTilesForSnapshot(payload.payloadMode)
+      const keptTiles = replaceChunkTiles
+        ? prev.tiles.filter((tile) =>
+          !incomingChunkIds.has(worldToChunkId(tile.transform.position.x, tile.transform.position.y, CHUNK_WORLD_SIZE)))
+        : prev.tiles
       const incomingTiles = payload.chunks.flatMap((chunk) => chunk.tiles)
       const mergedTiles = [...keptTiles, ...incomingTiles]
 
@@ -375,6 +381,7 @@ function App() {
     socket.emit('request_chunk_snapshot', {
       canvasId: sessionId,
       chunks: [payload.chunkId],
+      payloadMode: payload.payloadMode,
     })
   }, [requestSnapshot, sessionId])
 
@@ -542,7 +549,7 @@ function App() {
     onChunkTilePlaced,
     onChunkTileRemoved,
     onChunkResyncRequired,
-    realtimeCapabilities?.chunkStreamingEnabled ?? true,
+    realtimeCapabilities?.chunkStreamingEnabled ?? false,
   )
 
   const onViewportChanged = useCallback((payload: {
@@ -585,7 +592,7 @@ function App() {
       return
     }
 
-    if (realtimeCapabilities && !realtimeCapabilities.chunkStreamingEnabled) {
+    if (!realtimeCapabilities || !realtimeCapabilities.chunkStreamingEnabled) {
       if (subscribedChunkIdsRef.current.size > 0) {
         socket.emit('unsubscribe_chunks', {
           canvasId: sessionId,

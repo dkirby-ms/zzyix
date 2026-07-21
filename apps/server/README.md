@@ -29,7 +29,7 @@ npm start
 Set environment variables:
 - `PORT` — Server port (default: 3001)
 - `HOST` — Server host (default: 0.0.0.0)
-- `CORS_ORIGIN` — Allowed CORS origin for Socket.IO (default: *)
+- `CORS_ORIGIN` — Allowed CORS origin for Socket.IO (default: http://localhost:5173)
 
 Chunk rollout flags:
 - `FEATURE_CHUNK_STREAMING_ENABLED` — Enable chunk subscribe/unsubscribe handlers globally (`true` by default)

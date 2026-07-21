@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
 import type { ClientPresence, Session, TileInstance } from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
+import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
 import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema.js'
 import { getDatabaseBundle, type DatabaseClient } from './client.js'
 
@@ -112,7 +113,7 @@ export type ChunkTileReadResult = {
 
 const toMillis = (value: Date): number => value.getTime()
 
-const CHUNK_WORLD_SIZE = 8
+const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
 
 const worldToChunk = (x: number, y: number, chunkWorldSize: number = CHUNK_WORLD_SIZE): ChunkCoordinate => ({
   x: Math.floor(x / chunkWorldSize),

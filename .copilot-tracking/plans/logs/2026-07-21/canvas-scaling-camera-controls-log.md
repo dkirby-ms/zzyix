@@ -23,6 +23,10 @@ Gaps and differences identified between research findings and the implementation
   * Research recommends: profile chunk-size/hysteresis candidates and verify DB query plans at expected scale.
   * Plan implements: gate checks in rollout and final validation phases with documented pass thresholds.
   * Rationale: keeps implementation momentum while preserving measurable risk controls before broad adoption.
+* DD-04: Post-review rework phase added after initial completion to address runtime correctness and validation confidence gaps.
+  * Review recommends: fix aggregate merge semantics, add direct transition tests, consolidate chunk-size runtime config, and align startup/doc behavior.
+  * Plan implements: explicit Implementation Phase 6 for bounded-scope corrective work.
+  * Rationale: major review findings affect correctness and rollout confidence, requiring tracked corrective implementation before closure.
 
 ## Implementation Paths Considered
 
@@ -91,3 +95,11 @@ Gaps and differences identified between research findings and the implementation
 * WI-13: Canary gating negative-path tests - Add integration tests validating non-canary sessions are denied chunk streaming when gating is enabled. (Medium)
   * Source: Phase 4 implementation findings
   * Dependency: Phase 5 full test sweep
+* WI-14: Request snapshot payload-mode parity test - Add a server integration test asserting `request_chunk_snapshot` honors requested payload mode semantics end-to-end when capabilities allow both modes. (Low)
+  * Source: Phase 6 implementation findings
+  * Dependency: Phase 6 correctness rework completion
+
+## User Decisions
+
+* ID-01: Post-review corrective scope handling — Option A selected
+  * Rationale: Implement corrective items as an explicit new phase in the existing plan to preserve artifact traceability and phase-based validation history.

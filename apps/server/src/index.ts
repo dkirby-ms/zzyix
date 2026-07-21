@@ -3,6 +3,7 @@ import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
+import { RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -91,7 +92,7 @@ const DEFAULT_CANVAS_CONFIG: SessionCanvasConfig = {
   boundsPolicy: DEFAULT_BOUNDS_POLICY,
 }
 
-const CHUNK_WORLD_SIZE = 8
+const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
 const CHUNK_ROOM_PREFIX = 'chunk'
 const REPLICA_ID = process.env.REPLICA_ID ?? process.env.HOSTNAME ?? `local-${process.pid}`
 
@@ -281,6 +282,10 @@ const isRequestChunkSnapshotPayload = (value: unknown): value is RequestChunkSna
   }
 
   if (!Array.isArray(value.chunks) || value.chunks.some((chunkId) => !isChunkId(chunkId))) {
+    return false
+  }
+
+  if (value.payloadMode !== undefined && value.payloadMode !== 'fine' && value.payloadMode !== 'aggregate') {
     return false
   }
 
@@ -1516,7 +1521,7 @@ io.on('connection', (socket) => {
 
     try {
       const chunkRead = await listTilesByChunksWithParity(sessionId, chunkIdsToCoordinates(payload.chunks))
-      const payloadMode: ChunkPayloadMode = capabilities.aggregateSnapshotEnabled ? 'aggregate' : 'fine'
+      const payloadMode = resolvePayloadMode(payload.payloadMode, capabilities)
       const snapshot = buildChunkSnapshot(
         sessionId,
         payload.chunks,

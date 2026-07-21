@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from './domain/collaboratorUtils'
 import type { SessionSummary } from './network/session'
+import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
 const { createSessionMock, listSessionsMock, useSocketConnectionMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn<() => Promise<string>>(),
@@ -47,6 +48,8 @@ vi.mock('./render/MosaicScene', () => ({
     cameraPolicy,
     cameraPan,
     onCameraPan,
+    onViewportChanged,
+    onZoomTierChanged,
   }: {
     remoteCursors?: Array<{ clientId: string }>
     remoteSelections?: Array<{ clientId: string; tileId: string }>
@@ -54,6 +57,12 @@ vi.mock('./render/MosaicScene', () => ({
     cameraPolicy?: { minZoom: number; maxZoom: number; panSensitivity: number }
     cameraPan?: { x: number; y: number }
     onCameraPan?: (deltaX: number, deltaY: number) => void
+    onViewportChanged?: (payload: {
+      center: { x: number; y: number }
+      viewport: { minX: number; maxX: number; minY: number; maxY: number }
+      zoom: number
+    }) => void
+    onZoomTierChanged?: (zoom: number) => void
   }) => (
     <div
       data-testid="mosaic-scene"
@@ -73,6 +82,27 @@ vi.mock('./render/MosaicScene', () => ({
       </button>
       <button type="button" onClick={() => onCameraPan?.(10, -5)}>
         Pan Camera
+      </button>
+      <button
+        type="button"
+        onClick={() => onViewportChanged?.({
+          center: { x: 0, y: 0 },
+          viewport: {
+            minX: -RUNTIME_CHUNK_WORLD_SIZE,
+            maxX: 0,
+            minY: -RUNTIME_CHUNK_WORLD_SIZE,
+            maxY: 0,
+          },
+          zoom: 60,
+        })}
+      >
+        Emit Viewport
+      </button>
+      <button type="button" onClick={() => onZoomTierChanged?.(30)}>
+        Zoom Aggregate
+      </button>
+      <button type="button" onClick={() => onZoomTierChanged?.(60)}>
+        Zoom Fine
       </button>
     </div>
   ),
@@ -387,5 +417,243 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pan Camera' }))
 
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '-0.2,-0.1')
+  })
+
+  it('keeps existing fine tiles when aggregate chunk snapshots arrive, then replaces with fine chunk snapshot', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onSnapshot = socketCall[3] as (payload: any) => void
+    const onChunkSnapshot = socketCall[12] as (payload: any) => void
+
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [
+            {
+              id: '11111111-1111-4111-8111-111111111111',
+              shape: 'square',
+              color: '#111',
+              material: 'ceramic',
+              transform: { position: { x: 1, y: 1 }, rotation: 0, mirrored: false },
+              createdAt: Date.now(),
+              placedBy: 'client-2',
+            },
+          ],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        clients: [{ clientId: 'client-1', joinedAt: Date.now() - 10 }],
+        lastOpSeq: 1,
+        revision: 1,
+        realtimeCapabilities: {
+          chunkStreamingEnabled: true,
+          aggregateSnapshotEnabled: true,
+          chunkCanaryEnabled: false,
+          multiReplicaReady: false,
+        },
+      })
+    })
+
+    expect(screen.getByText('1 placed')).toBeInTheDocument()
+
+    act(() => {
+      onChunkSnapshot({
+        canvasId: 'session-1',
+        payloadMode: 'aggregate',
+        coordination: {
+          replicaId: 'r1',
+          membershipScope: 'process-local',
+          membershipAssumption: 'best-effort',
+          emittedAt: Date.now(),
+        },
+        chunks: [
+          {
+            chunkId: '0:0',
+            tiles: [],
+            aggregate: { tileCount: 1, byShape: { square: 1 }, byMaterial: { ceramic: 1 } },
+            opSeq: 2,
+            revision: 2,
+          },
+        ],
+        serverOpSeq: 2,
+        serverRevision: 2,
+      })
+    })
+
+    expect(screen.getByText('1 placed')).toBeInTheDocument()
+
+    act(() => {
+      onChunkSnapshot({
+        canvasId: 'session-1',
+        payloadMode: 'fine',
+        coordination: {
+          replicaId: 'r1',
+          membershipScope: 'process-local',
+          membershipAssumption: 'best-effort',
+          emittedAt: Date.now(),
+        },
+        chunks: [
+          {
+            chunkId: '0:0',
+            tiles: [
+              {
+                id: '22222222-2222-4222-8222-222222222222',
+                shape: 'triangle',
+                color: '#222',
+                material: 'stone',
+                transform: { position: { x: 2, y: 2 }, rotation: 0, mirrored: false },
+                createdAt: Date.now(),
+                placedBy: 'client-3',
+              },
+            ],
+            opSeq: 3,
+            revision: 3,
+          },
+        ],
+        serverOpSeq: 3,
+        serverRevision: 3,
+      })
+    })
+
+    expect(screen.getByText('1 placed')).toBeInTheDocument()
+  })
+
+  it('emits mode-coherent request_chunk_snapshot on chunk resync', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn()
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock } }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onSnapshot = socketCall[3] as (payload: any) => void
+    const onChunkResyncRequired = socketCall[15] as (payload: any) => void
+
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        clients: [{ clientId: 'client-1', joinedAt: Date.now() - 10 }],
+        lastOpSeq: 1,
+        revision: 1,
+        realtimeCapabilities: {
+          chunkStreamingEnabled: true,
+          aggregateSnapshotEnabled: true,
+          chunkCanaryEnabled: false,
+          multiReplicaReady: false,
+        },
+      })
+    })
+
+    act(() => {
+      onChunkResyncRequired({
+        canvasId: 'session-1',
+        chunkId: '0:0',
+        payloadMode: 'aggregate',
+        coordination: {
+          replicaId: 'r1',
+          membershipScope: 'process-local',
+          membershipAssumption: 'best-effort',
+          emittedAt: Date.now(),
+        },
+        currentOpSeq: 5,
+        currentRevision: 5,
+        reason: 'REVISION_MISMATCH',
+      })
+    })
+
+    expect(emitMock).toHaveBeenCalledWith('request_chunk_snapshot', {
+      canvasId: 'session-1',
+      chunks: ['0:0'],
+      payloadMode: 'aggregate',
+    })
+
+    act(() => {
+      onChunkResyncRequired({
+        canvasId: 'session-1',
+        chunkId: '1:1',
+        payloadMode: 'fine',
+        coordination: {
+          replicaId: 'r1',
+          membershipScope: 'process-local',
+          membershipAssumption: 'best-effort',
+          emittedAt: Date.now(),
+        },
+        currentOpSeq: 6,
+        currentRevision: 6,
+        reason: 'GAP_DETECTED',
+      })
+    })
+
+    expect(emitMock).toHaveBeenCalledWith('request_chunk_snapshot', {
+      canvasId: 'session-1',
+      chunks: ['1:1'],
+      payloadMode: 'fine',
+    })
+  })
+
+  it('gates chunk streaming wiring until capabilities are known and enabled', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    const initialSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    expect(initialSocketCall[16]).toBe(false)
+
+    const onSnapshot = initialSocketCall[3] as (payload: any) => void
+
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        clients: [{ clientId: 'client-1', joinedAt: Date.now() - 10 }],
+        lastOpSeq: 1,
+        revision: 1,
+        realtimeCapabilities: {
+          chunkStreamingEnabled: true,
+          aggregateSnapshotEnabled: true,
+          chunkCanaryEnabled: false,
+          multiReplicaReady: false,
+        },
+      })
+    })
+
+    const enabledSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    expect(enabledSocketCall[16]).toBe(true)
   })
 })

@@ -356,3 +356,93 @@ Document non-trivial blockers, impacted files, and additional research needed wh
 
 * All phases complete with bounded and chunked modes coexisting safely behind feature flags.
 * Final validation passes with no critical regressions in placement, camera navigation, synchronization, or persistence.
+
+## Implementation Phase 6: Post-review correctness and rollout confidence rework
+
+<!-- parallelizable: false -->
+
+### Step 6.1: Fix aggregate chunk snapshot merge semantics in client state reconciliation
+
+Ensure the client does not clear fine-grained visible tiles when receiving aggregate payload snapshots for subscribed chunks.
+
+Files:
+* apps/client/src/App.tsx - Update chunk snapshot merge logic to be payload-mode aware and preserve mode-coherent behavior.
+
+Success criteria:
+* Aggregate snapshots no longer clear existing visible fine tiles unexpectedly.
+* Fine snapshots continue to replace stale tiles for incoming chunks deterministically.
+* Chunk resync requests remain mode-coherent and avoid stale-mode regressions.
+
+Dependencies:
+* Prior completion of chunk protocol phases.
+
+### Step 6.2: Add direct App-level tests for aggregate and fine payload transitions and chunk resync behavior
+
+Add deterministic tests that simulate payload mode transitions and verify the App layer emits coherent socket requests and state transitions.
+
+Files:
+* apps/client/src/App.test.tsx - Add tests for aggregate snapshot merge safety, fine payload replacement behavior, and chunk resync-triggered snapshot requests.
+
+Success criteria:
+* Tests fail before regressions are fixed and pass with corrected behavior.
+* Coverage explicitly includes fine-to-aggregate and aggregate-to-fine behavior.
+
+Dependencies:
+* Step 6.1 completion.
+
+### Step 6.3: Consolidate chunk-size runtime configuration across client and server runtime paths
+
+Reduce runtime drift risk by centralizing chunk-size configuration used by client mapping and server repository/runtime chunk derivation.
+
+Files:
+* apps/server/src/contracts.ts - Add additive shared runtime constant export for chunk size.
+* apps/client/src/App.tsx - Consume shared runtime chunk-size source.
+* apps/server/src/index.ts - Consume shared runtime chunk-size source.
+* apps/server/src/db/repository.ts - Consume shared runtime chunk-size source.
+
+Success criteria:
+* Runtime chunk-size constant is defined once and consumed consistently in client and server runtime code paths.
+* Existing behavior remains unchanged with the same default chunk size.
+
+Dependencies:
+* None.
+
+### Step 6.4: Gate client chunk streaming until server capabilities are known
+
+Avoid initial default-enabled chunk subscriptions until capabilities are explicitly known from server snapshot.
+
+Files:
+* apps/client/src/App.tsx - Update chunk streaming enablement argument and subscription effect gating.
+* apps/client/src/network/useSocketConnection.test.ts - Add or update assertions for capability-gated chunk subscription wiring where needed.
+
+Success criteria:
+* Client does not subscribe chunk events before realtime capabilities are available.
+* Chunk subscriptions begin once capability indicates chunk streaming is enabled.
+
+Dependencies:
+* Step 6.1 completion.
+
+### Step 6.5: Align server README CORS default documentation with runtime behavior
+
+Update server environment variable documentation to match the actual runtime fallback for CORS origin.
+
+Files:
+* apps/server/README.md - Correct CORS default description.
+
+Success criteria:
+* README CORS default matches runtime value in server initialization.
+
+Dependencies:
+* None.
+
+### Step 6.6: Validate rework changes
+
+Run full validation to ensure rework correctness and no regressions.
+
+Validation commands:
+* npm run lint:client
+* npm run lint:server
+* npm run test:client
+* npm run test:server
+* npm run build:client
+* npm run build:server

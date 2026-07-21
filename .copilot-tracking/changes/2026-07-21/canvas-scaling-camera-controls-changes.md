@@ -11,6 +11,7 @@ Phase 1 completed: configurable bounds policy parity across client and server, a
 Phase 2 completed: additive chunk contracts, chunk room lifecycle on server, chunk-scoped deltas/resync, and viewport-derived subscription diffing with hysteresis and budgets.
 Phase 3 completed: additive chunk persistence schema and migration, chunk-aware repository query paths, and parity verification between legacy and chunked reads.
 Phase 4 completed: zoom-tier aggregate mode contracts and behavior, feature-flag and canary rollout controls, telemetry instrumentation, and multi-replica readiness metadata with failure-mode tests.
+Phase 6 completed: post-review correctness rework for aggregate snapshot merge semantics, App-level transition and resync tests, shared runtime chunk-size configuration, capability-gated client chunk streaming startup, and README runtime-default alignment.
 
 ## Changes
 
@@ -41,6 +42,12 @@ Phase 4 completed: zoom-tier aggregate mode contracts and behavior, feature-flag
 * apps/server/migrations/meta/_journal.json - Registered chunk schema migration metadata.
 * apps/client/src/network/useSocketConnection.test.ts - Added chunk event and capability gating behavior coverage.
 * apps/server/README.md - Documented feature flag and canary controls for chunk rollout.
+* apps/client/src/App.tsx - Fixed aggregate snapshot merge semantics, gated chunk streaming until realtime capabilities are known, and consumed shared runtime chunk-size constant.
+* apps/client/src/App.test.tsx - Added App-level regression tests for aggregate and fine snapshot transitions, resync snapshot requests, and capability-gated chunk streaming wiring.
+* apps/server/src/contracts.ts - Added additive shared runtime chunk-size constant for cross-layer runtime parity.
+* apps/server/src/index.ts - Consumed shared runtime chunk-size constant for server chunk mapping.
+* apps/server/src/db/repository.ts - Consumed shared runtime chunk-size constant for repository chunk mapping parity.
+* apps/server/README.md - Corrected CORS default value to match runtime behavior.
 
 ### Removed
 
@@ -58,14 +65,16 @@ Phase 4 completed: zoom-tier aggregate mode contracts and behavior, feature-flag
 	* Resolved in-scope by explicit numeric type-guard checks before comparisons and revalidated with clean build.
 * Optional architecture decision document update in `docs/decisions/2026-07-15-deployment-architecture-v01.md` was not applied in Phase 4.
 	* Deferred because implementation details marked it optional and all acceptance criteria were met without it.
+* Chunk snapshot payload mode hint on explicit `request_chunk_snapshot` remains server-selected by capability defaults.
+	* Deferred as follow-on because current correctness fix and tests are complete for mode-coherent client requests while preserving additive compatibility.
 
 ## Release Summary
 
-Completed all five implementation phases across client rendering/navigation, server protocol/runtime, and persistence migration.
+Completed implementation phases across client rendering/navigation, server protocol/runtime, persistence migration, and post-review corrective rework.
 
 Total files affected in implementation scope:
 * Added: 2
-* Modified: 15
+* Modified: 21
 * Removed: 0
 
 Created files:

@@ -26,6 +26,7 @@
 // Both client and server MUST use this same version to ensure compatibility.
 // Increment on any breaking change (new required fields, removed events, etc.).
 export const SCHEMA_VERSION = '1.0.0'
+export const RUNTIME_CHUNK_WORLD_SIZE = 8
 
 // ─── Domain primitives ────────────────────────────────────────────────────────
 
@@ -379,6 +380,7 @@ export type UnsubscribeChunksPayload = {
 export type RequestChunkSnapshotPayload = {
   canvasId: string
   chunks: ChunkId[]
+  payloadMode?: ChunkPayloadMode
 }
 
 export type ChunkSnapshotEntry = {
