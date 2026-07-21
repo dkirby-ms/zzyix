@@ -463,6 +463,14 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
 }
 
 const verifyDatabaseConnectivity = async (): Promise<void> => {
+  // Check that DATABASE_URL is set
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL environment variable is not set. ' +
+      'Please set DATABASE_URL to your PostgreSQL connection string.'
+    )
+  }
+
   const databaseTarget = describeDatabaseTarget(process.env.DATABASE_URL)
 
   writeLog('info', 'database_connectivity_check_started', {
