@@ -65,3 +65,23 @@ export const useCraftMaterial = (
     return material
   }, [colorHex, ghost, variant])
 }
+
+export const useRemoteSelectionMaterial = (colorHex: string): MeshPhysicalMaterial => {
+  return useMemo(() => {
+    const baseColor = new Color(colorHex)
+    const material = new MeshPhysicalMaterial({
+      color: baseColor,
+      roughness: 0.2,
+      metalness: 0,
+      clearcoat: 0.8,
+      transparent: true,
+      opacity: 0.2,
+      emissive: baseColor.clone().multiplyScalar(0.5),
+      emissiveIntensity: 0.5,
+      depthWrite: false,
+    })
+
+    withCraftShader(material)
+    return material
+  }, [colorHex])
+}

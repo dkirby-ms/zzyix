@@ -6,3 +6,15 @@ export const palettes = {
 } as const
 
 export type PaletteName = keyof typeof palettes
+
+export const getCollaboratorColor = (clientId: string): string => {
+  const swatches = [...palettes.terracotta, ...palettes.lagoon, ...palettes.dusk, ...palettes.quarry]
+  let hash = 0
+
+  for (let i = 0; i < clientId.length; i += 1) {
+    hash = ((hash << 5) - hash) + clientId.charCodeAt(i)
+    hash |= 0
+  }
+
+  return swatches[Math.abs(hash) % swatches.length]
+}

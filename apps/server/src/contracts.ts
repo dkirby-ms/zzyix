@@ -295,6 +295,13 @@ export type PointerUpdatePayload = {
   position: Vec2
 }
 
+export type SelectionUpdatePayload = {
+  canvasId: string
+  clientId: string
+  tileId?: string
+  updatedAt: number
+}
+
 export type ClientJoinedPayload = {
   client: ClientPresence
 }
@@ -322,6 +329,8 @@ export interface ClientToServerEvents {
   request_snapshot: () => void
   /** Fire-and-forget cursor position for collaborative presence. */
   pointer_move: (payload: PointerMovePayload) => void
+  /** Fire-and-forget selected tile intent for collaborative presence. */
+  selection_update: (payload: SelectionUpdatePayload) => void
 }
 
 /** Events emitted by the server, received by clients. */
@@ -334,6 +343,8 @@ export interface ServerToClientEvents {
   tile_removed: (payload: TileRemovedPayload) => void
   /** Broadcast to all sockets in the session room except the sender. */
   pointer_update: (payload: PointerUpdatePayload) => void
+  /** Broadcast to all sockets in the session room except the sender. */
+  selection_update: (payload: SelectionUpdatePayload) => void
   /** Broadcast to all sockets in the session room when a peer connects. */
   client_joined: (payload: ClientJoinedPayload) => void
   /** Broadcast to all sockets in the session room when a peer disconnects. */
