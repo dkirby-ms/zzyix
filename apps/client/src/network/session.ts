@@ -4,6 +4,18 @@ const SERVER_URL = resolveServerUrl()
 const SESSION_STORAGE_KEY = 'zzyix_session_id'
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
 
+export type ChunkId = `${number}:${number}`
+
+export const toChunkId = (chunkX: number, chunkY: number): ChunkId => `${chunkX}:${chunkY}`
+
+export const parseChunkId = (chunkId: ChunkId): { x: number; y: number } => {
+  const [rawX, rawY] = chunkId.split(':')
+  return {
+    x: Number(rawX),
+    y: Number(rawY),
+  }
+}
+
 export type SessionSummary = {
   id: string
   displayName: string

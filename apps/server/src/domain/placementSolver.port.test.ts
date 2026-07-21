@@ -49,4 +49,19 @@ describe('placementSolver server parity', () => {
     expect(result.correction.x).toBeLessThan(0)
     expect(result.reason).toContain('out-of-bounds')
   })
+
+  it('accepts placement outside finite bounds when policy mode is unbounded', () => {
+    const result = validatePlacement(
+      'rectangle',
+      {
+        position: vec2(defaultBounds.maxX + 50, 0),
+        rotation: 0,
+      },
+      [],
+      { mode: 'unbounded' },
+    )
+
+    expect(result.valid).toBe(true)
+    expect(result.reason).toBe('ok')
+  })
 })

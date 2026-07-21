@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { vec2 } from './domain/math2d'
+import {
+  applyChunkSubscriptionBudgets,
+  shouldRecomputeVisibleChunks,
+  vec2,
+  viewportToChunkIds,
+  type ChunkId,
+  type ViewportBounds,
+} from './domain/math2d'
 import { getTileDefinition, normalizeAngle, quantizeRotation, transformPolygon } from './domain/tileGeometry'
 import type { TileShape } from './domain/tileGeometry'
 import {
@@ -37,6 +44,12 @@ import type {
   SessionSnapshotPayload,
   TilePlacedPayload,
   TileRemovedPayload,
+  ChunkResyncRequiredPayload,
+  ChunkSnapshotPayload,
+  ChunkTilePlacedPayload,
+  ChunkTileRemovedPayload,
+  ChunkPayloadMode,
+  RealtimeCapabilities,
 } from '../../server/src/contracts'
 import { MosaicScene } from './render/MosaicScene'
 import { ControlsPanel } from './ui/ControlsPanel'
@@ -53,6 +66,25 @@ import {
   type RemoteCollaboratorMap,
 } from './domain/collaboratorUtils'
 import './App.css'
+
+const CHUNK_WORLD_SIZE = 8
+const CHUNK_PREFETCH_RING = 1
+const CHUNK_SOFT_SUBSCRIPTION_LIMIT = 64
+const CHUNK_HARD_SUBSCRIPTION_LIMIT = 128
+const CHUNK_MOVEMENT_HYSTERESIS_RATIO = 0.25
+const CHUNK_ZOOM_HYSTERESIS = 0.5
+const AGGREGATE_TIER_ENTER_ZOOM = 45
+const AGGREGATE_TIER_EXIT_ZOOM = 47
+
+type ZoomTier = 'fine' | 'aggregate'
+
+const resolveZoomTier = (previous: ZoomTier | null, zoom: number): ZoomTier => {
+  if (previous === 'aggregate') {
+    return zoom > AGGREGATE_TIER_EXIT_ZOOM ? 'fine' : 'aggregate'
+  }
+
+  return zoom <= AGGREGATE_TIER_ENTER_ZOOM ? 'aggregate' : 'fine'
+}
 
 const isPointInPolygon = (point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): boolean => {
   let inside = false
@@ -87,6 +119,9 @@ const findHoveredTileId = (x: number, y: number, tiles: SequencedTilesState['til
   return undefined
 }
 
+const worldToChunkId = (x: number, y: number, chunkSize: number): ChunkId =>
+  `${Math.floor(x / chunkSize)}:${Math.floor(y / chunkSize)}`
+
 function App() {
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
@@ -101,6 +136,11 @@ function App() {
   const [ghostVisible, setGhostVisible] = useState(false)
   const [invalidPulse, setInvalidPulse] = useState(false)
   const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 })
+  const [cameraPolicy] = useState({
+    minZoom: 20,
+    maxZoom: 140,
+    panSensitivity: 0.02,
+  })
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [mode, setMode] = useState<'lobby' | 'canvas'>('lobby')
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -110,6 +150,9 @@ function App() {
   const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
+  const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
+  const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
+  const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
   const pointerEmitThrottleRef = useRef<{
     lastSentAt: number
@@ -122,6 +165,19 @@ function App() {
     pendingTileId?: string
     timeoutId: number | null
   }>({ lastSentAt: 0, lastTileId: undefined, pendingTileId: undefined, timeoutId: null })
+  const lastChunkViewportRef = useRef<{
+    center: { x: number; y: number }
+    zoom: number
+    viewport: ViewportBounds
+  } | null>(null)
+  const subscribedChunkIdsRef = useRef<Set<ChunkId>>(new Set())
+  const zoomTierRef = useRef<ZoomTier>('fine')
+  const clientTelemetryRef = useRef({
+    tierTransitions: 0,
+    subscribeEvents: 0,
+    unsubscribeEvents: 0,
+    resyncEvents: 0,
+  })
   const clientId = useMemo(() => ensureClientId(), [])
   const serverUrl = useMemo(() => resolveServerUrl(), [])
 
@@ -202,6 +258,7 @@ function App() {
   }, [])
 
   const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
+    setRealtimeCapabilities(payload.realtimeCapabilities ?? null)
     setSequencedState(
       applySequencedSnapshot({
         tiles: payload.session.tiles,
@@ -248,6 +305,78 @@ function App() {
     console.warn('resync_required received:', { reason: payload.reason, currentOpSeq: payload.currentOpSeq })
     requestSnapshot()
   }, [requestSnapshot])
+
+  const onChunkSnapshot = useCallback((payload: ChunkSnapshotPayload): void => {
+    setSequencedState((prev) => {
+      const incomingChunkIds = new Set(payload.chunks.map((chunk) => chunk.chunkId))
+      const keptTiles = prev.tiles.filter((tile) =>
+        !incomingChunkIds.has(worldToChunkId(tile.transform.position.x, tile.transform.position.y, CHUNK_WORLD_SIZE)))
+      const incomingTiles = payload.chunks.flatMap((chunk) => chunk.tiles)
+      const mergedTiles = [...keptTiles, ...incomingTiles]
+
+      return {
+        tiles: mergedTiles,
+        lastOpSeq: Math.max(prev.lastOpSeq, payload.serverOpSeq),
+        revision: Math.max(prev.revision, payload.serverRevision),
+        requiresSnapshot: false,
+      }
+    })
+  }, [])
+
+  const onChunkTilePlaced = useCallback((payload: ChunkTilePlacedPayload): void => {
+    setSequencedState((prev) => {
+      const next = reconcileSequencedTilePlaced(prev, {
+        tile: { ...payload.tile, placedBy: payload.placedBy },
+        opSeq: payload.opSeq,
+        revision: payload.revision,
+      })
+
+      if (next.requiresSnapshot) {
+        requestSnapshot()
+      }
+
+      return next
+    })
+  }, [requestSnapshot])
+
+  const onChunkTileRemoved = useCallback((payload: ChunkTileRemovedPayload): void => {
+    setSequencedState((prev) => {
+      const next = reconcileSequencedTileRemoved(prev, {
+        tileId: payload.tileId,
+        opSeq: payload.opSeq,
+        revision: payload.revision,
+      })
+
+      if (next.requiresSnapshot) {
+        requestSnapshot()
+      }
+
+      return next
+    })
+  }, [requestSnapshot])
+
+  const onChunkResyncRequired = useCallback((payload: ChunkResyncRequiredPayload): void => {
+    clientTelemetryRef.current.resyncEvents += 1
+    console.info('chunk_resync_required_telemetry', {
+      chunkId: payload.chunkId,
+      reason: payload.reason,
+      payloadMode: payload.payloadMode,
+      currentOpSeq: payload.currentOpSeq,
+      currentRevision: payload.currentRevision,
+      totalResyncEvents: clientTelemetryRef.current.resyncEvents,
+    })
+
+    const socket = socketActionRef.current
+    if (!socket || !sessionId) {
+      requestSnapshot()
+      return
+    }
+
+    socket.emit('request_chunk_snapshot', {
+      canvasId: sessionId,
+      chunks: [payload.chunkId],
+    })
+  }, [requestSnapshot, sessionId])
 
   const onPointerUpdate = useCallback((payload: PointerUpdatePayload): void => {
     setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
@@ -409,7 +538,140 @@ function App() {
     onClientJoined,
     onClientLeft,
     onSelectionUpdate,
+    onChunkSnapshot,
+    onChunkTilePlaced,
+    onChunkTileRemoved,
+    onChunkResyncRequired,
+    realtimeCapabilities?.chunkStreamingEnabled ?? true,
   )
+
+  const onViewportChanged = useCallback((payload: {
+    center: { x: number; y: number }
+    viewport: ViewportBounds
+    zoom: number
+  }): void => {
+    const previous = lastChunkViewportRef.current
+
+    if (previous) {
+      const shouldRecompute = shouldRecomputeVisibleChunks(
+        previous.center,
+        payload.center,
+        CHUNK_WORLD_SIZE,
+        CHUNK_MOVEMENT_HYSTERESIS_RATIO,
+        previous.zoom,
+        payload.zoom,
+        CHUNK_ZOOM_HYSTERESIS,
+      )
+
+      if (!shouldRecompute) {
+        return
+      }
+    }
+
+    lastChunkViewportRef.current = payload
+
+    const nextChunkIds = applyChunkSubscriptionBudgets(
+      viewportToChunkIds(payload.viewport, CHUNK_WORLD_SIZE, CHUNK_PREFETCH_RING),
+      CHUNK_SOFT_SUBSCRIPTION_LIMIT,
+      CHUNK_HARD_SUBSCRIPTION_LIMIT,
+    )
+
+    setActiveChunkIds(nextChunkIds)
+  }, [])
+
+  useEffect(() => {
+    const socket = socketActionRef.current
+    if (!socket || !sessionId) {
+      return
+    }
+
+    if (realtimeCapabilities && !realtimeCapabilities.chunkStreamingEnabled) {
+      if (subscribedChunkIdsRef.current.size > 0) {
+        socket.emit('unsubscribe_chunks', {
+          canvasId: sessionId,
+          chunks: Array.from(subscribedChunkIdsRef.current),
+        })
+        subscribedChunkIdsRef.current = new Set()
+        setActiveChunkIds([])
+      }
+      return
+    }
+
+    const payloadMode: ChunkPayloadMode = zoomTier === 'aggregate' ? 'aggregate' : 'fine'
+
+    const previous = subscribedChunkIdsRef.current
+    const next = new Set(activeChunkIds)
+    const subscribe: ChunkId[] = []
+    const unsubscribe: ChunkId[] = []
+
+    for (const chunkId of next) {
+      if (!previous.has(chunkId)) {
+        subscribe.push(chunkId)
+      }
+    }
+
+    for (const chunkId of previous) {
+      if (!next.has(chunkId)) {
+        unsubscribe.push(chunkId)
+      }
+    }
+
+    if (unsubscribe.length > 0) {
+      socket.emit('unsubscribe_chunks', {
+        canvasId: sessionId,
+        chunks: unsubscribe,
+      })
+      clientTelemetryRef.current.unsubscribeEvents += unsubscribe.length
+    }
+
+    if (subscribe.length > 0) {
+      socket.emit('subscribe_chunks', {
+        canvasId: sessionId,
+        chunks: subscribe,
+        payloadMode,
+      })
+      clientTelemetryRef.current.subscribeEvents += subscribe.length
+    }
+
+    if (subscribe.length > 0 || unsubscribe.length > 0) {
+      console.info('chunk_subscription_churn', {
+        zoomTier,
+        payloadMode,
+        subscribeCount: subscribe.length,
+        unsubscribeCount: unsubscribe.length,
+        activeCount: next.size,
+        totalSubscribeEvents: clientTelemetryRef.current.subscribeEvents,
+        totalUnsubscribeEvents: clientTelemetryRef.current.unsubscribeEvents,
+      })
+    }
+
+    subscribedChunkIdsRef.current = next
+  }, [activeChunkIds, sessionId, zoomTier, realtimeCapabilities])
+
+  useEffect(() => {
+    const subscribedChunkIds = subscribedChunkIdsRef
+    const viewportRef = lastChunkViewportRef
+    const socketRef = socketActionRef
+
+    return () => {
+      if (!sessionId || subscribedChunkIds.current.size === 0) {
+        return
+      }
+
+      const socket = socketRef.current
+      if (!socket) {
+        return
+      }
+
+      socket.emit('unsubscribe_chunks', {
+        canvasId: sessionId,
+        chunks: Array.from(subscribedChunkIds.current),
+      })
+      subscribedChunkIds.current = new Set()
+      setActiveChunkIds([])
+      viewportRef.current = null
+    }
+  }, [sessionId])
 
   useEffect(() => {
     if (pointerEmitThrottleRef.current.timeoutId !== null) {
@@ -643,6 +905,7 @@ function App() {
           <span>{ghost.confidence.replace('-', ' ')}</span>
           <span>{sequencedState.tiles.length} placed</span>
           <span>{activeCollaborators.length} active</span>
+          <span>{zoomTier} zoom</span>
         </div>
 
         {activeCollaborators.length > 0 && (
@@ -674,12 +937,30 @@ function App() {
           remoteCursors={remoteCursors}
           remoteSelections={remoteSelections}
           cameraPan={cameraPan}
+          cameraPolicy={cameraPolicy}
           onCameraPan={(deltaX, deltaY) => {
-            const sensitivity = 0.02
             setCameraPan((prev) => ({
-              x: prev.x - deltaX * sensitivity,
-              y: prev.y + deltaY * sensitivity,
+              x: prev.x - deltaX * cameraPolicy.panSensitivity,
+              y: prev.y + deltaY * cameraPolicy.panSensitivity,
             }))
+          }}
+          onViewportChanged={onViewportChanged}
+          onZoomTierChanged={(zoom) => {
+            const previousTier = zoomTierRef.current
+            const nextTier = resolveZoomTier(previousTier, zoom)
+            if (nextTier === previousTier) {
+              return
+            }
+
+            zoomTierRef.current = nextTier
+            setZoomTier(nextTier)
+            clientTelemetryRef.current.tierTransitions += 1
+            console.info('chunk_zoom_tier_transition', {
+              from: previousTier,
+              to: nextTier,
+              zoom,
+              totalTransitions: clientTelemetryRef.current.tierTransitions,
+            })
           }}
         />
 

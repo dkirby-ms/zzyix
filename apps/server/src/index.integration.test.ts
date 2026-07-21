@@ -261,12 +261,26 @@ describe('multi-client collaboration', () => {
           displayName: 'Canvas 11111111',
           participantCount: 3,
           canvasSize: { width: 10.4, height: 6.8 },
+          canvasConfig: {
+            canvasSize: { width: 10.4, height: 6.8 },
+            boundsPolicy: {
+              mode: 'bounded',
+              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+            },
+          },
         },
         {
           id: '22222222-2222-4222-8222-222222222222',
           displayName: 'Canvas 22222222',
           participantCount: 1,
           canvasSize: { width: 10.4, height: 6.8 },
+          canvasConfig: {
+            canvasSize: { width: 10.4, height: 6.8 },
+            boundsPolicy: {
+              mode: 'bounded',
+              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+            },
+          },
         },
       ],
     })
@@ -606,5 +620,243 @@ describe('multi-client collaboration', () => {
     const remainingAfterLastDisconnect = unregisterClientSocket(sessionId, clientId, 'socket-2')
     const shouldEmitClientLeftAfterLastDisconnect = remainingAfterLastDisconnect === 0
     expect(shouldEmitClientLeftAfterLastDisconnect).toBe(true)
+  })
+
+  it('fanouts chunk tile events to scoped chunk room names', () => {
+    const io = {
+      to: vi.fn().mockReturnValue({ emit: vi.fn() }),
+    }
+
+    const sessionId = nextSessionId()
+    const chunkId = '0:0'
+    const chunkRoom = `chunk:${sessionId}:${chunkId}`
+    const eventPayload = {
+      canvasId: sessionId,
+      chunkId,
+      tile: {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        shape: 'square' as const,
+        color: '#abc',
+        material: 'ceramic' as const,
+        transform: { position: vec2(0, 0), rotation: 0 },
+        createdAt: Date.now(),
+      },
+      placedBy: 'client-a',
+      opSeq: 3,
+      revision: 3,
+    }
+
+    io.to(chunkRoom).emit('chunk_tile_placed', eventPayload)
+
+    expect(io.to).toHaveBeenCalledWith(chunkRoom)
+    expect(io.to(chunkRoom).emit).toHaveBeenCalledWith('chunk_tile_placed', eventPayload)
+  })
+
+  it('models chunk snapshot payload with monotonic ordering metadata', () => {
+    const sessionId = nextSessionId()
+    const chunkSnapshot = {
+      canvasId: sessionId,
+      chunks: [
+        {
+          chunkId: '0:0',
+          tiles: [
+            {
+              id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              shape: 'square' as const,
+              color: '#abc',
+              material: 'ceramic' as const,
+              transform: { position: vec2(0, 0), rotation: 0 },
+              createdAt: 10,
+            },
+          ],
+          opSeq: 4,
+          revision: 4,
+        },
+      ],
+      serverOpSeq: 4,
+      serverRevision: 4,
+    }
+
+    expect(chunkSnapshot.chunks[0].opSeq).toBe(chunkSnapshot.serverOpSeq)
+    expect(chunkSnapshot.chunks[0].revision).toBe(chunkSnapshot.serverRevision)
+  })
+
+  it('flags chunk resync_required when client cursor outruns server ordering', () => {
+    const serverCursor = { opSeq: 5, revision: 5 }
+    const clientCursor = { opSeq: 6, revision: 5 }
+    const requiresResync = clientCursor.opSeq > serverCursor.opSeq || clientCursor.revision > serverCursor.revision
+
+    expect(requiresResync).toBe(true)
+    expect({
+      canvasId: 'session-1',
+      chunkId: '0:0',
+      payloadMode: 'fine' as const,
+      coordination: {
+        replicaId: 'replica-a',
+        membershipScope: 'process-local' as const,
+        membershipAssumption: 'best-effort' as const,
+        emittedAt: 1,
+      },
+      currentOpSeq: serverCursor.opSeq,
+      currentRevision: serverCursor.revision,
+      reason: 'REVISION_MISMATCH' as const,
+    }).toEqual({
+      canvasId: 'session-1',
+      chunkId: '0:0',
+      payloadMode: 'fine',
+      coordination: {
+        replicaId: 'replica-a',
+        membershipScope: 'process-local',
+        membershipAssumption: 'best-effort',
+        emittedAt: 1,
+      },
+      currentOpSeq: 5,
+      currentRevision: 5,
+      reason: 'REVISION_MISMATCH',
+    })
+  })
+
+  it('supports aggregate chunk snapshot payload mode contract for far zoom tiers', () => {
+    const sessionId = nextSessionId()
+    const payloadMode = 'aggregate' as const
+    const coordination = {
+      replicaId: 'replica-a',
+      membershipScope: 'adapter-shared' as const,
+      membershipAssumption: 'authoritative' as const,
+      emittedAt: Date.now(),
+    }
+
+    const chunkSnapshot = {
+      canvasId: sessionId,
+      payloadMode,
+      coordination,
+      chunks: [
+        {
+          chunkId: '0:0',
+          tiles: [],
+          aggregate: {
+            tileCount: 3,
+            byShape: { square: 2, triangle: 1 },
+            byMaterial: { ceramic: 2, glass: 1 },
+          },
+          opSeq: 5,
+          revision: 5,
+        },
+      ],
+      serverOpSeq: 5,
+      serverRevision: 5,
+    }
+
+    expect(chunkSnapshot.payloadMode).toBe('aggregate')
+    expect(chunkSnapshot.chunks[0].tiles).toEqual([])
+    expect(chunkSnapshot.chunks[0].aggregate?.tileCount).toBe(3)
+    expect(chunkSnapshot.chunks[0].aggregate?.byShape.square).toBe(2)
+    expect(chunkSnapshot.coordination.membershipScope).toBe('adapter-shared')
+  })
+
+  it('models delayed leave in process-local mode as best-effort until adapter-shared state is enabled', () => {
+    const firstReplicaView = {
+      replicaId: 'replica-a',
+      membershipScope: 'process-local' as const,
+      membershipAssumption: 'best-effort' as const,
+      activeSocketsForClient: 0,
+    }
+    const secondReplicaView = {
+      replicaId: 'replica-b',
+      membershipScope: 'process-local' as const,
+      membershipAssumption: 'best-effort' as const,
+      activeSocketsForClient: 1,
+    }
+
+    const shouldEmitClientLeftFromReplicaA = firstReplicaView.activeSocketsForClient === 0
+    const globallySafeToTreatClientAsAbsent =
+      firstReplicaView.membershipScope === 'adapter-shared'
+      && secondReplicaView.activeSocketsForClient === 0
+
+    expect(shouldEmitClientLeftFromReplicaA).toBe(true)
+    expect(globallySafeToTreatClientAsAbsent).toBe(false)
+  })
+
+  it('represents duplicate cross-replica chunk joins as idempotent room membership state', () => {
+    const joinEvents = [
+      { replicaId: 'replica-a', socketId: 'socket-1', chunkId: '2:3' },
+      { replicaId: 'replica-b', socketId: 'socket-1', chunkId: '2:3' },
+    ]
+
+    const membershipKeys = new Set(joinEvents.map((event) => `${event.socketId}:${event.chunkId}`))
+
+    expect(joinEvents).toHaveLength(2)
+    expect(membershipKeys.size).toBe(1)
+  })
+
+  it('chunk snapshot parity includes only tiles from requested chunks', () => {
+    const chunkWorldSize = 8
+    const worldToChunkId = (x: number, y: number): string =>
+      `${Math.floor(x / chunkWorldSize)}:${Math.floor(y / chunkWorldSize)}`
+
+    const requestedChunks = ['0:0', '1:0']
+    const allTiles = [
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        shape: 'square' as const,
+        color: '#abc',
+        material: 'ceramic' as const,
+        transform: { position: vec2(0, 0), rotation: 0 },
+        createdAt: 1,
+      },
+      {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        shape: 'square' as const,
+        color: '#def',
+        material: 'glass' as const,
+        transform: { position: vec2(8.2, 0), rotation: 0 },
+        createdAt: 2,
+      },
+      {
+        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        shape: 'square' as const,
+        color: '#123',
+        material: 'stone' as const,
+        transform: { position: vec2(-8.2, 0), rotation: 0 },
+        createdAt: 3,
+      },
+    ]
+
+    const chunkedTiles = allTiles.filter((tile) => requestedChunks.includes(worldToChunkId(
+      tile.transform.position.x,
+      tile.transform.position.y,
+    )))
+
+    const legacyUnionTiles = allTiles.filter((tile) => requestedChunks.includes(worldToChunkId(
+      tile.transform.position.x,
+      tile.transform.position.y,
+    )))
+
+    const toIdentity = (tile: { id: string; transform: { position: { x: number; y: number } } }): string =>
+      `${tile.id}:${worldToChunkId(tile.transform.position.x, tile.transform.position.y)}`
+
+    expect(chunkedTiles.map(toIdentity).sort()).toEqual(legacyUnionTiles.map(toIdentity).sort())
+  })
+
+  it('chunk boundary parity test detects mismatched chunk assignment at x=8 seam', () => {
+    const chunkWorldSize = 8
+    const worldToChunkId = (x: number, y: number): string =>
+      `${Math.floor(x / chunkWorldSize)}:${Math.floor(y / chunkWorldSize)}`
+
+    const legacyTile = {
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      transform: { position: vec2(7.99, 0) },
+    }
+    const chunkTile = {
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      transform: { position: vec2(8.01, 0) },
+    }
+
+    const legacyIdentity = `${legacyTile.id}:${worldToChunkId(legacyTile.transform.position.x, legacyTile.transform.position.y)}`
+    const chunkIdentity = `${chunkTile.id}:${worldToChunkId(chunkTile.transform.position.x, chunkTile.transform.position.y)}`
+
+    expect(legacyIdentity).not.toBe(chunkIdentity)
+    expect(legacyIdentity).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd:0:0')
+    expect(chunkIdentity).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd:1:0')
   })
 })

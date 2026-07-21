@@ -41,6 +41,22 @@ export type Transform2D = {
   mirrored?: boolean
 }
 
+export type MosaicBounds = {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+}
+
+export type BoundsPolicy =
+  | {
+      mode: 'bounded'
+      bounds: MosaicBounds
+    }
+  | {
+      mode: 'unbounded'
+    }
+
 /**
  * Authoritative tile state on the server.
  * Does NOT include settleFrom (that's client-side animation metadata only).
@@ -60,6 +76,7 @@ export type TileInstance = {
 export type Session = {
   id: string
   tiles: TileInstance[]
+  boundsPolicy?: BoundsPolicy
   createdAt: number
   updatedAt: number
 }
@@ -146,11 +163,17 @@ export type CanvasSize = {
   height: number
 }
 
+export type SessionCanvasConfig = {
+  canvasSize: CanvasSize
+  boundsPolicy: BoundsPolicy
+}
+
 export type SessionSummary = {
   id: string
   displayName: string
   participantCount: number
   canvasSize: CanvasSize
+  canvasConfig?: SessionCanvasConfig
 }
 
 // GET /sessions
@@ -271,9 +294,18 @@ export type PointerMovePayload = {
 
 export type SessionSnapshotPayload = {
   session: Session
+  canvasConfig?: SessionCanvasConfig
+  realtimeCapabilities?: RealtimeCapabilities
   clients: ClientPresence[]
   lastOpSeq: number
   revision: number
+}
+
+export type RealtimeCapabilities = {
+  chunkStreamingEnabled: boolean
+  aggregateSnapshotEnabled: boolean
+  chunkCanaryEnabled: boolean
+  multiReplicaReady: boolean
 }
 
 export type TilePlacedPayload = {
@@ -316,6 +348,88 @@ export type ResyncRequiredPayload = {
   reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
 }
 
+export type ChunkId = `${number}:${number}`
+
+export type ChunkPayloadMode = 'fine' | 'aggregate'
+
+export type ChunkCoordinationMetadata = {
+  replicaId: string
+  membershipScope: 'process-local' | 'adapter-shared'
+  membershipAssumption: 'best-effort' | 'authoritative'
+  emittedAt: number
+}
+
+export type ChunkCursor = {
+  opSeq: number
+  revision: number
+}
+
+export type SubscribeChunksPayload = {
+  canvasId: string
+  chunks: ChunkId[]
+  payloadMode?: ChunkPayloadMode
+  clientOffsetByChunk?: Partial<Record<ChunkId, ChunkCursor>>
+}
+
+export type UnsubscribeChunksPayload = {
+  canvasId: string
+  chunks: ChunkId[]
+}
+
+export type RequestChunkSnapshotPayload = {
+  canvasId: string
+  chunks: ChunkId[]
+}
+
+export type ChunkSnapshotEntry = {
+  chunkId: ChunkId
+  tiles: TileInstance[]
+  aggregate?: {
+    tileCount: number
+    byShape: Partial<Record<TileShape, number>>
+    byMaterial: Partial<Record<MaterialVariant, number>>
+  }
+  opSeq: number
+  revision: number
+}
+
+export type ChunkSnapshotPayload = {
+  canvasId: string
+  payloadMode: ChunkPayloadMode
+  coordination: ChunkCoordinationMetadata
+  chunks: ChunkSnapshotEntry[]
+  serverOpSeq: number
+  serverRevision: number
+}
+
+export type ChunkTilePlacedPayload = {
+  canvasId: string
+  chunkId: ChunkId
+  tile: TileInstance
+  placedBy: string
+  opSeq: number
+  revision: number
+}
+
+export type ChunkTileRemovedPayload = {
+  canvasId: string
+  chunkId: ChunkId
+  tileId: string
+  removedBy: string
+  opSeq: number
+  revision: number
+}
+
+export type ChunkResyncRequiredPayload = {
+  canvasId: string
+  chunkId: ChunkId
+  payloadMode: ChunkPayloadMode
+  coordination: ChunkCoordinationMetadata
+  currentOpSeq: number
+  currentRevision: number
+  reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
+}
+
 // ── Typed event maps ──────────────────────────────────────────────────────────
 // Pass these to Server<C, S, I, D> and Socket<C, S, I, D>.
 
@@ -331,6 +445,12 @@ export interface ClientToServerEvents {
   pointer_move: (payload: PointerMovePayload) => void
   /** Fire-and-forget selected tile intent for collaborative presence. */
   selection_update: (payload: SelectionUpdatePayload) => void
+  /** Subscribe to chunk room streams while preserving the main session room. */
+  subscribe_chunks: (payload: SubscribeChunksPayload) => void
+  /** Unsubscribe from chunk room streams. */
+  unsubscribe_chunks: (payload: UnsubscribeChunksPayload) => void
+  /** Request chunk-scoped snapshots without reconnecting. */
+  request_chunk_snapshot: (payload: RequestChunkSnapshotPayload) => void
 }
 
 /** Events emitted by the server, received by clients. */
@@ -351,6 +471,14 @@ export interface ServerToClientEvents {
   client_left: (payload: ClientLeftPayload) => void
   /** Emitted to a single socket when its placement/removal is rejected due to a stale revision. */
   resync_required: (payload: ResyncRequiredPayload) => void
+  /** Sent to a single socket after chunk subscribe/request calls. */
+  chunk_snapshot: (payload: ChunkSnapshotPayload) => void
+  /** Broadcast to sockets subscribed to the affected chunk room. */
+  chunk_tile_placed: (payload: ChunkTilePlacedPayload) => void
+  /** Broadcast to sockets subscribed to the affected chunk room. */
+  chunk_tile_removed: (payload: ChunkTileRemovedPayload) => void
+  /** Emitted when chunk offsets diverge and chunk snapshot replay is required. */
+  chunk_resync_required: (payload: ChunkResyncRequiredPayload) => void
 }
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */

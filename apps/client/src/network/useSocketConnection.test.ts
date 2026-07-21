@@ -76,6 +76,90 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(socket.on).toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
   })
 
+  it('subscribes chunk events when chunk streaming is enabled', () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+
+    const callbacks = {
+      onSnapshot: vi.fn(),
+      onTilePlaced: vi.fn(),
+      onTileRemoved: vi.fn(),
+      onChunkSnapshot: vi.fn(),
+      onChunkTilePlaced: vi.fn(),
+      onChunkTileRemoved: vi.fn(),
+      onChunkResyncRequired: vi.fn(),
+    }
+
+    renderHook(() =>
+      useSocketConnection(
+        'http://localhost:3001',
+        'session-1',
+        'client-1',
+        callbacks.onSnapshot,
+        callbacks.onTilePlaced,
+        callbacks.onTileRemoved,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        callbacks.onChunkSnapshot,
+        callbacks.onChunkTilePlaced,
+        callbacks.onChunkTileRemoved,
+        callbacks.onChunkResyncRequired,
+        true,
+      ),
+    )
+
+    expect(socket.on).toHaveBeenCalledWith('chunk_snapshot', callbacks.onChunkSnapshot)
+    expect(socket.on).toHaveBeenCalledWith('chunk_tile_placed', callbacks.onChunkTilePlaced)
+    expect(socket.on).toHaveBeenCalledWith('chunk_tile_removed', callbacks.onChunkTileRemoved)
+    expect(socket.on).toHaveBeenCalledWith('chunk_resync_required', callbacks.onChunkResyncRequired)
+  })
+
+  it('does not subscribe chunk events when chunk streaming is disabled', () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+
+    const callbacks = {
+      onSnapshot: vi.fn(),
+      onTilePlaced: vi.fn(),
+      onTileRemoved: vi.fn(),
+      onChunkSnapshot: vi.fn(),
+      onChunkTilePlaced: vi.fn(),
+      onChunkTileRemoved: vi.fn(),
+      onChunkResyncRequired: vi.fn(),
+    }
+
+    renderHook(() =>
+      useSocketConnection(
+        'http://localhost:3001',
+        'session-1',
+        'client-1',
+        callbacks.onSnapshot,
+        callbacks.onTilePlaced,
+        callbacks.onTileRemoved,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        callbacks.onChunkSnapshot,
+        callbacks.onChunkTilePlaced,
+        callbacks.onChunkTileRemoved,
+        callbacks.onChunkResyncRequired,
+        false,
+      ),
+    )
+
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_snapshot', callbacks.onChunkSnapshot)
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_tile_placed', callbacks.onChunkTilePlaced)
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_tile_removed', callbacks.onChunkTileRemoved)
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_resync_required', callbacks.onChunkResyncRequired)
+  })
+
   it('unsubscribes collaboration events and disconnects on cleanup', () => {
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)

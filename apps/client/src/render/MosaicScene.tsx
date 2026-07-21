@@ -1,16 +1,16 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useMemo, useRef } from 'react'
 import {
   ExtrudeGeometry,
   Group,
   MathUtils,
+  OrthographicCamera,
   PlaneGeometry,
   Shape,
   Vector2,
 } from 'three'
 import { easeOutCubic, shortestAngleDelta } from '../domain/math2d'
-import { defaultBounds } from '../domain/placementSolver'
 import { getTileDefinition } from '../domain/tileGeometry'
 import { useCraftMaterial, useRemoteSelectionMaterial } from './materials'
 import type { ThreeEvent } from '@react-three/fiber'
@@ -50,6 +50,23 @@ type MosaicSceneProps = {
   onRotateDrag: (deltaX: number) => void
   onCameraPan: (deltaX: number, deltaY: number) => void
   cameraPan: { x: number; y: number }
+  cameraPolicy?: {
+    minZoom: number
+    maxZoom: number
+    panSensitivity: number
+  }
+  onViewportChanged?: (payload: {
+    center: { x: number; y: number }
+    viewport: { minX: number; maxX: number; minY: number; maxY: number }
+    zoom: number
+  }) => void
+  onZoomTierChanged?: (zoom: number) => void
+}
+
+const DEFAULT_CAMERA_POLICY = {
+  minZoom: 20,
+  maxZoom: 140,
+  panSensitivity: 0.02,
 }
 
 const confidenceColor = (base: string, confidence: ConfidenceState): string => {
@@ -265,6 +282,53 @@ const CanvasBounds = () => {
   )
 }
 
+const ViewportReporter = ({
+  onViewportChanged,
+  onZoomTierChanged,
+}: {
+  onViewportChanged?: MosaicSceneProps['onViewportChanged']
+  onZoomTierChanged?: MosaicSceneProps['onZoomTierChanged']
+}) => {
+  const { camera, size } = useThree()
+  const previousRef = useRef<string | null>(null)
+
+  useFrame(() => {
+    if (!onViewportChanged) {
+      return
+    }
+
+    const orthographic = camera as OrthographicCamera
+    const zoom = orthographic.zoom
+    const halfWidth = size.width / (2 * zoom)
+    const halfHeight = size.height / (2 * zoom)
+    const centerX = orthographic.position.x
+    const centerY = orthographic.position.y
+    const viewport = {
+      minX: centerX - halfWidth,
+      maxX: centerX + halfWidth,
+      minY: centerY - halfHeight,
+      maxY: centerY + halfHeight,
+    }
+
+    const signature = `${centerX.toFixed(3)}:${centerY.toFixed(3)}:${zoom.toFixed(3)}:${size.width}:${size.height}`
+    if (previousRef.current === signature) {
+      return
+    }
+
+    previousRef.current = signature
+    if (onZoomTierChanged) {
+      onZoomTierChanged(zoom)
+    }
+    onViewportChanged({
+      center: { x: centerX, y: centerY },
+      viewport,
+      zoom,
+    })
+  })
+
+  return null
+}
+
 const SceneContents = ({
   tiles,
   activeShape,
@@ -277,6 +341,9 @@ const SceneContents = ({
   onRotateDrag,
   onCameraPan,
   cameraPan,
+  cameraPolicy,
+  onViewportChanged,
+  onZoomTierChanged,
 }: MosaicSceneProps) => {
   const controlsRef = useRef(null)
   const tilesById = useMemo(() => {
@@ -289,6 +356,7 @@ const SceneContents = ({
 
   return (
     <>
+      <ViewportReporter onViewportChanged={onViewportChanged} onZoomTierChanged={onZoomTierChanged} />
       <ambientLight intensity={0.58} color="#fff5e8" />
       <directionalLight
         castShadow
@@ -345,8 +413,8 @@ const SceneContents = ({
         enableRotate={false}
         enablePan={false}
         enableZoom={true}
-        minZoom={40}
-        maxZoom={80}
+        minZoom={cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom}
+        maxZoom={cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom}
         minPolarAngle={Math.PI / 2}
         maxPolarAngle={Math.PI / 2}
         target={[cameraPan.x, cameraPan.y, 0]}
@@ -367,6 +435,9 @@ export const MosaicScene = ({
   onRotateDrag,
   onCameraPan,
   cameraPan,
+  cameraPolicy,
+  onViewportChanged,
+  onZoomTierChanged,
 }: MosaicSceneProps) => {
   return (
     <Canvas
@@ -384,20 +455,20 @@ export const MosaicScene = ({
       <color attach="background" args={['#e8e3d7']} />
       <fog attach="fog" args={['#e8e3d7', 10, 24]} />
       <SceneContents
-        tiles={tiles.filter((tile) =>
-          tile.transform.position.x > defaultBounds.minX - 1 &&
-          tile.transform.position.x < defaultBounds.maxX + 1,
-        )}
+        tiles={tiles}
         activeShape={activeShape}
         onRotateDrag={onRotateDrag}
         onCameraPan={onCameraPan}
         cameraPan={cameraPan}
+        cameraPolicy={cameraPolicy}
         ghost={ghost}
         remoteCursors={remoteCursors}
         remoteSelections={remoteSelections}
         onPointerMove={onPointerMove}
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
+        onViewportChanged={onViewportChanged}
+        onZoomTierChanged={onZoomTierChanged}
       />
     </Canvas>
   )

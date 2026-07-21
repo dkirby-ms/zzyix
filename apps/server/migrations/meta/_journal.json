@@ -22,6 +22,13 @@
       "when": 1784240151692,
       "tag": "0002_flat_cable",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784635200000,
+      "tag": "0003_tidy_chunk_columns",
+      "breakpoints": true
     }
   ]
 }

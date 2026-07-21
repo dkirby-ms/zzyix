@@ -34,12 +34,26 @@ describe('authoritative handler semantics', () => {
           displayName: 'Canvas aaaaaaaa',
           participantCount: 2,
           canvasSize: { width: 10.4, height: 6.8 },
+          canvasConfig: {
+            canvasSize: { width: 10.4, height: 6.8 },
+            boundsPolicy: {
+              mode: 'bounded',
+              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+            },
+          },
         },
         {
           id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
           displayName: 'Canvas bbbbbbbb',
           participantCount: 0,
           canvasSize: { width: 10.4, height: 6.8 },
+          canvasConfig: {
+            canvasSize: { width: 10.4, height: 6.8 },
+            boundsPolicy: {
+              mode: 'bounded',
+              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+            },
+          },
         },
       ],
     })
@@ -77,6 +91,31 @@ describe('authoritative handler semantics', () => {
     }
     expect(result.event).toBeUndefined()
     expect(state.session.tiles).toHaveLength(0)
+  })
+
+  it('accepts far placement when session bounds policy is unbounded', () => {
+    const state = createAuthoritativeSessionState('session-unbounded', 1, {
+      canvasSize: { width: 10.4, height: 6.8 },
+      boundsPolicy: { mode: 'unbounded' },
+    })
+
+    const result = applyPlaceTile(
+      state,
+      {
+        tileId: 'abababab-abab-4bab-8bab-abababababab',
+        shape: 'square',
+        color: '#fff',
+        material: 'ceramic',
+        transform: {
+          position: vec2(99, 0),
+          rotation: 0,
+        },
+      },
+      'client-a',
+    )
+
+    expect(result.ack.rejected).toBe(false)
+    expect(state.session.tiles).toHaveLength(1)
   })
 
   it('emits tile_placed payload only after successful state mutation', () => {

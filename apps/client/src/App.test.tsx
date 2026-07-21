@@ -44,15 +44,25 @@ vi.mock('./render/MosaicScene', () => ({
     remoteCursors,
     remoteSelections,
     onPointerMove,
+    cameraPolicy,
+    cameraPan,
+    onCameraPan,
   }: {
     remoteCursors?: Array<{ clientId: string }>
     remoteSelections?: Array<{ clientId: string; tileId: string }>
     onPointerMove?: (x: number, y: number) => void
+    cameraPolicy?: { minZoom: number; maxZoom: number; panSensitivity: number }
+    cameraPan?: { x: number; y: number }
+    onCameraPan?: (deltaX: number, deltaY: number) => void
   }) => (
     <div
       data-testid="mosaic-scene"
       data-remote-cursors={remoteCursors?.length ?? 0}
       data-remote-selections={remoteSelections?.length ?? 0}
+      data-min-zoom={cameraPolicy?.minZoom ?? -1}
+      data-max-zoom={cameraPolicy?.maxZoom ?? -1}
+      data-pan-sensitivity={cameraPolicy?.panSensitivity ?? -1}
+      data-camera-pan={`${cameraPan?.x ?? 0},${cameraPan?.y ?? 0}`}
     >
       scene
       <button type="button" onClick={() => onPointerMove?.(0, 0)}>
@@ -60,6 +70,9 @@ vi.mock('./render/MosaicScene', () => ({
       </button>
       <button type="button" onClick={() => onPointerMove?.(5, 5)}>
         Move Pointer Far
+      </button>
+      <button type="button" onClick={() => onCameraPan?.(10, -5)}>
+        Pan Camera
       </button>
     </div>
   ),
@@ -354,5 +367,25 @@ describe('App lobby-first behavior', () => {
     })
 
     vi.useRealTimers()
+  })
+
+  it('wires camera pan and zoom policy into MosaicScene', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    const scene = await screen.findByTestId('mosaic-scene')
+
+    expect(scene).toHaveAttribute('data-min-zoom', '20')
+    expect(scene).toHaveAttribute('data-max-zoom', '140')
+    expect(scene).toHaveAttribute('data-pan-sensitivity', '0.02')
+    expect(scene).toHaveAttribute('data-camera-pan', '0,0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pan Camera' }))
+
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '-0.2,-0.1')
   })
 })
