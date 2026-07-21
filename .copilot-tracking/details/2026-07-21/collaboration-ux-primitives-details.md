@@ -324,3 +324,66 @@ If failures require larger architecture changes beyond this plan scope, document
 * Remote cursor and selection indicators render and remain usable under moderate contention.
 * Collaboration indicators self-heal on reconnect and stale state eviction.
 * Server and client validation suites pass with added coverage for new collaboration events.
+
+## Implementation Phase 5: Review-driven rework and hardening
+
+<!-- parallelizable: false -->
+
+### Step 5.1: Make snapshot presence reconciliation authoritative and clear stale present ghosts
+
+Refine collaborator reconciliation in the client so `session_snapshot.clients` is treated as authoritative for presence membership. Any collaborator omitted from a fresh snapshot must transition to `present: false`, and stale signal cleanup should remove non-present collaborators after TTL.
+
+Files:
+* apps/client/src/App.tsx - Update `mergeCollaboratorsFromSnapshot` and stale eviction behavior.
+* apps/client/src/App.test.tsx - Add/adjust tests proving omitted collaborators are not preserved as present.
+
+Success criteria:
+* A collaborator omitted from a new snapshot is no longer reported as active.
+* Pointer and selection signals still preserve short-lived continuity during reconnect churn.
+
+### Step 5.2: Optimize remote selection rendering lookup to O(1) per collaborator
+
+Replace repeated linear `tiles.find(...)` lookup per remote selection during render with a precomputed tile index map keyed by `tileId`.
+
+Files:
+* apps/client/src/render/MosaicScene.tsx - Add memoized tile lookup map and consume it in selection rendering loop.
+
+Success criteria:
+* Remote selection rendering no longer performs repeated full-array scans per collaborator.
+
+### Step 5.3: Harden disconnect leave-gating for multi-replica socket topologies
+
+Add explicit deployment guardrails for process-local `sessionClientSockets` membership accounting, and verify disconnect semantics via integration-level assertions on the real socket handler path.
+
+Files:
+* apps/server/src/index.ts - Add clear warning/logging around process-local leave-gating assumptions.
+* apps/server/src/index.integration.test.ts - Add or adjust integration tests targeting disconnect fanout gate path.
+* docs/decisions/2026-07-15-deployment-architecture-v01.md - Document process-local constraint and follow-on shared-state option.
+
+Success criteria:
+* Server behavior and deployment assumptions are explicit and test-covered.
+* Last-socket-only `client_left` behavior is validated on disconnect-path coverage.
+
+### Step 5.4: Add deterministic tests for throttling semantics and selection fanout guard paths
+
+Create deterministic client tests (fake timers) for pointer and selection throttling cadence and server integration tests that exercise `selection_update` handler guard checks (`canvasId` and `clientId` mismatch rejection).
+
+Files:
+* apps/client/src/App.test.tsx - Add fake-timer assertions for bounded emit frequency and trailing flush behavior.
+* apps/server/src/index.integration.test.ts - Add selection guard-path tests.
+
+Success criteria:
+* Throttling semantics are explicitly asserted and deterministic.
+* Selection fanout guard behavior is tested through production handler logic.
+
+### Step 5.5: Re-run full validation and resolve regressions within scope
+
+Run root validation scripts and fix any regressions introduced by Phase 5.
+
+Validation commands:
+* npm run lint:client
+* npm run lint:server
+* npm run test:client
+* npm run test:server
+* npm run build:client
+* npm run build:server

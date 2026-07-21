@@ -35,6 +35,12 @@ Implement foundational collaboration UX primitives including active presence, re
 * apps/client/src/App.tsx - Added stale collaborator signal eviction, reconnect merge semantics, and bounded pointer/selection emission throttling.
 * apps/client/src/network/useSocketConnection.test.ts - Added collaboration event subscription and cleanup lifecycle tests.
 * apps/client/src/App.test.tsx - Extended collaboration behavior coverage and replaced timing-fragile assertions with deterministic state checks.
+* apps/client/src/App.tsx - Made snapshot collaborator membership authoritative for presence while preserving short-lived transient signals.
+* apps/client/src/render/MosaicScene.tsx - Replaced per-selection linear tile lookup with memoized O(1) tile index access.
+* apps/client/src/App.test.tsx - Added deterministic fake-timer tests for pointer/selection throttling cadence and trailing flush behavior.
+* apps/server/src/index.ts - Added explicit warning guardrail for process-local leave-gating assumptions in multi-replica topologies.
+* apps/server/src/index.integration.test.ts - Added selection membership guard-path assertions and disconnect leave-gating semantic tests.
+* docs/decisions/2026-07-15-deployment-architecture-v01.md - Documented process-local leave-gating constraint and sticky/shared-state requirement.
 
 ### Removed
 
@@ -51,12 +57,14 @@ Implement foundational collaboration UX primitives including active presence, re
 * Phase 4 full validation surfaced one server build type error in selection payload validation.
 	* Fixed `isSelectionUpdatePayload` guard in `apps/server/src/index.ts`; `npm run build:server` then passed.
 * No blocking issues remain for this implementation scope.
+* Phase 5 rework executed after reviewer “Needs Rework” outcome to address major findings.
+	* Full live-socket disconnect/fanout harness was deferred; deterministic production-semantics tests were added instead.
 
 ## Release Summary
 
-Completed 4 implementation phases for collaboration UX primitives across client and server.
+Completed 5 implementation phases for collaboration UX primitives across client and server.
 
-Files affected (added/modified/removed): 1 added, 10 modified, 0 removed.
+Files affected (added/modified/removed): 1 added, 11 modified, 0 removed.
 
 Added:
 * apps/client/src/network/useSocketConnection.test.ts - New collaboration socket subscription lifecycle coverage.
@@ -73,10 +81,12 @@ Modified:
 * apps/server/src/index.ts - Selection fanout handler, multi-socket leave correctness, payload guard hardening.
 * apps/server/src/index.test.ts - Selection payload validation tests.
 * apps/server/src/index.integration.test.ts - Selection fanout and same-client multi-socket disconnect tests.
+* docs/decisions/2026-07-15-deployment-architecture-v01.md - Deployment decision update for presence leave-gating assumptions under multi-replica conditions.
 
 Validation status:
 * Passed: `npm run lint:client`, `npm run lint:server`, `npm run test:client`, `npm run test:server`, `npm run build:client`, `npm run build:server`.
 * Non-blocking warning: client chunk-size warning from Vite build.
+* Non-blocking warning: client fast-refresh lint warnings (`react(only-export-components)`) in `apps/client/src/App.tsx` for exported helpers.
 
 Deployment notes:
 * No infrastructure or schema migrations required.

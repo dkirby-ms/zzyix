@@ -112,6 +112,21 @@ Implement foundational collaboration UX primitives by wiring active presence, re
   * Document blockers that require additional planning instead of large refactors.
   * Details: .copilot-tracking/details/2026-07-21/collaboration-ux-primitives-details.md (Lines 311-313)
 
+### [x] Implementation Phase 5: Review-driven rework and hardening
+
+<!-- parallelizable: false -->
+
+* [x] Step 5.1: Make snapshot presence reconciliation authoritative and clear stale present ghosts.
+  * Details: .copilot-tracking/details/2026-07-21/collaboration-ux-primitives-details.md (Phase 5 Step 5.1)
+* [x] Step 5.2: Optimize remote selection rendering lookup to O(1) per collaborator.
+  * Details: .copilot-tracking/details/2026-07-21/collaboration-ux-primitives-details.md (Phase 5 Step 5.2)
+* [x] Step 5.3: Harden disconnect leave-gating for multi-replica socket topologies.
+  * Details: .copilot-tracking/details/2026-07-21/collaboration-ux-primitives-details.md (Phase 5 Step 5.3)
+* [x] Step 5.4: Add deterministic tests for throttling semantics and selection fanout guard paths.
+  * Details: .copilot-tracking/details/2026-07-21/collaboration-ux-primitives-details.md (Phase 5 Step 5.4)
+* [x] Step 5.5: Re-run full validation and resolve regressions within scope.
+  * Details: .copilot-tracking/details/2026-07-21/collaboration-ux-primitives-details.md (Phase 5 Step 5.5)
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-21/collaboration-ux-primitives-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.

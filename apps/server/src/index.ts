@@ -1110,6 +1110,18 @@ io.on('connection', (socket) => {
       return
     }
 
+    const connectedClientCount = (io.engine as { clientsCount?: number }).clientsCount ?? 0
+
+    if (connectedClientCount > 1) {
+      writeLog('warn', 'presence_leave_gating_process_local', {
+        sessionId,
+        clientId,
+        socketId: socket.id,
+        connectedClientCount,
+        note: 'last-socket leave gating is process-local; enforce sticky sessions or add shared membership state for multi-replica correctness',
+      })
+    }
+
     try {
       await finalizeParticipantPresence(sessionId, clientId, Date.now())
       io.to(sessionId).emit('client_left', { clientId })

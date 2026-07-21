@@ -279,6 +279,14 @@ const SceneContents = ({
   cameraPan,
 }: MosaicSceneProps) => {
   const controlsRef = useRef(null)
+  const tilesById = useMemo(() => {
+    const index = new Map<string, TileInstance>()
+    for (const tile of tiles) {
+      index.set(tile.id, tile)
+    }
+    return index
+  }, [tiles])
+
   return (
     <>
       <ambientLight intensity={0.58} color="#fff5e8" />
@@ -298,7 +306,7 @@ const SceneContents = ({
           <TileMesh key={tile.id} tile={tile} />
         ))}
         {remoteSelections.map((selection) => {
-          const selectedTile = tiles.find((tile) => tile.id === selection.tileId)
+          const selectedTile = tilesById.get(selection.tileId)
           if (!selectedTile) {
             return null
           }

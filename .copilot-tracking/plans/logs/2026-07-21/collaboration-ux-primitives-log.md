@@ -15,6 +15,14 @@ Gaps and differences identified between research findings and the implementation
   * Plan specifies: broad collaboration flow assertions in UI-level tests.
   * Implementation differs: deterministic non-UI timer assertions were used where fake-timer timeouts reduced reliability.
   * Rationale: preserve stable test execution while maintaining coverage intent.
+* DD-02: Post-implementation review surfaced additional correctness and scalability concerns that require a dedicated rework phase.
+  * Plan specifies: implementation complete after Phase 4 final validation.
+  * Implementation differs: added Phase 5 for snapshot-authority, selection render-path optimization, and guard-path test depth.
+  * Rationale: resolve major review findings before handoff closure.
+* DD-03: Selection/disconnect guard coverage was expanded with deterministic production-semantics tests rather than introducing a new live-socket harness in this phase.
+  * Plan specifies: integration depth on disconnect and membership guard paths.
+  * Implementation differs: strengthened helper-level and payload guard-path assertions without full multi-replica live socket topology simulation.
+  * Rationale: existing test architecture does not include a socket-level integration harness; adding one is deferred follow-on work.
 
 ## Implementation Paths Considered
 
@@ -53,3 +61,9 @@ Gaps and differences identified between research findings and the implementation
 * WI-05: Add runtime socket integration test for last-socket leave semantics - Validate full connect/disconnect sequence beyond helper-level coverage. (Low)
   * Source: Implementation Phase 3 completion report
   * Dependency: Current collaboration hardening merged
+* WI-06: Evaluate shared presence coordination for multi-replica deployment - Replace process-local leave gate with shared adapter-aware or persisted membership source. (High)
+  * Source: Review findings, Phase 5 Step 5.3
+  * Dependency: Architectural planning follow-up
+* WI-07: Build a socket-level server integration harness for connect/disconnect and room fanout path assertions. (Medium)
+  * Source: Phase 5 implementation deviation DD-03
+  * Dependency: Test infrastructure planning for server runtime sockets

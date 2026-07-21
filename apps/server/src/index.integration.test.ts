@@ -7,6 +7,7 @@ import {
   getSessionState,
   initializeParticipantPresence,
   isPlaceTilePayload,
+  isSelectionUpdatePayload,
   registerClientSocket,
   unregisterClientSocket,
 } from './index.js'
@@ -521,6 +522,36 @@ describe('multi-client collaboration', () => {
     expect(emitToPeers).toHaveBeenCalledWith('selection_update', payload)
   })
 
+  it('selection_update guard rejects payload when canvas membership mismatches', () => {
+    const sessionId = nextSessionId()
+    const clientId = 'client-a'
+    const payload = {
+      canvasId: `${sessionId}-different`,
+      clientId,
+      tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      updatedAt: Date.now(),
+    }
+
+    expect(isSelectionUpdatePayload(payload)).toBe(true)
+    const membershipMatches = payload.canvasId === sessionId && payload.clientId === clientId
+    expect(membershipMatches).toBe(false)
+  })
+
+  it('selection_update guard rejects payload when client identity mismatches', () => {
+    const sessionId = nextSessionId()
+    const clientId = 'client-a'
+    const payload = {
+      canvasId: sessionId,
+      clientId: 'client-b',
+      tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      updatedAt: Date.now(),
+    }
+
+    expect(isSelectionUpdatePayload(payload)).toBe(true)
+    const membershipMatches = payload.canvasId === sessionId && payload.clientId === clientId
+    expect(membershipMatches).toBe(false)
+  })
+
   it('pointer_update fanout payload includes sender identity and position', () => {
     const emitToPeers = vi.fn()
     const socket = {
@@ -559,5 +590,21 @@ describe('multi-client collaboration', () => {
 
     expect(emitRoom).toHaveBeenNthCalledWith(1, 'client_joined', joinedPayload)
     expect(emitRoom).toHaveBeenNthCalledWith(2, 'client_left', leftPayload)
+  })
+
+  it('disconnect leave-gating keeps presence when at least one socket remains', () => {
+    const sessionId = nextSessionId()
+    const clientId = 'shared-client'
+
+    expect(registerClientSocket(sessionId, clientId, 'socket-1')).toBe(1)
+    expect(registerClientSocket(sessionId, clientId, 'socket-2')).toBe(2)
+
+    const remainingAfterFirstDisconnect = unregisterClientSocket(sessionId, clientId, 'socket-1')
+    const shouldEmitClientLeftAfterFirstDisconnect = remainingAfterFirstDisconnect === 0
+    expect(shouldEmitClientLeftAfterFirstDisconnect).toBe(false)
+
+    const remainingAfterLastDisconnect = unregisterClientSocket(sessionId, clientId, 'socket-2')
+    const shouldEmitClientLeftAfterLastDisconnect = remainingAfterLastDisconnect === 0
+    expect(shouldEmitClientLeftAfterLastDisconnect).toBe(true)
   })
 })

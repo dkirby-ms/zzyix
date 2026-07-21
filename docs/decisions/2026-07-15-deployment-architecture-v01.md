@@ -94,6 +94,8 @@ WebSockets are required for low-latency collaborative tile placement. Key findin
 
 For the current server runtime, room broadcasts are synchronized across replicas with the Socket.IO Postgres adapter by reusing the shared Postgres pool already required for persistence. This does not remove the ACA sticky-session requirement. Affinity is still required so reconnects and follow-up traffic land on the same replica, and the adapter does not provide Socket.IO connection state recovery by itself.
 
+The server currently gates `client_left` fanout using process-local socket membership (`sessionId + clientId -> socketIds`). This is correct under sticky-session routing and single-replica operation. Under multi-replica topologies without affinity guarantees, this local gate can emit premature leave events. If horizontal scale requirements evolve, we must either keep strict affinity guarantees or move membership gating to shared state.
+
 > **Deferred:** Cross-replica state sync design (Redis pub-sub or equivalent) is out of scope for this ADR. It will be addressed when scaling requirements demand more than one server replica.
 
 ---

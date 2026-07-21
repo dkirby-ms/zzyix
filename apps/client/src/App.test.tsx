@@ -54,8 +54,11 @@ vi.mock('./render/MosaicScene', () => ({
       data-remote-selections={remoteSelections?.length ?? 0}
     >
       scene
-      <button type="button" onClick={() => onPointerMove?.(1, 2)}>
-        Move Pointer
+      <button type="button" onClick={() => onPointerMove?.(0, 0)}>
+        Move Pointer Near
+      </button>
+      <button type="button" onClick={() => onPointerMove?.(5, 5)}>
+        Move Pointer Far
       </button>
     </div>
   ),
@@ -70,6 +73,7 @@ describe('App lobby-first behavior', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     cleanup()
   })
 
@@ -192,7 +196,7 @@ describe('App lobby-first behavior', () => {
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-remote-selections', '0')
     expect(screen.getByLabelText('Active collaborators')).not.toHaveTextContent('client-2')
 
-    // Snapshot reconciliation should not drop active collaborators seen via transient events.
+    // Snapshot reconciliation is authoritative for presence membership.
     act(() => {
       onSnapshot({
         session: {
@@ -207,7 +211,9 @@ describe('App lobby-first behavior', () => {
       })
     })
 
-    expect(screen.getByLabelText('Active collaborators')).toHaveTextContent('client-3')
+    expect(screen.getByLabelText('Active collaborators')).not.toHaveTextContent('client-3')
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-remote-cursors', '0')
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-remote-selections', '0')
   })
 
   it('evicts stale pointer and selection signals while preserving active collaborators', () => {
@@ -234,7 +240,7 @@ describe('App lobby-first behavior', () => {
 
     expect(result['client-active']).toMatchObject({
       clientId: 'client-active',
-      present: true,
+      present: false,
       pointer: undefined,
       selectionTileId: undefined,
     })
@@ -257,6 +263,95 @@ describe('App lobby-first behavior', () => {
 
     expect(merged['client-1']).toBeDefined()
     expect(merged['client-3']).toBeDefined()
-    expect(merged['client-3'].present).toBe(true)
+    expect(merged['client-3'].present).toBe(false)
+  })
+
+  it('throttles pointer and selection emits with bounded rate and trailing flush semantics', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn()
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock } }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onSnapshot = socketCall[3] as (payload: any) => void
+
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [
+            {
+              id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+              shape: 'square',
+              color: '#abc',
+              material: 'ceramic',
+              transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
+              createdAt: Date.now(),
+              placedBy: 'client-2',
+            },
+          ],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        clients: [{ clientId: 'client-1', joinedAt: Date.now() - 10 }],
+        lastOpSeq: 1,
+        revision: 1,
+      })
+    })
+
+    const moveNearButton = screen.getByRole('button', { name: 'Move Pointer Near' })
+    const moveFarButton = screen.getByRole('button', { name: 'Move Pointer Far' })
+
+    fireEvent.click(moveNearButton)
+
+    expect(emitMock).toHaveBeenCalledWith('pointer_move', { position: { x: 0, y: 0 } })
+
+    const immediateCount = emitMock.mock.calls.filter((call) => call[0] === 'pointer_move').length
+    expect(immediateCount).toBe(1)
+
+    const immediateSelectionCount = emitMock.mock.calls.filter((call) => call[0] === 'selection_update').length
+    expect(immediateSelectionCount).toBe(1)
+
+    fireEvent.click(moveFarButton)
+
+    const beforeFlushCount = emitMock.mock.calls.filter((call) => call[0] === 'pointer_move').length
+    expect(beforeFlushCount).toBe(1)
+
+    const beforeSelectionFlushCount = emitMock.mock.calls.filter((call) => call[0] === 'selection_update').length
+    expect(beforeSelectionFlushCount).toBe(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(50)
+    })
+
+    const afterFlushCalls = emitMock.mock.calls.filter((call) => call[0] === 'pointer_move')
+    expect(afterFlushCalls.length).toBe(2)
+    expect(afterFlushCalls.at(-1)?.[1]).toEqual({ position: { x: 5, y: 5 } })
+
+    const selectionAfterFlushCalls = emitMock.mock.calls.filter((call) => call[0] === 'selection_update')
+    expect(selectionAfterFlushCalls.length).toBe(2)
+    expect(selectionAfterFlushCalls.at(-1)?.[1]).toMatchObject({
+      canvasId: 'session-1',
+      clientId: 'client-1',
+      tileId: undefined,
+    })
+
+    vi.useRealTimers()
   })
 })

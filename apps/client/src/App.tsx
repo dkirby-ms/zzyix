@@ -87,7 +87,7 @@ export const mergeCollaboratorsFromSnapshot = (
   previous: RemoteCollaboratorMap,
   snapshotClients: ClientPresence[],
 ): RemoteCollaboratorMap => {
-  const next: RemoteCollaboratorMap = { ...previous }
+  const next: RemoteCollaboratorMap = {}
   const now = Date.now()
   const snapshotClientIds = new Set<string>()
 
@@ -103,13 +103,18 @@ export const mergeCollaboratorsFromSnapshot = (
     }
   }
 
-  for (const [remoteClientId, collaborator] of Object.entries(next)) {
+  for (const [remoteClientId, collaborator] of Object.entries(previous)) {
     if (snapshotClientIds.has(remoteClientId)) {
       continue
     }
 
     if (now - collaborator.lastSeenAt > COLLABORATOR_SIGNAL_TTL_MS && !collaborator.present) {
-      delete next[remoteClientId]
+      continue
+    }
+
+    next[remoteClientId] = {
+      ...collaborator,
+      present: false,
     }
   }
 
@@ -134,10 +139,15 @@ export const evictStaleCollaboratorSignals = (
     if (collaborator.present) {
       next[clientId] = {
         ...collaborator,
+        present: false,
         pointer: undefined,
         selectionTileId: undefined,
       }
-      if (collaborator.pointer !== undefined || collaborator.selectionTileId !== undefined) {
+      if (
+        collaborator.pointer !== undefined
+        || collaborator.selectionTileId !== undefined
+        || collaborator.present
+      ) {
         hasChanges = true
       }
       continue
