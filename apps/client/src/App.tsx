@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { vec2 } from './domain/math2d'
-import { normalizeAngle, quantizeRotation } from './domain/tileGeometry'
+import { getTileDefinition, normalizeAngle, quantizeRotation, transformPolygon } from './domain/tileGeometry'
 import type { TileShape } from './domain/tileGeometry'
 import {
   applySequencedSnapshot,
@@ -27,8 +27,13 @@ import {
 import { resolveServerUrl } from './network/serverUrl'
 import { useSocketConnection } from './network/useSocketConnection'
 import type {
+  ClientJoinedPayload,
+  ClientLeftPayload,
+  ClientPresence,
   PlaceTileAck,
   PlaceTilePayload,
+  PointerUpdatePayload,
+  SelectionUpdatePayload,
   ResyncRequiredPayload,
   SessionSnapshotPayload,
   TilePlacedPayload,
@@ -40,6 +45,150 @@ import { LobbyScreen } from './ui/LobbyScreen'
 import { palettes } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import './App.css'
+
+type RemoteCollaborator = {
+  clientId: string
+  present: boolean
+  pointer?: { x: number; y: number }
+  selectionTileId?: string
+  lastSeenAt: number
+}
+
+type RemoteCollaboratorMap = Record<string, RemoteCollaborator>
+
+const COLLABORATOR_SIGNAL_TTL_MS = 8_000
+const COLLABORATOR_CLEANUP_INTERVAL_MS = 1_000
+const COLLABORATION_EMIT_INTERVAL_MS = 40
+
+const updateCollaborator = (
+  collaborators: RemoteCollaboratorMap,
+  clientId: string,
+  patch: Partial<RemoteCollaborator>,
+): RemoteCollaboratorMap => {
+  const previous = collaborators[clientId]
+  const hasPresent = Object.prototype.hasOwnProperty.call(patch, 'present')
+  const hasPointer = Object.prototype.hasOwnProperty.call(patch, 'pointer')
+  const hasSelection = Object.prototype.hasOwnProperty.call(patch, 'selectionTileId')
+  const next: RemoteCollaborator = {
+    clientId,
+    present: hasPresent ? (patch.present as boolean) : previous?.present ?? false,
+    pointer: hasPointer ? patch.pointer : previous?.pointer,
+    selectionTileId: hasSelection ? patch.selectionTileId : previous?.selectionTileId,
+    lastSeenAt: patch.lastSeenAt ?? previous?.lastSeenAt ?? Date.now(),
+  }
+
+  return {
+    ...collaborators,
+    [clientId]: next,
+  }
+}
+
+export const mergeCollaboratorsFromSnapshot = (
+  previous: RemoteCollaboratorMap,
+  snapshotClients: ClientPresence[],
+): RemoteCollaboratorMap => {
+  const next: RemoteCollaboratorMap = { ...previous }
+  const now = Date.now()
+  const snapshotClientIds = new Set<string>()
+
+  for (const client of snapshotClients) {
+    snapshotClientIds.add(client.clientId)
+    const existing = previous[client.clientId]
+    next[client.clientId] = {
+      clientId: client.clientId,
+      present: true,
+      pointer: client.pointer ?? existing?.pointer,
+      selectionTileId: existing?.selectionTileId,
+      lastSeenAt: now,
+    }
+  }
+
+  for (const [remoteClientId, collaborator] of Object.entries(next)) {
+    if (snapshotClientIds.has(remoteClientId)) {
+      continue
+    }
+
+    if (now - collaborator.lastSeenAt > COLLABORATOR_SIGNAL_TTL_MS && !collaborator.present) {
+      delete next[remoteClientId]
+    }
+  }
+
+  return next
+}
+
+export const evictStaleCollaboratorSignals = (
+  previous: RemoteCollaboratorMap,
+  now: number,
+): RemoteCollaboratorMap => {
+  let hasChanges = false
+  const next: RemoteCollaboratorMap = {}
+
+  for (const [clientId, collaborator] of Object.entries(previous)) {
+    const age = now - collaborator.lastSeenAt
+
+    if (age <= COLLABORATOR_SIGNAL_TTL_MS) {
+      next[clientId] = collaborator
+      continue
+    }
+
+    if (collaborator.present) {
+      next[clientId] = {
+        ...collaborator,
+        pointer: undefined,
+        selectionTileId: undefined,
+      }
+      if (collaborator.pointer !== undefined || collaborator.selectionTileId !== undefined) {
+        hasChanges = true
+      }
+      continue
+    }
+
+    hasChanges = true
+  }
+
+  return hasChanges ? next : previous
+}
+
+const formatCollaboratorLabel = (remoteClientId: string, localClientId: string): string => {
+  if (remoteClientId === localClientId) {
+    return 'You'
+  }
+
+  return remoteClientId.slice(0, 8)
+}
+
+const isPointInPolygon = (point: { x: number; y: number }, polygon: Array<{ x: number; y: number }>): boolean => {
+  let inside = false
+
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+    const xi = polygon[i].x
+    const yi = polygon[i].y
+    const xj = polygon[j].x
+    const yj = polygon[j].y
+
+    const intersect = ((yi > point.y) !== (yj > point.y)) &&
+      (point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || Number.EPSILON) + xi)
+
+    if (intersect) {
+      inside = !inside
+    }
+  }
+
+  return inside
+}
+
+const findHoveredTileId = (x: number, y: number, tiles: SequencedTilesState['tiles']): string | undefined => {
+  for (let index = tiles.length - 1; index >= 0; index -= 1) {
+    const tile = tiles[index]
+    const outline = getTileDefinition(tile.shape).outline
+    const transformedOutline = transformPolygon(outline, tile.transform)
+    if (isPointInPolygon({ x, y }, transformedOutline)) {
+      return tile.id
+    }
+  }
+
+  return undefined
+}
 
 function App() {
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
@@ -63,7 +212,19 @@ function App() {
   const [creatingSession, setCreatingSession] = useState(false)
   const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
+  const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
+  const pointerEmitThrottleRef = useRef<{
+    lastSentAt: number
+    pendingPosition?: { x: number; y: number }
+    timeoutId: number | null
+  }>({ lastSentAt: 0, pendingPosition: undefined, timeoutId: null })
+  const selectionEmitThrottleRef = useRef<{
+    lastSentAt: number
+    lastTileId?: string
+    pendingTileId?: string
+    timeoutId: number | null
+  }>({ lastSentAt: 0, lastTileId: undefined, pendingTileId: undefined, timeoutId: null })
   const clientId = useMemo(() => ensureClientId(), [])
   const serverUrl = useMemo(() => resolveServerUrl(), [])
 
@@ -151,6 +312,7 @@ function App() {
         revision: payload.revision,
       }),
     )
+    setCollaborators((prev) => mergeCollaboratorsFromSnapshot(prev, payload.clients))
   }, [])
 
   const onTilePlaced = useCallback((payload: TilePlacedPayload): void => {
@@ -190,6 +352,153 @@ function App() {
     requestSnapshot()
   }, [requestSnapshot])
 
+  const onPointerUpdate = useCallback((payload: PointerUpdatePayload): void => {
+    setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
+      present: true,
+      pointer: payload.position,
+      lastSeenAt: Date.now(),
+    }))
+  }, [])
+
+  const onClientJoined = useCallback((payload: ClientJoinedPayload): void => {
+    setCollaborators((prev) => updateCollaborator(prev, payload.client.clientId, {
+      present: true,
+      pointer: payload.client.pointer,
+      lastSeenAt: Date.now(),
+    }))
+  }, [])
+
+  const onClientLeft = useCallback((payload: ClientLeftPayload): void => {
+    setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
+      present: false,
+      pointer: undefined,
+      selectionTileId: undefined,
+      lastSeenAt: Date.now(),
+    }))
+  }, [])
+
+  const onSelectionUpdate = useCallback((payload: SelectionUpdatePayload): void => {
+    setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
+      present: true,
+      selectionTileId: payload.tileId,
+      lastSeenAt: Date.now(),
+    }))
+  }, [])
+
+  const activeCollaborators = useMemo(
+    () => Object.values(collaborators).filter((collaborator) => collaborator.present),
+    [collaborators],
+  )
+
+  const remoteCursors = useMemo(
+    () => activeCollaborators
+      .filter((collaborator) => collaborator.clientId !== clientId && collaborator.pointer !== undefined)
+      .map((collaborator) => ({
+        clientId: collaborator.clientId,
+        position: collaborator.pointer as { x: number; y: number },
+      })),
+    [activeCollaborators, clientId],
+  )
+
+  const remoteSelections = useMemo(
+    () => activeCollaborators
+      .filter((collaborator) => collaborator.clientId !== clientId && collaborator.selectionTileId !== undefined)
+      .map((collaborator) => ({
+        clientId: collaborator.clientId,
+        tileId: collaborator.selectionTileId as string,
+      })),
+    [activeCollaborators, clientId],
+  )
+
+  const emitPointerMove = useCallback((position: { x: number; y: number }): void => {
+    const socket = socketActionRef.current
+    if (!socket || !sessionId) {
+      return
+    }
+
+    const throttleState = pointerEmitThrottleRef.current
+    const now = Math.max(Date.now(), throttleState.lastSentAt)
+    const elapsed = now - throttleState.lastSentAt
+
+    const flushPointerMove = (nextPosition: { x: number; y: number }): void => {
+      socket.emit('pointer_move', { position: nextPosition })
+      throttleState.lastSentAt = Math.max(Date.now(), throttleState.lastSentAt)
+      throttleState.pendingPosition = undefined
+    }
+
+    if (elapsed >= COLLABORATION_EMIT_INTERVAL_MS) {
+      if (throttleState.timeoutId !== null) {
+        window.clearTimeout(throttleState.timeoutId)
+        throttleState.timeoutId = null
+      }
+      flushPointerMove(position)
+      return
+    }
+
+    throttleState.pendingPosition = position
+
+    if (throttleState.timeoutId !== null) {
+      return
+    }
+
+    throttleState.timeoutId = window.setTimeout(() => {
+      throttleState.timeoutId = null
+      const pendingPosition = throttleState.pendingPosition
+      if (!pendingPosition) {
+        return
+      }
+      flushPointerMove(pendingPosition)
+    }, Math.max(0, COLLABORATION_EMIT_INTERVAL_MS - elapsed))
+  }, [sessionId])
+
+  const emitSelectionUpdate = useCallback((tileId?: string): void => {
+    const socket = socketActionRef.current
+    if (!socket || !sessionId) {
+      return
+    }
+
+    const throttleState = selectionEmitThrottleRef.current
+    const now = Math.max(Date.now(), throttleState.lastSentAt)
+    const elapsed = now - throttleState.lastSentAt
+
+    const flushSelectionUpdate = (nextTileId?: string): void => {
+      if (throttleState.lastTileId === nextTileId) {
+        throttleState.pendingTileId = undefined
+        return
+      }
+
+      socket.emit('selection_update', {
+        canvasId: sessionId,
+        clientId,
+        tileId: nextTileId,
+        updatedAt: Date.now(),
+      })
+
+      throttleState.lastSentAt = Math.max(Date.now(), throttleState.lastSentAt)
+      throttleState.lastTileId = nextTileId
+      throttleState.pendingTileId = undefined
+    }
+
+    if (elapsed >= COLLABORATION_EMIT_INTERVAL_MS) {
+      if (throttleState.timeoutId !== null) {
+        window.clearTimeout(throttleState.timeoutId)
+        throttleState.timeoutId = null
+      }
+      flushSelectionUpdate(tileId)
+      return
+    }
+
+    throttleState.pendingTileId = tileId
+    if (throttleState.timeoutId !== null) {
+      return
+    }
+
+    throttleState.timeoutId = window.setTimeout(() => {
+      throttleState.timeoutId = null
+      flushSelectionUpdate(throttleState.pendingTileId)
+    }, Math.max(0, COLLABORATION_EMIT_INTERVAL_MS - elapsed))
+  }, [clientId, sessionId])
+
   const socketRef = useSocketConnection(
     serverUrl,
     sessionId,
@@ -199,7 +508,31 @@ function App() {
     onTileRemoved,
     onResyncRequired,
     socketActionRef,
+    onPointerUpdate,
+    onClientJoined,
+    onClientLeft,
+    onSelectionUpdate,
   )
+
+  useEffect(() => {
+    if (pointerEmitThrottleRef.current.timeoutId !== null) {
+      window.clearTimeout(pointerEmitThrottleRef.current.timeoutId)
+    }
+    pointerEmitThrottleRef.current = { lastSentAt: 0, pendingPosition: undefined, timeoutId: null }
+
+    if (selectionEmitThrottleRef.current.timeoutId !== null) {
+      window.clearTimeout(selectionEmitThrottleRef.current.timeoutId)
+    }
+    selectionEmitThrottleRef.current = { lastSentAt: 0, lastTileId: undefined, pendingTileId: undefined, timeoutId: null }
+  }, [sessionId])
+
+  useEffect(() => {
+    const cleanupId = window.setInterval(() => {
+      setCollaborators((prev) => evictStaleCollaboratorSignals(prev, Date.now()))
+    }, COLLABORATOR_CLEANUP_INTERVAL_MS)
+
+    return () => window.clearInterval(cleanupId)
+  }, [])
 
   useEffect(() => {
     let last = performance.now()
@@ -284,7 +617,9 @@ function App() {
   }, [rotation, mirrored])
 
   const updatePointer = (x: number, y: number): void => {
+    emitPointerMove({ x, y })
     const updated = updateGhostTarget(vec2(x, y), activeTile, sequencedState.tiles)
+    emitSelectionUpdate(findHoveredTileId(x, y, sequencedState.tiles))
     setGhostVisible(true)
     setGhost((prev) => ({
       ...prev,
@@ -331,6 +666,7 @@ function App() {
         return
       }
 
+      emitSelectionUpdate(ack.placed.id)
       setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
     })
   }
@@ -409,7 +745,18 @@ function App() {
         <div className="status-strip" data-state={ghost.confidence}>
           <span>{ghost.confidence.replace('-', ' ')}</span>
           <span>{sequencedState.tiles.length} placed</span>
+          <span>{activeCollaborators.length} active</span>
         </div>
+
+        {activeCollaborators.length > 0 && (
+          <div className="collaborator-roster" aria-label="Active collaborators">
+            {activeCollaborators.map((collaborator) => (
+              <span key={collaborator.clientId} className="collaborator-chip">
+                {formatCollaboratorLabel(collaborator.clientId, clientId)}
+              </span>
+            ))}
+          </div>
+        )}
 
         <MosaicScene
           tiles={sequencedState.tiles}
@@ -427,6 +774,8 @@ function App() {
           onRotateDrag={(deltaX) =>
             setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
           }
+          remoteCursors={remoteCursors}
+          remoteSelections={remoteSelections}
           cameraPan={cameraPan}
           onCameraPan={(deltaX, deltaY) => {
             const sensitivity = 0.02

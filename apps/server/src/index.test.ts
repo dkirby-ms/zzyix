@@ -12,6 +12,7 @@ import {
   invokeAckSafely,
   isPlaceTilePayload,
   isRemoveTilePayload,
+  isSelectionUpdatePayload,
   isOriginAllowed,
   resolveCorsOrigin,
   shouldCleanupSession,
@@ -288,6 +289,50 @@ describe('authoritative handler semantics', () => {
     expect(isRemoveTilePayload({ tileId: 'abc', expectedRevision: 0 })).toBe(true)
     expect(isRemoveTilePayload({ tileId: 'abc', expectedRevision: -1 })).toBe(false)
     expect(isRemoveTilePayload({ tileId: 'abc', expectedRevision: 1.2 })).toBe(false)
+  })
+
+  it('validates selection_update payload guards for canvas and client identity fields', () => {
+    expect(
+      isSelectionUpdatePayload({
+        canvasId: 'session-1',
+        clientId: 'client-a',
+        tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        updatedAt: Date.now(),
+      }),
+    ).toBe(true)
+
+    expect(
+      isSelectionUpdatePayload({
+        canvasId: 'session-1',
+        clientId: 'client-a',
+        updatedAt: Date.now(),
+      }),
+    ).toBe(true)
+
+    expect(
+      isSelectionUpdatePayload({
+        canvasId: '',
+        clientId: 'client-a',
+        updatedAt: Date.now(),
+      }),
+    ).toBe(false)
+
+    expect(
+      isSelectionUpdatePayload({
+        canvasId: 'session-1',
+        clientId: '',
+        updatedAt: Date.now(),
+      }),
+    ).toBe(false)
+
+    expect(
+      isSelectionUpdatePayload({
+        canvasId: 'session-1',
+        clientId: 'client-a',
+        tileId: 'not-a-uuid',
+        updatedAt: Date.now(),
+      }),
+    ).toBe(false)
   })
 
   it('uses safe CORS defaults when wildcard is missing or configured', () => {

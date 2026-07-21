@@ -273,6 +273,28 @@ button:disabled {
   box-shadow: 0 0 0 1px rgba(170, 83, 83, 0.38) inset;
 }
 
+.collaborator-roster {
+  position: absolute;
+  top: 3.2rem;
+  right: 0.8rem;
+  z-index: 10;
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: min(60%, 460px);
+}
+
+.collaborator-chip {
+  border-radius: 999px;
+  border: 1px solid rgba(59, 45, 36, 0.18);
+  background: rgba(248, 243, 234, 0.92);
+  padding: 0.2rem 0.54rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 .invalid-pulse .status-strip {
   animation: pulse 180ms ease;
 }

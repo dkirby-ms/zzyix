@@ -2,7 +2,11 @@ import { useEffect, useRef } from 'react'
 import { io } from 'socket.io-client'
 import type { Socket } from 'socket.io-client'
 import type {
+  ClientJoinedPayload,
+  ClientLeftPayload,
   ClientToServerEvents,
+  PointerUpdatePayload,
+  SelectionUpdatePayload,
   ServerToClientEvents,
   ResyncRequiredPayload,
   SessionSnapshotPayload,
@@ -21,6 +25,10 @@ export const useSocketConnection = (
   onTileRemoved: (payload: TileRemovedPayload) => void,
   onResyncRequired?: (payload: ResyncRequiredPayload) => void,
   socketActionRef?: React.MutableRefObject<AppSocket | null>,
+  onPointerUpdate?: (payload: PointerUpdatePayload) => void,
+  onClientJoined?: (payload: ClientJoinedPayload) => void,
+  onClientLeft?: (payload: ClientLeftPayload) => void,
+  onSelectionUpdate?: (payload: SelectionUpdatePayload) => void,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
 
@@ -51,6 +59,18 @@ export const useSocketConnection = (
     socket.on('session_snapshot', onSnapshot)
     socket.on('tile_placed', onTilePlaced)
     socket.on('tile_removed', onTileRemoved)
+    if (onPointerUpdate) {
+      socket.on('pointer_update', onPointerUpdate)
+    }
+    if (onClientJoined) {
+      socket.on('client_joined', onClientJoined)
+    }
+    if (onClientLeft) {
+      socket.on('client_left', onClientLeft)
+    }
+    if (onSelectionUpdate) {
+      socket.on('selection_update', onSelectionUpdate)
+    }
     if (onResyncRequired) {
       socket.on('resync_required', onResyncRequired)
     }
@@ -64,6 +84,18 @@ export const useSocketConnection = (
       socket.off('session_snapshot', onSnapshot)
       socket.off('tile_placed', onTilePlaced)
       socket.off('tile_removed', onTileRemoved)
+      if (onPointerUpdate) {
+        socket.off('pointer_update', onPointerUpdate)
+      }
+      if (onClientJoined) {
+        socket.off('client_joined', onClientJoined)
+      }
+      if (onClientLeft) {
+        socket.off('client_left', onClientLeft)
+      }
+      if (onSelectionUpdate) {
+        socket.off('selection_update', onSelectionUpdate)
+      }
       if (onResyncRequired) {
         socket.off('resync_required', onResyncRequired)
       }
@@ -73,7 +105,20 @@ export const useSocketConnection = (
         socketActionRef.current = null
       }
     }
-  }, [serverUrl, sessionId, clientId, onSnapshot, onTilePlaced, onTileRemoved, onResyncRequired, socketActionRef])
+  }, [
+    serverUrl,
+    sessionId,
+    clientId,
+    onSnapshot,
+    onTilePlaced,
+    onTileRemoved,
+    onResyncRequired,
+    socketActionRef,
+    onPointerUpdate,
+    onClientJoined,
+    onClientLeft,
+    onSelectionUpdate,
+  ])
 
   return socketRef
 }

@@ -19,6 +19,7 @@ import type {
   TilePlacedPayload,
   TileRemovedPayload,
   ListSessionsResponse,
+  SelectionUpdatePayload,
 } from './contracts.js'
 import {
   closeDatabaseBundle,
@@ -51,6 +52,7 @@ type PresenceRepository = {
 }
 
 const sessions = new Map<string, AuthoritativeSessionState>()
+const sessionClientSockets = new Map<string, Map<string, Set<string>>>()
 const defaultPresenceRepository: PresenceRepository = {
   listActiveParticipants,
   loadSessionReplayRecord,
@@ -281,6 +283,32 @@ const isPointerMovePayload = (payload: unknown): payload is { position: { x: num
   return isFiniteNumber(position.x) && isFiniteNumber(position.y)
 }
 
+export const isSelectionUpdatePayload = (payload: unknown): payload is SelectionUpdatePayload => {
+  if (!isObjectRecord(payload)) {
+    return false
+  }
+
+  if (typeof payload.canvasId !== 'string' || payload.canvasId.length === 0) {
+    return false
+  }
+
+  if (typeof payload.clientId !== 'string' || payload.clientId.length === 0) {
+    return false
+  }
+
+  if (!isFiniteNumber(payload.updatedAt)) {
+    return false
+  }
+
+  if (payload.tileId !== undefined) {
+    if (typeof payload.tileId !== 'string' || !isValidTileId(payload.tileId)) {
+      return false
+    }
+  }
+
+  return true
+}
+
 export const invokeAckSafely = <T>(ack: unknown, response: T): void => {
   if (typeof ack === 'function') {
     ;(ack as (result: T) => void)(response)
@@ -382,6 +410,56 @@ export const getSessionState = (sessionId: string): AuthoritativeSessionState =>
   const created = createAuthoritativeSessionState(sessionId)
   sessions.set(sessionId, created)
   return created
+}
+
+export const registerClientSocket = (
+  sessionId: string,
+  clientId: string,
+  socketId: string,
+): number => {
+  let sessionMembership = sessionClientSockets.get(sessionId)
+  if (!sessionMembership) {
+    sessionMembership = new Map<string, Set<string>>()
+    sessionClientSockets.set(sessionId, sessionMembership)
+  }
+
+  let clientSockets = sessionMembership.get(clientId)
+  if (!clientSockets) {
+    clientSockets = new Set<string>()
+    sessionMembership.set(clientId, clientSockets)
+  }
+
+  clientSockets.add(socketId)
+  return clientSockets.size
+}
+
+export const unregisterClientSocket = (
+  sessionId: string,
+  clientId: string,
+  socketId: string,
+): number => {
+  const sessionMembership = sessionClientSockets.get(sessionId)
+  if (!sessionMembership) {
+    return 0
+  }
+
+  const clientSockets = sessionMembership.get(clientId)
+  if (!clientSockets) {
+    return 0
+  }
+
+  clientSockets.delete(socketId)
+  const remainingSockets = clientSockets.size
+
+  if (remainingSockets === 0) {
+    sessionMembership.delete(clientId)
+  }
+
+  if (sessionMembership.size === 0) {
+    sessionClientSockets.delete(sessionId)
+  }
+
+  return remainingSockets
 }
 
 export const initializeParticipantPresence = async (
@@ -733,6 +811,7 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
   const { sessionId, clientId } = socket.data
+  registerClientSocket(sessionId, clientId, socket.id)
 
   socket.onAny((eventName, ...args) => {
     writeLog('debug', 'socket_event_received', {
@@ -957,6 +1036,35 @@ io.on('connection', (socket) => {
     })
   })
 
+  socket.on('selection_update', (payload) => {
+    if (!isSelectionUpdatePayload(payload)) {
+      return
+    }
+
+    if (payload.canvasId !== sessionId || payload.clientId !== clientId) {
+      writeLog('warn', 'selection_update_ignored_invalid_membership', {
+        sessionId,
+        clientId,
+        payloadCanvasId: payload.canvasId,
+        payloadClientId: payload.clientId,
+      })
+      return
+    }
+
+    writeLog('debug', 'selection_update', {
+      sessionId,
+      clientId,
+      tileId: payload.tileId,
+    })
+
+    socket.to(sessionId).emit('selection_update', {
+      canvasId: sessionId,
+      clientId,
+      tileId: payload.tileId,
+      updatedAt: payload.updatedAt,
+    })
+  })
+
   socket.on('request_snapshot', async () => {
     try {
       const record = await loadSessionReplayRecord(sessionId)
@@ -985,10 +1093,22 @@ io.on('connection', (socket) => {
   // ── Disconnection ──────────────────────────────────────────────────────────
 
   socket.on('disconnect', async () => {
+    const remainingSockets = unregisterClientSocket(sessionId, clientId, socket.id)
+
     writeLog('info', 'socket_disconnected', {
       clientId,
       sessionId,
+      remainingSockets,
     })
+
+    if (remainingSockets > 0) {
+      writeLog('debug', 'socket_disconnected_presence_deferred', {
+        sessionId,
+        clientId,
+        remainingSockets,
+      })
+      return
+    }
 
     try {
       await finalizeParticipantPresence(sessionId, clientId, Date.now())

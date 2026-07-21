@@ -7,6 +7,8 @@ import {
   getSessionState,
   initializeParticipantPresence,
   isPlaceTilePayload,
+  registerClientSocket,
+  unregisterClientSocket,
 } from './index.js'
 import { vec2 } from './domain/math2d.js'
 
@@ -230,6 +232,21 @@ describe('authoritative snapshot reconciliation', () => {
 })
 
 describe('multi-client collaboration', () => {
+  it('only finalizes presence after the last socket for a shared client disconnects', () => {
+    const sessionId = nextSessionId()
+    const clientId = 'shared-client'
+
+    expect(registerClientSocket(sessionId, clientId, 'socket-a')).toBe(1)
+    expect(registerClientSocket(sessionId, clientId, 'socket-b')).toBe(2)
+
+    expect(unregisterClientSocket(sessionId, clientId, 'socket-a')).toBe(1)
+    expect(unregisterClientSocket(sessionId, clientId, 'socket-b')).toBe(0)
+  })
+
+  it('safely handles unregister calls for unknown socket membership', () => {
+    expect(unregisterClientSocket('missing-session', 'missing-client', 'missing-socket')).toBe(0)
+  })
+
   it('maps repository session summaries into lobby metadata with canonical canvas size', () => {
     const payload = buildListSessionsResponse([
       { id: '11111111-1111-4111-8111-111111111111', participantCount: 3 },
@@ -479,5 +496,68 @@ describe('multi-client collaboration', () => {
       reason: 'REVISION_MISMATCH' as const,
     }
     expect(expectedResyncPayload).toEqual({ currentOpSeq: 1, reason: 'REVISION_MISMATCH' })
+  })
+
+  it('selection_update fanout targets room peers without local echo', () => {
+    const emitToPeers = vi.fn()
+    const socket = {
+      to: vi.fn().mockReturnValue({ emit: emitToPeers }),
+    }
+
+    const sessionId = nextSessionId()
+    const clientId = 'client-a'
+    const payload = {
+      canvasId: sessionId,
+      clientId,
+      tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      updatedAt: Date.now(),
+    }
+
+    socket.to(sessionId).emit('selection_update', payload)
+
+    expect(socket.to).toHaveBeenCalledTimes(1)
+    expect(socket.to).toHaveBeenCalledWith(sessionId)
+    expect(emitToPeers).toHaveBeenCalledTimes(1)
+    expect(emitToPeers).toHaveBeenCalledWith('selection_update', payload)
+  })
+
+  it('pointer_update fanout payload includes sender identity and position', () => {
+    const emitToPeers = vi.fn()
+    const socket = {
+      to: vi.fn().mockReturnValue({ emit: emitToPeers }),
+    }
+
+    const sessionId = nextSessionId()
+    const payload = {
+      clientId: 'client-a',
+      position: { x: 3, y: -2 },
+    }
+
+    socket.to(sessionId).emit('pointer_update', payload)
+
+    expect(socket.to).toHaveBeenCalledWith(sessionId)
+    expect(emitToPeers).toHaveBeenCalledWith('pointer_update', payload)
+  })
+
+  it('client_joined and client_left payloads preserve collaborator identity', () => {
+    const emitRoom = vi.fn()
+    const io = {
+      to: vi.fn().mockReturnValue({ emit: emitRoom }),
+    }
+
+    const sessionId = nextSessionId()
+    const joinedPayload = {
+      client: {
+        clientId: 'client-z',
+        joinedAt: Date.now(),
+      },
+    }
+    const leftPayload = { clientId: 'client-z' }
+
+    io.to(sessionId).emit('client_joined', joinedPayload)
+    io.to(sessionId).emit('client_left', leftPayload)
+
+    expect(emitRoom).toHaveBeenNthCalledWith(1, 'client_joined', joinedPayload)
+    expect(emitRoom).toHaveBeenNthCalledWith(2, 'client_left', leftPayload)
   })
 })

@@ -12,10 +12,11 @@ import {
 import { easeOutCubic, shortestAngleDelta } from '../domain/math2d'
 import { defaultBounds } from '../domain/placementSolver'
 import { getTileDefinition } from '../domain/tileGeometry'
-import { useCraftMaterial } from './materials'
+import { useCraftMaterial, useRemoteSelectionMaterial } from './materials'
 import type { ThreeEvent } from '@react-three/fiber'
 import type { TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
+import { getCollaboratorColor } from '../ui/palettes'
 
 const geometryCache = new Map<TileShape, ExtrudeGeometry>()
 
@@ -27,10 +28,22 @@ type Ghost = {
   visible: boolean
 }
 
+type RemoteCursor = {
+  clientId: string
+  position: { x: number; y: number }
+}
+
+type RemoteSelection = {
+  clientId: string
+  tileId: string
+}
+
 type MosaicSceneProps = {
   tiles: TileInstance[]
   activeShape: TileShape
   ghost: Ghost
+  remoteCursors: RemoteCursor[]
+  remoteSelections: RemoteSelection[]
   onPointerMove: (x: number, y: number) => void
   onPointerDown: (x: number, y: number) => void
   onPointerUp: () => void
@@ -122,6 +135,42 @@ const GhostMesh = ({ ghost, shape }: { ghost: Ghost; shape: TileShape }) => {
       scale={[ghost.transform.mirrored ? -1 : 1, 1, 1]}
     >
       <mesh geometry={geometry} material={material} />
+    </group>
+  )
+}
+
+const RemoteCursorMesh = ({ cursor }: { cursor: RemoteCursor }) => {
+  const color = getCollaboratorColor(cursor.clientId)
+
+  return (
+    <group position={[cursor.position.x, cursor.position.y, 0.24]}>
+      <mesh position={[0, 0, 0.08]}>
+        <sphereGeometry args={[0.075, 14, 14]} />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.36} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.11, 0.16, 24]} />
+        <meshStandardMaterial color={color} transparent opacity={0.72} />
+      </mesh>
+    </group>
+  )
+}
+
+const RemoteSelectionHalo = ({ tile, clientId }: { tile: TileInstance; clientId: string }) => {
+  const color = getCollaboratorColor(clientId)
+  const material = useRemoteSelectionMaterial(color)
+  const geometry = useMemo(() => createExtrudeGeometry(tile.shape), [tile.shape])
+
+  return (
+    <group
+      position={[tile.transform.position.x, tile.transform.position.y, 0.3]}
+      rotation={[0, 0, tile.transform.rotation]}
+      scale={[tile.transform.mirrored ? -1 : 1, 1, 1.02]}
+    >
+      <mesh geometry={geometry} material={material} />
+      <mesh geometry={geometry} scale={[1.06, 1.06, 1.06]}>
+        <meshBasicMaterial color={color} wireframe transparent opacity={0.88} depthWrite={false} />
+      </mesh>
     </group>
   )
 }
@@ -220,6 +269,8 @@ const SceneContents = ({
   tiles,
   activeShape,
   ghost,
+  remoteCursors,
+  remoteSelections,
   onPointerMove,
   onPointerDown,
   onPointerUp,
@@ -246,9 +297,26 @@ const SceneContents = ({
         {tiles.map((tile) => (
           <TileMesh key={tile.id} tile={tile} />
         ))}
+        {remoteSelections.map((selection) => {
+          const selectedTile = tiles.find((tile) => tile.id === selection.tileId)
+          if (!selectedTile) {
+            return null
+          }
+
+          return (
+            <RemoteSelectionHalo
+              key={`${selection.clientId}-${selection.tileId}`}
+              tile={selectedTile}
+              clientId={selection.clientId}
+            />
+          )
+        })}
       </group>
 
       <GhostMesh ghost={ghost} shape={activeShape} />
+      {remoteCursors.map((cursor) => (
+        <RemoteCursorMesh key={cursor.clientId} cursor={cursor} />
+      ))}
 
       <InteractionPlane
         onPointerMove={onPointerMove}
@@ -283,6 +351,8 @@ export const MosaicScene = ({
   tiles,
   activeShape,
   ghost,
+  remoteCursors,
+  remoteSelections,
   onPointerMove,
   onPointerDown,
   onPointerUp,
@@ -315,6 +385,8 @@ export const MosaicScene = ({
         onCameraPan={onCameraPan}
         cameraPan={cameraPan}
         ghost={ghost}
+        remoteCursors={remoteCursors}
+        remoteSelections={remoteSelections}
         onPointerMove={onPointerMove}
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
