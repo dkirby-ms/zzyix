@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useEffect } from 'react'
 import {
   ExtrudeGeometry,
   Group,
@@ -213,15 +213,18 @@ const InteractionPlane = ({
   onCameraPan,
   worldBounds,
 }: Pick<MosaicSceneProps, 'onPointerMove' | 'onPointerDown' | 'onPointerUp' | 'onRotateDrag' | 'onCameraPan' | 'worldBounds'>) => {
-  const lastRightX = useRef<number | null>(null)
+  const meshRef = useRef<any>(null)
+  const isRightMouseDown = useRef(false)
   const lastMiddlePos = useRef<{ x: number; y: number } | null>(null)
+  const skipNextMove = useRef(false)
 
   const handleMove = (event: ThreeEvent<PointerEvent>): void => {
     if ((event.buttons & 2) !== 0) {
-      if (lastRightX.current !== null) {
-        onRotateDrag(event.clientX - lastRightX.current)
+      // Right mouse button: rotate using movement delta
+      const movement = (event.nativeEvent as PointerEvent).movementX || 0
+      if (movement !== 0) {
+        onRotateDrag(movement)
       }
-      lastRightX.current = event.clientX
       event.stopPropagation()
       return
     }
@@ -236,14 +239,20 @@ const InteractionPlane = ({
       event.stopPropagation()
       return
     }
-    lastRightX.current = null
+    // Skip the first move after rotating
+    if (skipNextMove.current) {
+      skipNextMove.current = false
+      return
+    }
     lastMiddlePos.current = null
     onPointerMove(event.point.x, event.point.y)
   }
 
   const handleDown = (event: ThreeEvent<PointerEvent>): void => {
     if (event.button === 2) {
-      lastRightX.current = event.clientX
+      isRightMouseDown.current = true
+      skipNextMove.current = false
+      meshRef.current?.setPointerCapture?.(event.pointerId)
       event.stopPropagation()
       return
     }
@@ -258,7 +267,9 @@ const InteractionPlane = ({
 
   const handleUp = (event: ThreeEvent<PointerEvent>): void => {
     if (event.button === 2) {
-      lastRightX.current = null
+      isRightMouseDown.current = false
+      skipNextMove.current = true
+      meshRef.current?.releasePointerCapture?.(event.pointerId)
       event.stopPropagation()
       return
     }
@@ -268,7 +279,6 @@ const InteractionPlane = ({
       event.stopPropagation()
       return
     }
-    lastRightX.current = null
     lastMiddlePos.current = null
     onPointerUp()
   }
@@ -281,6 +291,7 @@ const InteractionPlane = ({
 
   return (
     <mesh
+      ref={meshRef}
       position={[centerX, centerY, -0.02]}
       onPointerMove={handleMove}
       onPointerDown={handleDown}
@@ -489,39 +500,99 @@ export const MosaicScene = ({
     cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom,
     Math.min(cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom, 58 * (10.4 / Math.max(10.4, maxDimension))),
   )
+  const containerRef = useRef<HTMLDivElement>(null)
+  const fakeCursorRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+    }
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 2) {
+        // Right mouse button pressed - show fake cursor at this position
+        if (fakeCursorRef.current) {
+          fakeCursorRef.current.style.left = `${e.clientX}px`
+          fakeCursorRef.current.style.top = `${e.clientY}px`
+          fakeCursorRef.current.style.display = 'block'
+        }
+        container.style.cursor = 'none'
+      }
+    }
+
+    const handleMouseUp = () => {
+      // Hide fake cursor
+      if (fakeCursorRef.current) {
+        fakeCursorRef.current.style.display = 'none'
+      }
+      container.style.cursor = 'auto'
+    }
+
+    container.addEventListener('contextmenu', handleContextMenu)
+    container.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      container.removeEventListener('contextmenu', handleContextMenu)
+      container.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
 
   return (
-    <Canvas
-      shadows="percentage"
-      camera={{
-        position: [centerX, centerY, 8],
-        zoom: initialZoom,
-        near: 0.1,
-        far: 100,
-      }}
-      orthographic
-      dpr={[1, 1.8]}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <color attach="background" args={['#e8e3d7']} />
-      <fog attach="fog" args={['#e8e3d7', 10, 24]} />
-      <SceneContents
-        tiles={tiles}
-        activeShape={activeShape}
-        worldBounds={resolvedBounds}
-        onRotateDrag={onRotateDrag}
-        onCameraPan={onCameraPan}
-        cameraPan={cameraPan}
-        cameraPolicy={cameraPolicy}
-        ghost={ghost}
-        remoteCursors={remoteCursors}
-        remoteSelections={remoteSelections}
-        onPointerMove={onPointerMove}
-        onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
-        onViewportChanged={onViewportChanged}
-        onZoomTierChanged={onZoomTierChanged}
+    <>
+      <div
+        ref={fakeCursorRef}
+        style={{
+          position: 'fixed',
+          width: '8px',
+          height: '8px',
+          backgroundColor: '#333',
+          borderRadius: '50%',
+          pointerEvents: 'none',
+          display: 'none',
+          transform: 'translate(-4px, -4px)',
+          zIndex: 9999,
+          boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.5)',
+        }}
       />
-    </Canvas>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+        <Canvas
+          shadows="percentage"
+          camera={{
+            position: [centerX, centerY, 8],
+            zoom: initialZoom,
+            near: 0.1,
+            far: 100,
+          }}
+          orthographic
+          dpr={[1, 1.8]}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <color attach="background" args={['#e8e3d7']} />
+          <fog attach="fog" args={['#e8e3d7', 10, 24]} />
+          <SceneContents
+            tiles={tiles}
+            activeShape={activeShape}
+            worldBounds={resolvedBounds}
+            onRotateDrag={onRotateDrag}
+            onCameraPan={onCameraPan}
+            cameraPan={cameraPan}
+            cameraPolicy={cameraPolicy}
+            ghost={ghost}
+            remoteCursors={remoteCursors}
+            remoteSelections={remoteSelections}
+            onPointerMove={onPointerMove}
+            onPointerDown={onPointerDown}
+            onPointerUp={onPointerUp}
+            onViewportChanged={onViewportChanged}
+            onZoomTierChanged={onZoomTierChanged}
+          />
+        </Canvas>
+      </div>
+    </>
   )
 }

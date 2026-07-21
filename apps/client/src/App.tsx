@@ -241,6 +241,10 @@ function App() {
     setMode('canvas')
   }, [])
 
+  const returnToLobby = useCallback((): void => {
+    setMode('lobby')
+  }, [])
+
   const handleJoinSession = useCallback((nextSessionId: string): void => {
     setJoiningSessionId(nextSessionId)
     try {
@@ -928,6 +932,7 @@ function App() {
         onUndo={handleUndo}
         clearDisabled
         onClear={() => {}}
+        onReturnToLobby={returnToLobby}
       />
 
       <section className="canvas-shell">
