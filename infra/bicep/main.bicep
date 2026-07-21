@@ -1,9 +1,6 @@
 @description('Short name for the target environment (e.g. dev, staging, prod). Used as a suffix on all resource names.')
 param environmentName string = 'dev'
 
-@description('Azure region for all resources. Defaults to the resource group location.')
-param location string = resourceGroup().location
-
 @description('Administrator login name for the PostgreSQL Flexible Server.')
 param postgresAdminLogin string = 'pgadmin'
 
@@ -13,6 +10,7 @@ param postgresAdminLogin string = 'pgadmin'
 param postgresAdminPassword string
 
 var namePrefix = 'zzyix-${environmentName}'
+var deploymentLocation = resourceGroup().location
 
 // ── Networking ────────────────────────────────────────────────────────────────
 // VNet with two subnets:
@@ -21,7 +19,17 @@ var namePrefix = 'zzyix-${environmentName}'
 module network 'modules/network.bicep' = {
   name: 'network'
   params: {
-    location: location
+    location: deploymentLocation
+    namePrefix: namePrefix
+  }
+}
+
+// ── Monitoring ────────────────────────────────────────────────────────────────
+// Log Analytics workspace for Container Apps environment logs.
+module monitoring 'modules/monitoring.bicep' = {
+  name: 'monitoring'
+  params: {
+    location: deploymentLocation
     namePrefix: namePrefix
   }
 }
@@ -32,9 +40,11 @@ module network 'modules/network.bicep' = {
 module containerAppsEnvironment 'modules/containerAppsEnvironment.bicep' = {
   name: 'containerAppsEnvironment'
   params: {
-    location: location
+    location: deploymentLocation
     namePrefix: namePrefix
     acaSubnetId: network.outputs.acaSubnetId
+    logAnalyticsCustomerId: monitoring.outputs.customerId
+    logAnalyticsSharedKey: monitoring.outputs.sharedKey
   }
 }
 
@@ -44,7 +54,7 @@ module containerAppsEnvironment 'modules/containerAppsEnvironment.bicep' = {
 module postgresql 'modules/postgresql.bicep' = {
   name: 'postgresql'
   params: {
-    location: location
+    location: deploymentLocation
     namePrefix: namePrefix
     postgresSubnetId: network.outputs.postgresSubnetId
     vnetId: network.outputs.vnetId

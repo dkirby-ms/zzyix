@@ -58,6 +58,92 @@ jobs:
               exit 1
             fi
 
+            # Parse and validate database connection metadata before starting migrations.
+            DB_URL="${{ secrets.SERVER_DATABASE_URL }}"
+            export DB_URL
+            mapfile -t db_parts < <(python - <<'PY'
+            from urllib.parse import urlparse, unquote
+            import os
+            import sys
+
+            value = os.environ.get('DB_URL', '')
+            parsed = urlparse(value)
+            if parsed.scheme not in ('postgres', 'postgresql'):
+                sys.exit(1)
+
+            host = parsed.hostname or ''
+            username = unquote(parsed.username or '')
+            database = (parsed.path or '').lstrip('/')
+            if not host or not username or not database:
+                sys.exit(2)
+
+            server = host.split('.')[0]
+            print(server)
+            print(username)
+            print(database)
+            print(host)
+            PY
+            )
+
+            if [[ ${#db_parts[@]} -ne 4 ]]; then
+              echo "SERVER_DATABASE_URL must include username, host, and database name."
+              exit 1
+            fi
+
+            DB_SERVER_NAME="${db_parts[0]}"
+            DB_USERNAME="${db_parts[1]}"
+            DB_NAME="${db_parts[2]}"
+            DB_HOST="${db_parts[3]}"
+
+            echo "Preflight DB target: server=${DB_SERVER_NAME} host=${DB_HOST} db=${DB_NAME} user=${DB_USERNAME}"
+
+            admin_login="$({
+              az postgres flexible-server show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${DB_SERVER_NAME}" \
+                --query administratorLogin \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ -z "${admin_login}" || "${admin_login}" == "null" ]]; then
+              echo "Failed to resolve PostgreSQL server administrator login for ${DB_SERVER_NAME}."
+              exit 1
+            fi
+
+            if [[ "${admin_login}" != "${DB_USERNAME}" ]]; then
+              echo "SERVER_DATABASE_URL username (${DB_USERNAME}) does not match PostgreSQL admin login (${admin_login})."
+              exit 1
+            fi
+
+            password_auth_enabled="$({
+              az postgres flexible-server show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${DB_SERVER_NAME}" \
+                --query authConfig.passwordAuth \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ "${password_auth_enabled}" != "Enabled" ]]; then
+              echo "Password auth is not enabled on ${DB_SERVER_NAME}."
+              exit 1
+            fi
+
+            if az postgres flexible-server db show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --server-name "${DB_SERVER_NAME}" \
+              --name "${DB_NAME}" >/dev/null 2>&1; then
+              echo "Database ${DB_NAME} already exists on ${DB_SERVER_NAME}."
+            else
+              echo "Database ${DB_NAME} not found; creating it now."
+              az postgres flexible-server db create \
+                --resource-group "${RESOURCE_GROUP}" \
+                --server-name "${DB_SERVER_NAME}" \
+                --name "${DB_NAME}" \
+                --charset UTF8 \
+                --collation en_US.utf8 >/dev/null
+              echo "Created database ${DB_NAME}."
+            fi
+
             SERVER_IMAGE="$({
               az containerapp show \
                 --resource-group "${RESOURCE_GROUP}" \
