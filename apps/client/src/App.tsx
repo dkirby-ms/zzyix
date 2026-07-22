@@ -34,6 +34,8 @@ import {
 } from './network/session'
 import { resolveServerUrl } from './network/serverUrl'
 import { useSocketConnection } from './network/useSocketConnection'
+import { useConnectionStatus } from './network/useConnectionStatus'
+import { StatusIndicator } from './ui/StatusIndicator'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
   BoundsPolicy,
@@ -577,6 +579,8 @@ function App() {
     realtimeCapabilities?.chunkStreamingEnabled ?? false,
   )
 
+  const connectionState = useConnectionStatus(socketRef)
+
   const onViewportChanged = useCallback((payload: {
     center: { x: number; y: number }
     viewport: ViewportBounds
@@ -937,6 +941,7 @@ function App() {
 
       <section className="canvas-shell">
         <div className="status-strip" data-state={ghost.confidence}>
+          <StatusIndicator connectionState={connectionState} />
           <span>{ghost.confidence.replace('-', ' ')}</span>
           <span>{sequencedState.tiles.length} placed</span>
           <span>{activeCollaborators.length} active</span>
