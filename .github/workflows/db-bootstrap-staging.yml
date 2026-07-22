@@ -195,7 +195,7 @@ jobs:
               --image "${SERVER_IMAGE}" \
               --command "node" \
               --args "dist/db/migrate.js" \
-              --env-vars "NODE_ENV=production" "DATABASE_URL=secretref:database-url" \
+              --env-vars "NODE_ENV=production" "DATABASE_URL=secretref:database-url" "PGSSLMODE=require" \
               --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
               ${create_registry_args[@]}
 
@@ -213,6 +213,23 @@ jobs:
             fi
 
             echo "Started bootstrap job execution: ${execution_name}"
+
+            print_execution_diagnostics() {
+              echo "Execution diagnostics for ${execution_name}:"
+
+              az containerapp job execution show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${DB_BOOTSTRAP_JOB_NAME}" \
+                --job-execution-name "${execution_name}" \
+                --output json || true
+
+              echo "Recent job executions (latest 5):"
+              az containerapp job execution list \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${DB_BOOTSTRAP_JOB_NAME}" \
+                --query "sort_by([].{name:name,status:properties.status,startTime:properties.startTime,endTime:properties.endTime}, &startTime)[-5:]" \
+                --output table || true
+            }
 
             for attempt in {1..60}; do
               status="$({
@@ -233,6 +250,7 @@ jobs:
 
               if [[ "${status}" == "Failed" ]]; then
                 echo "Database bootstrap failed."
+                print_execution_diagnostics
                 exit 1
               fi
 
@@ -240,4 +258,5 @@ jobs:
             done
 
             echo "Timed out waiting for bootstrap job execution to finish."
+            print_execution_diagnostics
             exit 1
