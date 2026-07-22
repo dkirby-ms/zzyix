@@ -17,31 +17,41 @@ export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket 
     status: 'connecting',
   })
 
+  const setConnectionState = (next: ConnectionState): void => {
+    setState((previous) => {
+      if (previous.status === next.status && previous.lastError === next.lastError) {
+        return previous
+      }
+
+      return next
+    })
+  }
+
   useEffect(() => {
     const socket = socketRef.current
     if (!socket) {
-      setState({ status: 'disconnected' })
+      setConnectionState({ status: 'disconnected' })
       return
     }
 
     // Track connection events
     const handleConnect = () => {
-      setState({ status: 'connected' })
+      setConnectionState({ status: 'connected' })
     }
 
     const handleDisconnect = (reason: string) => {
       // Check if it's a normal disconnect or an error-based disconnect
       if (reason === 'client namespace disconnect') {
-        setState({ status: 'disconnected' })
+        setConnectionState({ status: 'disconnected' })
       } else {
         // Network error or unexpected disconnect - will try to reconnect
-        setState({ status: 'disconnecting' })
+        setConnectionState({ status: 'disconnecting' })
       }
     }
 
     const handleConnectError = (error: Error | string) => {
       const errorMessage = typeof error === 'string' ? error : error.message
-      setState({
+      setConnectionState({
         status: 'error',
         lastError: errorMessage,
       })
@@ -54,9 +64,9 @@ export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket 
 
     // Initialize state based on current connection status
     if (socket.connected) {
-      setState({ status: 'connected' })
+      setConnectionState({ status: 'connected' })
     } else {
-      setState({ status: 'connecting' })
+      setConnectionState({ status: 'connecting' })
     }
 
     return () => {

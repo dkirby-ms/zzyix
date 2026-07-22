@@ -730,6 +730,10 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (mode !== 'canvas') {
+      return
+    }
+
     let last = performance.now()
     let raf = 0
 
@@ -742,7 +746,7 @@ function App() {
 
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [])
+  }, [mode])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {

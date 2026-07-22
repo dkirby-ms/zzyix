@@ -321,7 +321,14 @@ describe('App lobby-first behavior', () => {
     const emitMock = vi.fn()
     useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
       const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
-      const socketRef = { current: { emit: emitMock } }
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
       if (actionRef) {
         actionRef.current = socketRef.current
       }
@@ -625,7 +632,14 @@ describe('App lobby-first behavior', () => {
     const emitMock = vi.fn()
     useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
       const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
-      const socketRef = { current: { emit: emitMock } }
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
       if (actionRef) {
         actionRef.current = socketRef.current
       }
