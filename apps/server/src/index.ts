@@ -488,8 +488,12 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
   console.log(line)
 }
 
+const DB_CONNECT_MAX_ATTEMPTS = Number(process.env.DB_CONNECT_MAX_ATTEMPTS ?? 10)
+const DB_CONNECT_RETRY_BASE_MS = Number(process.env.DB_CONNECT_RETRY_BASE_MS ?? 3_000)
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
 const verifyDatabaseConnectivity = async (): Promise<void> => {
-  // Check that DATABASE_URL is set
   if (!process.env.DATABASE_URL) {
     throw new Error(
       'DATABASE_URL environment variable is not set. ' +
@@ -501,31 +505,53 @@ const verifyDatabaseConnectivity = async (): Promise<void> => {
 
   writeLog('info', 'database_connectivity_check_started', {
     databaseTarget,
+    maxAttempts: DB_CONNECT_MAX_ATTEMPTS,
   })
 
-  const startedAt = Date.now()
+  let lastError: unknown
 
-  try {
-    const client = await getDatabaseBundle().pool.connect()
-
+  for (let attempt = 1; attempt <= DB_CONNECT_MAX_ATTEMPTS; attempt++) {
+    const attemptStartedAt = Date.now()
     try {
-      await client.query('SELECT 1 AS ok')
-    } finally {
-      client.release()
-    }
+      const client = await getDatabaseBundle().pool.connect()
+      try {
+        await client.query('SELECT 1 AS ok')
+      } finally {
+        client.release()
+      }
 
-    writeLog('info', 'database_connectivity_check_succeeded', {
-      databaseTarget,
-      durationMs: Date.now() - startedAt,
-    })
-  } catch (error) {
-    writeLog('error', 'database_connectivity_check_failed', {
-      databaseTarget,
-      durationMs: Date.now() - startedAt,
-      error,
-    })
-    throw error
+      writeLog('info', 'database_connectivity_check_succeeded', {
+        databaseTarget,
+        attempt,
+        durationMs: Date.now() - attemptStartedAt,
+      })
+      return
+    } catch (error) {
+      lastError = error
+      const retryDelayMs = DB_CONNECT_RETRY_BASE_MS * attempt
+
+      if (attempt < DB_CONNECT_MAX_ATTEMPTS) {
+        writeLog('warn', 'database_connectivity_check_retrying', {
+          databaseTarget,
+          attempt,
+          maxAttempts: DB_CONNECT_MAX_ATTEMPTS,
+          retryDelayMs,
+          error,
+        })
+        await sleep(retryDelayMs)
+      } else {
+        writeLog('error', 'database_connectivity_check_failed', {
+          databaseTarget,
+          attempt,
+          maxAttempts: DB_CONNECT_MAX_ATTEMPTS,
+          durationMs: Date.now() - attemptStartedAt,
+          error,
+        })
+      }
+    }
   }
+
+  throw lastError
 }
 
 export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tileId)
