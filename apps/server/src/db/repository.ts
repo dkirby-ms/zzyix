@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, lte, max, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
 import type { ClientPresence, Session, TileInstance } from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
+import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
 import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema.js'
 import { getDatabaseBundle, type DatabaseClient } from './client.js'
 
@@ -98,7 +99,44 @@ export type SessionSummaryRecord = {
   participantCount: number
 }
 
+export type ChunkCoordinate = {
+  x: number
+  y: number
+}
+
+export type ChunkTileReadResult = {
+  tiles: TileInstance[]
+  opSeq: number
+  revision: number
+  parityMatched: boolean
+}
+
 const toMillis = (value: Date): number => value.getTime()
+
+const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
+
+const worldToChunk = (x: number, y: number, chunkWorldSize: number = CHUNK_WORLD_SIZE): ChunkCoordinate => ({
+  x: Math.floor(x / chunkWorldSize),
+  y: Math.floor(y / chunkWorldSize),
+})
+
+const toChunkIdentity = (tile: TileInstance): string => {
+  const chunk = worldToChunk(tile.transform.position.x, tile.transform.position.y)
+  return `${tile.id}:${chunk.x}:${chunk.y}`
+}
+
+const normalizeTileIdentitySet = (tilesList: TileInstance[]): string[] =>
+  tilesList.map(toChunkIdentity).sort((left, right) => left.localeCompare(right))
+
+export const areChunkTileSetsEquivalent = (left: TileInstance[], right: TileInstance[]): boolean => {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  const leftIds = normalizeTileIdentitySet(left)
+  const rightIds = normalizeTileIdentitySet(right)
+  return leftIds.every((value, index) => value === rightIds[index])
+}
 
 const mapTile = (row: typeof tiles.$inferSelect): TileInstance => ({
   id: row.id,
@@ -344,6 +382,50 @@ export const loadSessionRecord = async (sessionId: string): Promise<Authoritativ
   }
 }
 
+export const listTilesByChunks = async (sessionId: string, chunks: ChunkCoordinate[]): Promise<TileInstance[]> => {
+  if (chunks.length === 0) {
+    return []
+  }
+
+  const { db } = getDatabaseBundle()
+  const uniqueChunks = Array.from(new Map(chunks.map((chunk) => [`${chunk.x}:${chunk.y}`, chunk])).values())
+
+  const chunkClauses = uniqueChunks.map((chunk) =>
+    and(eq(tiles.chunkX, chunk.x), eq(tiles.chunkY, chunk.y)),
+  )
+
+  const rows = await db
+    .select()
+    .from(tiles)
+    .where(and(eq(tiles.canvasId, sessionId), or(...chunkClauses)))
+    .orderBy(asc(tiles.createdAt))
+
+  return rows.map(mapTile)
+}
+
+export const listTilesByChunksWithParity = async (
+  sessionId: string,
+  chunks: ChunkCoordinate[],
+): Promise<ChunkTileReadResult> => {
+  const record = await loadSessionRecord(sessionId)
+  const chunkedTiles = await listTilesByChunks(sessionId, chunks)
+
+  const requestedChunkIds = new Set(chunks.map((chunk) => `${chunk.x}:${chunk.y}`))
+  const legacyTiles = record.session.tiles.filter((tile) => {
+    const tileChunk = worldToChunk(tile.transform.position.x, tile.transform.position.y)
+    return requestedChunkIds.has(`${tileChunk.x}:${tileChunk.y}`)
+  })
+
+  const parityMatched = areChunkTileSetsEquivalent(chunkedTiles, legacyTiles)
+
+  return {
+    tiles: parityMatched ? chunkedTiles : legacyTiles,
+    opSeq: record.lastOpSeq,
+    revision: record.revision,
+    parityMatched,
+  }
+}
+
 export const markParticipantJoined = async (
   sessionId: string,
   clientId: string,
@@ -571,6 +653,8 @@ export const persistTilePlacement = async (params: {
 
     const opSeq = await getNextOpSeq(tx, sessionId)
 
+    const tileChunk = worldToChunk(payload.transform.position.x, payload.transform.position.y)
+
     await tx.insert(tiles).values({
       id: tileId,
       canvasId: sessionId,
@@ -579,6 +663,8 @@ export const persistTilePlacement = async (params: {
       material: payload.material,
       posX: payload.transform.position.x,
       posY: payload.transform.position.y,
+      chunkX: tileChunk.x,
+      chunkY: tileChunk.y,
       rotation: payload.transform.rotation,
       mirrored: payload.transform.mirrored ?? false,
       placedBy,

@@ -12,6 +12,10 @@ import type {
   SessionSnapshotPayload,
   TilePlacedPayload,
   TileRemovedPayload,
+  ChunkSnapshotPayload,
+  ChunkTilePlacedPayload,
+  ChunkTileRemovedPayload,
+  ChunkResyncRequiredPayload,
 } from '../../../server/src/contracts'
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
@@ -29,6 +33,11 @@ export const useSocketConnection = (
   onClientJoined?: (payload: ClientJoinedPayload) => void,
   onClientLeft?: (payload: ClientLeftPayload) => void,
   onSelectionUpdate?: (payload: SelectionUpdatePayload) => void,
+  onChunkSnapshot?: (payload: ChunkSnapshotPayload) => void,
+  onChunkTilePlaced?: (payload: ChunkTilePlacedPayload) => void,
+  onChunkTileRemoved?: (payload: ChunkTileRemovedPayload) => void,
+  onChunkResyncRequired?: (payload: ChunkResyncRequiredPayload) => void,
+  enableChunkStreaming: boolean = true,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
 
@@ -74,6 +83,18 @@ export const useSocketConnection = (
     if (onResyncRequired) {
       socket.on('resync_required', onResyncRequired)
     }
+    if (enableChunkStreaming && onChunkSnapshot) {
+      socket.on('chunk_snapshot', onChunkSnapshot)
+    }
+    if (enableChunkStreaming && onChunkTilePlaced) {
+      socket.on('chunk_tile_placed', onChunkTilePlaced)
+    }
+    if (enableChunkStreaming && onChunkTileRemoved) {
+      socket.on('chunk_tile_removed', onChunkTileRemoved)
+    }
+    if (enableChunkStreaming && onChunkResyncRequired) {
+      socket.on('chunk_resync_required', onChunkResyncRequired)
+    }
 
     socketRef.current = socket
     if (socketActionRef) {
@@ -99,6 +120,18 @@ export const useSocketConnection = (
       if (onResyncRequired) {
         socket.off('resync_required', onResyncRequired)
       }
+      if (enableChunkStreaming && onChunkSnapshot) {
+        socket.off('chunk_snapshot', onChunkSnapshot)
+      }
+      if (enableChunkStreaming && onChunkTilePlaced) {
+        socket.off('chunk_tile_placed', onChunkTilePlaced)
+      }
+      if (enableChunkStreaming && onChunkTileRemoved) {
+        socket.off('chunk_tile_removed', onChunkTileRemoved)
+      }
+      if (enableChunkStreaming && onChunkResyncRequired) {
+        socket.off('chunk_resync_required', onChunkResyncRequired)
+      }
       socket.disconnect()
       socketRef.current = null
       if (socketActionRef) {
@@ -118,6 +151,11 @@ export const useSocketConnection = (
     onClientJoined,
     onClientLeft,
     onSelectionUpdate,
+    onChunkSnapshot,
+    onChunkTilePlaced,
+    onChunkTileRemoved,
+    onChunkResyncRequired,
+    enableChunkStreaming,
   ])
 
   return socketRef

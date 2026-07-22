@@ -57,6 +57,48 @@
   gap: 0.5rem;
 }
 
+.lobby-create-config {
+  margin-bottom: 0.85rem;
+  border: 1px solid rgba(66, 47, 37, 0.14);
+  border-radius: 14px;
+  padding: 0.72rem;
+  background: rgba(255, 248, 235, 0.7);
+}
+
+.lobby-create-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+
+.lobby-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.48rem;
+}
+
+.lobby-preset {
+  border-radius: 12px;
+  border: 1px solid rgba(66, 47, 37, 0.24);
+  background: rgba(255, 251, 243, 0.84);
+  text-align: left;
+  padding: 0.52rem 0.62rem;
+  display: grid;
+  gap: 0.14rem;
+}
+
+.lobby-preset span {
+  font-weight: 600;
+  font-size: 0.84rem;
+}
+
+.lobby-preset small {
+  font-size: 0.74rem;
+  opacity: 0.75;
+}
+
 .lobby-error {
   margin: 0.75rem 0;
   color: #8c3434;
@@ -338,6 +380,10 @@ button:disabled {
 
   .lobby-row button {
     width: 100%;
+  }
+
+  .lobby-preset-grid {
+    grid-template-columns: 1fr;
   }
 
   .app-shell {

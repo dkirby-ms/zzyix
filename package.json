@@ -10,6 +10,8 @@
     "dev": "npm run dev:server & npm run dev:client",
     "dev:client": "npm run dev --workspace=apps/client",
     "dev:server": "npm run dev --workspace=apps/server",
+    "db:apply": "npm run build:server && node --env-file=.env apps/server/dist/db/migrate.js",
+    "db:seed": "npm run build:server && node --env-file=.env apps/server/dist/db/seed.js",
     "db:purge": "./scripts/database-purge.sh",
     "audit": "npm audit --audit-level=high --workspaces --if-present",
     "audit:client": "npm audit --audit-level=high --workspace=apps/client",

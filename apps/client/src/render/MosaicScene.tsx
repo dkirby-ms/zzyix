@@ -1,16 +1,17 @@
-import { Canvas, useFrame } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useEffect } from 'react'
 import {
   ExtrudeGeometry,
   Group,
   MathUtils,
+  MOUSE,
+  OrthographicCamera,
   PlaneGeometry,
   Shape,
   Vector2,
 } from 'three'
 import { easeOutCubic, shortestAngleDelta } from '../domain/math2d'
-import { defaultBounds } from '../domain/placementSolver'
 import { getTileDefinition } from '../domain/tileGeometry'
 import { useCraftMaterial, useRemoteSelectionMaterial } from './materials'
 import type { ThreeEvent } from '@react-three/fiber'
@@ -44,12 +45,42 @@ type MosaicSceneProps = {
   ghost: Ghost
   remoteCursors: RemoteCursor[]
   remoteSelections: RemoteSelection[]
+  worldBounds?: {
+    minX: number
+    maxX: number
+    minY: number
+    maxY: number
+  }
   onPointerMove: (x: number, y: number) => void
   onPointerDown: (x: number, y: number) => void
   onPointerUp: () => void
   onRotateDrag: (deltaX: number) => void
   onCameraPan: (deltaX: number, deltaY: number) => void
   cameraPan: { x: number; y: number }
+  cameraPolicy?: {
+    minZoom: number
+    maxZoom: number
+    panSensitivity: number
+  }
+  onViewportChanged?: (payload: {
+    center: { x: number; y: number }
+    viewport: { minX: number; maxX: number; minY: number; maxY: number }
+    zoom: number
+  }) => void
+  onZoomTierChanged?: (zoom: number) => void
+}
+
+const DEFAULT_CAMERA_POLICY = {
+  minZoom: 20,
+  maxZoom: 140,
+  panSensitivity: 0.02,
+}
+
+const DEFAULT_WORLD_BOUNDS = {
+  minX: -5.2,
+  maxX: 5.2,
+  minY: -3.4,
+  maxY: 3.4,
 }
 
 const confidenceColor = (base: string, confidence: ConfidenceState): string => {
@@ -181,16 +212,20 @@ const InteractionPlane = ({
   onPointerUp,
   onRotateDrag,
   onCameraPan,
-}: Pick<MosaicSceneProps, 'onPointerMove' | 'onPointerDown' | 'onPointerUp' | 'onRotateDrag' | 'onCameraPan'>) => {
-  const lastRightX = useRef<number | null>(null)
+  worldBounds,
+}: Pick<MosaicSceneProps, 'onPointerMove' | 'onPointerDown' | 'onPointerUp' | 'onRotateDrag' | 'onCameraPan' | 'worldBounds'>) => {
+  const meshRef = useRef<any>(null)
+  const isRightMouseDown = useRef(false)
   const lastMiddlePos = useRef<{ x: number; y: number } | null>(null)
+  const skipNextMove = useRef(false)
 
   const handleMove = (event: ThreeEvent<PointerEvent>): void => {
     if ((event.buttons & 2) !== 0) {
-      if (lastRightX.current !== null) {
-        onRotateDrag(event.clientX - lastRightX.current)
+      // Right mouse button: rotate using movement delta
+      const movement = (event.nativeEvent as PointerEvent).movementX || 0
+      if (movement !== 0) {
+        onRotateDrag(movement)
       }
-      lastRightX.current = event.clientX
       event.stopPropagation()
       return
     }
@@ -205,14 +240,20 @@ const InteractionPlane = ({
       event.stopPropagation()
       return
     }
-    lastRightX.current = null
+    // Skip the first move after rotating
+    if (skipNextMove.current) {
+      skipNextMove.current = false
+      return
+    }
     lastMiddlePos.current = null
     onPointerMove(event.point.x, event.point.y)
   }
 
   const handleDown = (event: ThreeEvent<PointerEvent>): void => {
     if (event.button === 2) {
-      lastRightX.current = event.clientX
+      isRightMouseDown.current = true
+      skipNextMove.current = false
+      meshRef.current?.setPointerCapture?.(event.pointerId)
       event.stopPropagation()
       return
     }
@@ -227,7 +268,9 @@ const InteractionPlane = ({
 
   const handleUp = (event: ThreeEvent<PointerEvent>): void => {
     if (event.button === 2) {
-      lastRightX.current = null
+      isRightMouseDown.current = false
+      skipNextMove.current = true
+      meshRef.current?.releasePointerCapture?.(event.pointerId)
       event.stopPropagation()
       return
     }
@@ -237,32 +280,91 @@ const InteractionPlane = ({
       event.stopPropagation()
       return
     }
-    lastRightX.current = null
     lastMiddlePos.current = null
     onPointerUp()
   }
 
+  const bounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
+  const width = (bounds.maxX - bounds.minX) + 6
+  const height = (bounds.maxY - bounds.minY) + 6
+  const centerX = (bounds.minX + bounds.maxX) / 2
+  const centerY = (bounds.minY + bounds.maxY) / 2
+
   return (
     <mesh
-      position={[0, 0, -0.02]}
+      ref={meshRef}
+      position={[centerX, centerY, -0.02]}
       onPointerMove={handleMove}
       onPointerDown={handleDown}
       onPointerUp={handleUp}
       receiveShadow={false}
     >
-      <planeGeometry args={[20, 14]} />
+      <planeGeometry args={[width, height]} />
       <meshBasicMaterial transparent opacity={0} />
     </mesh>
   )
 }
 
-const CanvasBounds = () => {
-  const geometry = useMemo(() => new PlaneGeometry(10.5, 7), [])
+const CanvasBounds = ({ worldBounds }: { worldBounds?: MosaicSceneProps['worldBounds'] }) => {
+  const bounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
+  const width = (bounds.maxX - bounds.minX) + 0.2
+  const height = (bounds.maxY - bounds.minY) + 0.2
+  const centerX = (bounds.minX + bounds.maxX) / 2
+  const centerY = (bounds.minY + bounds.maxY) / 2
+  const geometry = useMemo(() => new PlaneGeometry(width, height), [width, height])
+
   return (
-    <mesh geometry={geometry} position={[0, 0, -0.12]} receiveShadow>
+    <mesh geometry={geometry} position={[centerX, centerY, -0.12]} receiveShadow>
       <meshStandardMaterial color="#f6f1e7" roughness={0.9} metalness={0.05} />
     </mesh>
   )
+}
+
+const ViewportReporter = ({
+  onViewportChanged,
+  onZoomTierChanged,
+}: {
+  onViewportChanged?: MosaicSceneProps['onViewportChanged']
+  onZoomTierChanged?: MosaicSceneProps['onZoomTierChanged']
+}) => {
+  const { camera, size } = useThree()
+  const previousRef = useRef<string | null>(null)
+
+  useFrame(() => {
+    if (!onViewportChanged) {
+      return
+    }
+
+    const orthographic = camera as OrthographicCamera
+    const zoom = orthographic.zoom
+    const halfWidth = size.width / (2 * zoom)
+    const halfHeight = size.height / (2 * zoom)
+    const centerX = orthographic.position.x
+    const centerY = orthographic.position.y
+    const viewport = {
+      minX: centerX - halfWidth,
+      maxX: centerX + halfWidth,
+      minY: centerY - halfHeight,
+      maxY: centerY + halfHeight,
+    }
+
+    const signature = `${centerX.toFixed(3)}:${centerY.toFixed(3)}:${zoom.toFixed(3)}:${size.width}:${size.height}`
+    if (previousRef.current === signature) {
+      return
+    }
+
+    previousRef.current = signature
+    if (onZoomTierChanged) {
+      onZoomTierChanged(zoom)
+    }
+    onViewportChanged({
+      center: { x: centerX, y: centerY },
+      viewport,
+      zoom,
+    })
+  })
+
+  return null
 }
 
 const SceneContents = ({
@@ -271,12 +373,16 @@ const SceneContents = ({
   ghost,
   remoteCursors,
   remoteSelections,
+  worldBounds,
   onPointerMove,
   onPointerDown,
   onPointerUp,
   onRotateDrag,
   onCameraPan,
   cameraPan,
+  cameraPolicy,
+  onViewportChanged,
+  onZoomTierChanged,
 }: MosaicSceneProps) => {
   const controlsRef = useRef(null)
   const tilesById = useMemo(() => {
@@ -289,6 +395,7 @@ const SceneContents = ({
 
   return (
     <>
+      <ViewportReporter onViewportChanged={onViewportChanged} onZoomTierChanged={onZoomTierChanged} />
       <ambientLight intensity={0.58} color="#fff5e8" />
       <directionalLight
         castShadow
@@ -301,7 +408,7 @@ const SceneContents = ({
       <directionalLight intensity={0.38} color="#c8e1ff" position={[-4, 4, 6]} />
 
       <group position={[0, 0, 0]}>
-        <CanvasBounds />
+        <CanvasBounds worldBounds={worldBounds} />
         {tiles.map((tile) => (
           <TileMesh key={tile.id} tile={tile} />
         ))}
@@ -332,10 +439,22 @@ const SceneContents = ({
         onPointerUp={onPointerUp}
         onRotateDrag={onRotateDrag}
         onCameraPan={onCameraPan}
+        worldBounds={worldBounds}
       />
 
-      <mesh position={[0, 0, -0.8]}>
-        <planeGeometry args={[26, 20]} />
+      <mesh
+        position={[
+          ((worldBounds ?? DEFAULT_WORLD_BOUNDS).minX + (worldBounds ?? DEFAULT_WORLD_BOUNDS).maxX) / 2,
+          ((worldBounds ?? DEFAULT_WORLD_BOUNDS).minY + (worldBounds ?? DEFAULT_WORLD_BOUNDS).maxY) / 2,
+          -0.8,
+        ]}
+      >
+        <planeGeometry
+          args={[
+            ((worldBounds ?? DEFAULT_WORLD_BOUNDS).maxX - (worldBounds ?? DEFAULT_WORLD_BOUNDS).minX) + 20,
+            ((worldBounds ?? DEFAULT_WORLD_BOUNDS).maxY - (worldBounds ?? DEFAULT_WORLD_BOUNDS).minY) + 20,
+          ]}
+        />
         <meshStandardMaterial color="#d5cfbf" roughness={1} metalness={0} />
       </mesh>
 
@@ -345,8 +464,10 @@ const SceneContents = ({
         enableRotate={false}
         enablePan={false}
         enableZoom={true}
-        minZoom={40}
-        maxZoom={80}
+        // Keep zoom on wheel only; drag interactions are handled by the interaction plane.
+        mouseButtons={{ LEFT: MOUSE.PAN, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.PAN }}
+        minZoom={cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom}
+        maxZoom={cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom}
         minPolarAngle={Math.PI / 2}
         maxPolarAngle={Math.PI / 2}
         target={[cameraPan.x, cameraPan.y, 0]}
@@ -361,44 +482,105 @@ export const MosaicScene = ({
   ghost,
   remoteCursors,
   remoteSelections,
+  worldBounds,
   onPointerMove,
   onPointerDown,
   onPointerUp,
   onRotateDrag,
   onCameraPan,
   cameraPan,
+  cameraPolicy,
+  onViewportChanged,
+  onZoomTierChanged,
 }: MosaicSceneProps) => {
+  const resolvedBounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
+  const width = resolvedBounds.maxX - resolvedBounds.minX
+  const height = resolvedBounds.maxY - resolvedBounds.minY
+  const centerX = (resolvedBounds.minX + resolvedBounds.maxX) / 2
+  const centerY = (resolvedBounds.minY + resolvedBounds.maxY) / 2
+  const maxDimension = Math.max(width, height)
+  const initialZoom = Math.max(
+    cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom,
+    Math.min(cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom, 58 * (10.4 / Math.max(10.4, maxDimension))),
+  )
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+    }
+
+    const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 1) {
+        // Prevent browser autoscroll and use a standard pan cursor while middle-dragging.
+        e.preventDefault()
+        container.style.cursor = 'grabbing'
+      }
+      if (e.button === 2) {
+        container.style.cursor = 'ew-resize'
+      }
+    }
+
+    const handleMouseUp = () => {
+      container.style.cursor = 'auto'
+    }
+
+    const handleMouseLeave = () => {
+      container.style.cursor = 'auto'
+    }
+
+    container.addEventListener('contextmenu', handleContextMenu)
+    container.addEventListener('mousedown', handleMouseDown)
+    container.addEventListener('mouseleave', handleMouseLeave)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      container.removeEventListener('contextmenu', handleContextMenu)
+      container.removeEventListener('mousedown', handleMouseDown)
+      container.removeEventListener('mouseleave', handleMouseLeave)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
   return (
-    <Canvas
-      shadows="percentage"
-      camera={{
-        position: [0, 0, 8],
-        zoom: 58,
-        near: 0.1,
-        far: 100,
-      }}
-      orthographic
-      dpr={[1, 1.8]}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      <color attach="background" args={['#e8e3d7']} />
-      <fog attach="fog" args={['#e8e3d7', 10, 24]} />
-      <SceneContents
-        tiles={tiles.filter((tile) =>
-          tile.transform.position.x > defaultBounds.minX - 1 &&
-          tile.transform.position.x < defaultBounds.maxX + 1,
-        )}
-        activeShape={activeShape}
-        onRotateDrag={onRotateDrag}
-        onCameraPan={onCameraPan}
-        cameraPan={cameraPan}
-        ghost={ghost}
-        remoteCursors={remoteCursors}
-        remoteSelections={remoteSelections}
-        onPointerMove={onPointerMove}
-        onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
-      />
-    </Canvas>
+    <>
+      <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
+        <Canvas
+          shadows="percentage"
+          camera={{
+            position: [centerX, centerY, 8],
+            zoom: initialZoom,
+            near: 0.1,
+            far: 100,
+          }}
+          orthographic
+          dpr={[1, 1.8]}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <color attach="background" args={['#e8e3d7']} />
+          <fog attach="fog" args={['#e8e3d7', 10, 24]} />
+          <SceneContents
+            tiles={tiles}
+            activeShape={activeShape}
+            worldBounds={resolvedBounds}
+            onRotateDrag={onRotateDrag}
+            onCameraPan={onCameraPan}
+            cameraPan={cameraPan}
+            cameraPolicy={cameraPolicy}
+            ghost={ghost}
+            remoteCursors={remoteCursors}
+            remoteSelections={remoteSelections}
+            onPointerMove={onPointerMove}
+            onPointerDown={onPointerDown}
+            onPointerUp={onPointerUp}
+            onViewportChanged={onViewportChanged}
+            onZoomTierChanged={onZoomTierChanged}
+          />
+        </Canvas>
+      </div>
+    </>
   )
 }

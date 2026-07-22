@@ -1,5 +1,14 @@
 export type Vec2 = { x: number; y: number }
 
+export type ChunkId = `${number}:${number}`
+
+export type ViewportBounds = {
+  minX: number
+  maxX: number
+  minY: number
+  maxY: number
+}
+
 export const vec2 = (x: number, y: number): Vec2 => ({ x, y })
 
 export const add = (a: Vec2, b: Vec2): Vec2 => vec2(a.x + b.x, a.y + b.y)
@@ -42,4 +51,65 @@ export const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3)
 export const hash2 = (x: number, y: number): number => {
   const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123
   return v - Math.floor(v)
+}
+
+export const toChunkId = (chunkX: number, chunkY: number): ChunkId => `${chunkX}:${chunkY}`
+
+export const worldToChunkCoords = (
+  x: number,
+  y: number,
+  chunkSize: number,
+): { chunkX: number; chunkY: number } => ({
+  chunkX: Math.floor(x / chunkSize),
+  chunkY: Math.floor(y / chunkSize),
+})
+
+export const viewportToChunkIds = (
+  viewport: ViewportBounds,
+  chunkSize: number,
+  prefetchRing: number,
+): ChunkId[] => {
+  const startChunkX = Math.floor(viewport.minX / chunkSize) - prefetchRing
+  const endChunkX = Math.floor(viewport.maxX / chunkSize) + prefetchRing
+  const startChunkY = Math.floor(viewport.minY / chunkSize) - prefetchRing
+  const endChunkY = Math.floor(viewport.maxY / chunkSize) + prefetchRing
+
+  const chunkIds: ChunkId[] = []
+  for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX += 1) {
+    for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY += 1) {
+      chunkIds.push(toChunkId(chunkX, chunkY))
+    }
+  }
+
+  return chunkIds
+}
+
+export const shouldRecomputeVisibleChunks = (
+  previousCenter: Vec2,
+  nextCenter: Vec2,
+  chunkSize: number,
+  hysteresisRatio: number,
+  previousZoom: number,
+  nextZoom: number,
+  zoomHysteresis: number,
+): boolean => {
+  const movementThreshold = chunkSize * hysteresisRatio
+  const dx = Math.abs(nextCenter.x - previousCenter.x)
+  const dy = Math.abs(nextCenter.y - previousCenter.y)
+
+  return dx > movementThreshold || dy > movementThreshold || Math.abs(nextZoom - previousZoom) >= zoomHysteresis
+}
+
+export const applyChunkSubscriptionBudgets = (
+  orderedChunkIds: ChunkId[],
+  softLimit: number,
+  hardLimit: number,
+): ChunkId[] => {
+  const hardCapped = orderedChunkIds.slice(0, hardLimit)
+
+  if (hardCapped.length <= softLimit) {
+    return hardCapped
+  }
+
+  return hardCapped.slice(0, softLimit)
 }

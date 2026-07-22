@@ -74,6 +74,8 @@ export const tiles = pgTable(
     material: text('material').notNull(),
     posX: doublePrecision('pos_x').notNull(),
     posY: doublePrecision('pos_y').notNull(),
+    chunkX: integer('chunk_x').default(0).notNull(),
+    chunkY: integer('chunk_y').default(0).notNull(),
     rotation: doublePrecision('rotation').notNull(),
     mirrored: boolean('mirrored').default(false).notNull(),
     placedBy: text('placed_by'),
@@ -81,6 +83,12 @@ export const tiles = pgTable(
   },
   (table) => ({
     canvasIdIndex: index('tiles_canvas_id_idx').on(table.canvasId),
+    canvasChunkCreatedIndex: index('tiles_canvas_chunk_created_idx').on(
+      table.canvasId,
+      table.chunkX,
+      table.chunkY,
+      table.createdAt,
+    ),
     shapeCheck: check('tiles_shape_check', sql`${table.shape} in (${asSqlLiteralList(tileShapeValues)})`),
     materialCheck: check(
       'tiles_material_check',

@@ -29,7 +29,20 @@ npm start
 Set environment variables:
 - `PORT` — Server port (default: 3001)
 - `HOST` — Server host (default: 0.0.0.0)
-- `CORS_ORIGIN` — Allowed CORS origin for Socket.IO (default: *)
+- `CORS_ORIGIN` — Allowed CORS origin for Socket.IO (default: http://localhost:5173)
+
+Chunk rollout flags:
+- `FEATURE_CHUNK_STREAMING_ENABLED` — Enable chunk subscribe/unsubscribe handlers globally (`true` by default)
+- `FEATURE_CHUNK_AGGREGATE_ENABLED` — Allow aggregate chunk snapshot payload mode (`true` by default)
+- `FEATURE_CHUNK_CANARY_ENABLED` — Restrict chunk streaming to canary sessions only (`false` by default)
+- `FEATURE_CHUNK_CANARY_SESSION_IDS` — Comma-separated session IDs allowed when canary mode is on
+- `FEATURE_MULTI_REPLICA_READY` — Emit adapter-shared coordination metadata for multi-replica readiness (`false` by default)
+- `REPLICA_ID` — Optional override for replica identity in coordination metadata (defaults to `HOSTNAME` or pid)
+
+Rollout notes:
+- Keep `FEATURE_CHUNK_STREAMING_ENABLED=false` to hard-disable chunk streaming and preserve legacy session snapshot + tile events.
+- Enable canary mode first (`FEATURE_CHUNK_CANARY_ENABLED=true`) with a small `FEATURE_CHUNK_CANARY_SESSION_IDS` cohort before full rollout.
+- Aggregate payload mode is additive and can be disabled independently to rollback to fine-grained chunk snapshots.
 
 ## Architecture
 

@@ -4,7 +4,7 @@ import {
   solveGuidedPlacement,
 } from '../domain/placementSolver'
 import type { Vec2 } from '../domain/math2d'
-import type { TileInstance } from '../domain/placementSolver'
+import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 
 export type SequencedSnapshot = {
@@ -177,6 +177,7 @@ export const updateGhostTarget = (
   pointer: Vec2,
   activeTile: ActiveTile,
   settled: TileInstance[],
+  bounds: MosaicBounds = defaultBounds,
 ): GhostState => {
   const solved = solveGuidedPlacement(
     pointer,
@@ -184,7 +185,7 @@ export const updateGhostTarget = (
     activeTile.rotation,
     activeTile.mirrored,
     settled,
-    defaultBounds,
+    bounds,
   )
 
   return {

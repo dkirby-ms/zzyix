@@ -1,4 +1,5 @@
 import { dot, len, normalize, perp, sub, vec2 } from './math2d'
+import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../../../server/src/contracts'
 import {
   transformTile,
 } from './tileGeometry'
@@ -11,6 +12,15 @@ export type MosaicBounds = {
   minY: number
   maxY: number
 }
+
+export type BoundsPolicy =
+  | {
+      mode: 'bounded'
+      bounds: MosaicBounds
+    }
+  | {
+      mode: 'unbounded'
+    }
 
 export type TileInstance = {
   id: string
@@ -153,23 +163,34 @@ const isInsideBounds = (polygon: Vec2[], bounds: MosaicBounds): { inside: boolea
   return { inside: correction.x === 0 && correction.y === 0, correction }
 }
 
+const resolveBoundsPolicy = (bounds: MosaicBounds | BoundsPolicy): BoundsPolicy =>
+  'mode' in bounds
+    ? bounds
+    : {
+        mode: 'bounded',
+        bounds,
+      }
+
 export const validatePlacement = (
   candidateShape: TileShape,
   candidateTransform: Transform2D,
   settled: TileInstance[],
-  bounds: MosaicBounds,
+  bounds: MosaicBounds | BoundsPolicy,
 ): ValidationResult => {
   const candidate = transformTile(candidateShape, candidateTransform)
+  const policy = resolveBoundsPolicy(bounds)
 
-  const boundsResult = isInsideBounds(candidate.outline, bounds)
-  if (!boundsResult.inside) {
-    const penetration = len(boundsResult.correction)
-    return {
-      state: penetration < 0.22 ? 'near-valid' : 'invalid',
-      valid: false,
-      correction: boundsResult.correction,
-      penetration,
-      reason: `out-of-bounds (correction ${penetration.toFixed(3)})`,
+  if (policy.mode === 'bounded') {
+    const boundsResult = isInsideBounds(candidate.outline, policy.bounds)
+    if (!boundsResult.inside) {
+      const penetration = len(boundsResult.correction)
+      return {
+        state: penetration < 0.22 ? 'near-valid' : 'invalid',
+        valid: false,
+        correction: boundsResult.correction,
+        penetration,
+        reason: `out-of-bounds (correction ${penetration.toFixed(3)})`,
+      }
     }
   }
 
@@ -241,7 +262,7 @@ export const solveGuidedPlacement = (
   rotation: number,
   mirrored: boolean,
   settled: TileInstance[],
-  bounds: MosaicBounds,
+  bounds: MosaicBounds | BoundsPolicy,
 ): GuidedPlacement => {
   // Snapping disabled: always use the raw pointer position
   const baseTransform: Transform2D = {
@@ -264,9 +285,9 @@ export const solveGuidedPlacement = (
   }
 }
 
-export const defaultBounds: MosaicBounds = {
-  minX: -5.2,
-  maxX: 5.2,
-  minY: -3.4,
-  maxY: 3.4,
+export const defaultBounds: MosaicBounds = DEFAULT_BOUNDED_WORLD_BOUNDS
+
+export const defaultBoundsPolicy: BoundsPolicy = {
+  mode: 'bounded',
+  bounds: defaultBounds,
 }

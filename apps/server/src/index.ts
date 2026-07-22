@@ -3,7 +3,11 @@ import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
+import { rateLimit } from 'express-rate-limit'
+import { RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
 import type {
+  CanvasSizePreset,
+  CreateSessionRequest,
   ClientToServerEvents,
   ServerToClientEvents,
   InterServerEvents,
@@ -20,11 +24,22 @@ import type {
   TileRemovedPayload,
   ListSessionsResponse,
   SelectionUpdatePayload,
+  BoundsPolicy,
+  SessionCanvasConfig,
+  ChunkId,
+  SubscribeChunksPayload,
+  UnsubscribeChunksPayload,
+  RequestChunkSnapshotPayload,
+  ChunkSnapshotPayload,
+  ChunkPayloadMode,
+  RealtimeCapabilities,
+  ChunkCoordinationMetadata,
 } from './contracts.js'
 import {
   closeDatabaseBundle,
   getDatabaseBundle,
   listSessionSummaries,
+  listTilesByChunksWithParity,
   listActiveParticipants,
   loadSessionReplayRecord,
   loadSessionRecord,
@@ -40,6 +55,7 @@ import { startRetentionJob } from './jobs/retention.js'
 
 type AuthoritativeSessionState = {
   session: Session
+  canvasConfig: SessionCanvasConfig
   clients: Map<string, ClientPresence>
   lastOpSeq: number
 }
@@ -67,6 +83,320 @@ const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_SESSION_STALE_MS = 30 * 60 * 1000
 const CANVAS_WIDTH = defaultBounds.maxX - defaultBounds.minX
 const CANVAS_HEIGHT = defaultBounds.maxY - defaultBounds.minY
+const DEFAULT_BOUNDS_POLICY: BoundsPolicy = {
+  mode: 'bounded',
+  bounds: defaultBounds,
+}
+const DEFAULT_CANVAS_CONFIG: SessionCanvasConfig = {
+  canvasSize: {
+    width: CANVAS_WIDTH,
+    height: CANVAS_HEIGHT,
+  },
+  boundsPolicy: DEFAULT_BOUNDS_POLICY,
+}
+
+const CANVAS_PRESET_MULTIPLIER: Record<CanvasSizePreset, number> = {
+  classic: 1,
+  expanded: 2,
+  vast: 3,
+}
+
+const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
+const CHUNK_ROOM_PREFIX = 'chunk'
+const REPLICA_ID = process.env.REPLICA_ID ?? process.env.HOSTNAME ?? `local-${process.pid}`
+const SOCKET_AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000)
+const SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 60)
+
+const socketAuthRateLimitBuckets = new Map<string, { count: number; resetAt: number }>()
+
+const pruneSocketAuthRateLimitBuckets = (now: number): void => {
+  if (socketAuthRateLimitBuckets.size < 2_000) {
+    return
+  }
+
+  for (const [key, bucket] of socketAuthRateLimitBuckets) {
+    if (bucket.resetAt <= now) {
+      socketAuthRateLimitBuckets.delete(key)
+    }
+  }
+}
+
+const sessionCreateRateLimit = rateLimit({
+  windowMs: Number(process.env.SESSION_CREATE_RATE_LIMIT_WINDOW_MS ?? 60_000),
+  limit: Number(process.env.SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS ?? 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' },
+})
+
+const parseBooleanFlag = (value: string | undefined, fallback: boolean): boolean => {
+  if (value === undefined) {
+    return fallback
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    return true
+  }
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false
+  }
+
+  return fallback
+}
+
+const parseCanarySessions = (value: string | undefined): Set<string> => {
+  if (!value) {
+    return new Set()
+  }
+
+  return new Set(
+    value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  )
+}
+
+const isChunkStreamingEnabledByDefault = parseBooleanFlag(process.env.FEATURE_CHUNK_STREAMING_ENABLED, true)
+const isAggregatePayloadEnabledByDefault = parseBooleanFlag(process.env.FEATURE_CHUNK_AGGREGATE_ENABLED, true)
+const isChunkCanaryEnabled = parseBooleanFlag(process.env.FEATURE_CHUNK_CANARY_ENABLED, false)
+const canarySessionIds = parseCanarySessions(process.env.FEATURE_CHUNK_CANARY_SESSION_IDS)
+const isMultiReplicaReady = parseBooleanFlag(process.env.FEATURE_MULTI_REPLICA_READY, false)
+
+const getRealtimeCapabilities = (sessionId: string): RealtimeCapabilities => {
+  const canarySessionEnabled = !isChunkCanaryEnabled || canarySessionIds.has(sessionId)
+  const chunkStreamingEnabled = isChunkStreamingEnabledByDefault && canarySessionEnabled
+  const aggregateSnapshotEnabled = isAggregatePayloadEnabledByDefault && chunkStreamingEnabled
+
+  return {
+    chunkStreamingEnabled,
+    aggregateSnapshotEnabled,
+    chunkCanaryEnabled: isChunkCanaryEnabled,
+    multiReplicaReady: isMultiReplicaReady,
+  }
+}
+
+const resolvePayloadMode = (
+  requestedMode: ChunkPayloadMode | undefined,
+  capabilities: RealtimeCapabilities,
+): ChunkPayloadMode => {
+  if (requestedMode === 'aggregate' && capabilities.aggregateSnapshotEnabled) {
+    return 'aggregate'
+  }
+
+  return 'fine'
+}
+
+const buildCoordinationMetadata = (): ChunkCoordinationMetadata => ({
+  replicaId: REPLICA_ID,
+  membershipScope: isMultiReplicaReady ? 'adapter-shared' : 'process-local',
+  membershipAssumption: isMultiReplicaReady ? 'authoritative' : 'best-effort',
+  emittedAt: Date.now(),
+})
+
+const chunkTelemetry = {
+  subscribeEvents: 0,
+  unsubscribeEvents: 0,
+  resyncEvents: 0,
+  snapshotEvents: 0,
+  snapshotBytesFine: 0,
+  snapshotBytesAggregate: 0,
+}
+
+const emitChunkTelemetry = (
+  event: 'chunk_subscribe' | 'chunk_unsubscribe' | 'chunk_snapshot' | 'chunk_resync_required',
+  payload: Record<string, unknown>,
+): void => {
+  writeLog('info', event, payload)
+}
+
+const toChunkId = (x: number, y: number): ChunkId => `${x}:${y}`
+
+const worldToChunk = (x: number, y: number, chunkWorldSize: number = CHUNK_WORLD_SIZE): ChunkId => {
+  const chunkX = Math.floor(x / chunkWorldSize)
+  const chunkY = Math.floor(y / chunkWorldSize)
+  return toChunkId(chunkX, chunkY)
+}
+
+const parseChunkId = (chunkId: string): { x: number; y: number } | null => {
+  const [rawX, rawY] = chunkId.split(':')
+  const x = Number(rawX)
+  const y = Number(rawY)
+  if (!Number.isInteger(x) || !Number.isInteger(y)) {
+    return null
+  }
+
+  return { x, y }
+}
+
+const chunkRoomName = (sessionId: string, chunkId: ChunkId): string => `${CHUNK_ROOM_PREFIX}:${sessionId}:${chunkId}`
+
+const chunkIdsToCoordinates = (chunkIds: ChunkId[]): Array<{ x: number; y: number }> =>
+  chunkIds
+    .map((chunkId) => parseChunkId(chunkId))
+    .filter((chunk): chunk is { x: number; y: number } => chunk !== null)
+
+const isChunkId = (value: unknown): value is ChunkId =>
+  typeof value === 'string' && parseChunkId(value) !== null
+
+const isChunkCursor = (value: unknown): value is { opSeq: number; revision: number } => {
+  if (!isObjectRecord(value)) {
+    return false
+  }
+
+  const opSeq = value.opSeq
+  const revision = value.revision
+  return (
+    typeof opSeq === 'number'
+    && Number.isInteger(opSeq)
+    && opSeq >= 0
+    && typeof revision === 'number'
+    && Number.isInteger(revision)
+    && revision >= 0
+  )
+}
+
+const isSubscribeChunksPayload = (value: unknown): value is SubscribeChunksPayload => {
+  if (!isObjectRecord(value)) {
+    return false
+  }
+
+  if (typeof value.canvasId !== 'string' || value.canvasId.length === 0) {
+    return false
+  }
+
+  if (!Array.isArray(value.chunks) || value.chunks.some((chunkId) => !isChunkId(chunkId))) {
+    return false
+  }
+
+  if (value.payloadMode !== undefined && value.payloadMode !== 'fine' && value.payloadMode !== 'aggregate') {
+    return false
+  }
+
+  if (value.clientOffsetByChunk !== undefined) {
+    if (!isObjectRecord(value.clientOffsetByChunk)) {
+      return false
+    }
+
+    for (const [chunkId, cursor] of Object.entries(value.clientOffsetByChunk)) {
+      if (!isChunkId(chunkId) || !isChunkCursor(cursor)) {
+        return false
+      }
+    }
+  }
+
+  return true
+}
+
+const isUnsubscribeChunksPayload = (value: unknown): value is UnsubscribeChunksPayload => {
+  if (!isObjectRecord(value)) {
+    return false
+  }
+
+  if (typeof value.canvasId !== 'string' || value.canvasId.length === 0) {
+    return false
+  }
+
+  if (!Array.isArray(value.chunks) || value.chunks.some((chunkId) => !isChunkId(chunkId))) {
+    return false
+  }
+
+  return true
+}
+
+const isRequestChunkSnapshotPayload = (value: unknown): value is RequestChunkSnapshotPayload => {
+  if (!isObjectRecord(value)) {
+    return false
+  }
+
+  if (typeof value.canvasId !== 'string' || value.canvasId.length === 0) {
+    return false
+  }
+
+  if (!Array.isArray(value.chunks) || value.chunks.some((chunkId) => !isChunkId(chunkId))) {
+    return false
+  }
+
+  if (value.payloadMode !== undefined && value.payloadMode !== 'fine' && value.payloadMode !== 'aggregate') {
+    return false
+  }
+
+  return true
+}
+
+const buildChunkSnapshot = (
+  canvasId: string,
+  chunks: ChunkId[],
+  sessionTiles: Session['tiles'],
+  currentOpSeq: number,
+  currentRevision: number,
+  payloadMode: ChunkPayloadMode,
+): ChunkSnapshotPayload => {
+  const uniqueChunks = Array.from(new Set(chunks))
+  const tileGroups = new Map<ChunkId, Session['tiles']>()
+
+  for (const chunkId of uniqueChunks) {
+    tileGroups.set(chunkId, [])
+  }
+
+  for (const tile of sessionTiles) {
+    const tileChunk = worldToChunk(tile.transform.position.x, tile.transform.position.y)
+    if (!tileGroups.has(tileChunk)) {
+      continue
+    }
+
+    tileGroups.get(tileChunk)?.push(tile)
+  }
+
+  return {
+    canvasId,
+    payloadMode,
+    coordination: buildCoordinationMetadata(),
+    chunks: uniqueChunks.map((chunkId) => ({
+      chunkId,
+      tiles: payloadMode === 'aggregate' ? [] : (tileGroups.get(chunkId) ?? []),
+      aggregate: payloadMode === 'aggregate'
+        ? (() => {
+            const groupedTiles = tileGroups.get(chunkId) ?? []
+            const byShape: Partial<Record<PlaceTilePayload['shape'], number>> = {}
+            const byMaterial: Partial<Record<PlaceTilePayload['material'], number>> = {}
+            for (const tile of groupedTiles) {
+              byShape[tile.shape] = (byShape[tile.shape] ?? 0) + 1
+              byMaterial[tile.material] = (byMaterial[tile.material] ?? 0) + 1
+            }
+
+            return {
+              tileCount: groupedTiles.length,
+              byShape,
+              byMaterial,
+            }
+          })()
+        : undefined,
+      opSeq: currentOpSeq,
+      revision: currentRevision,
+    })),
+    serverOpSeq: currentOpSeq,
+    serverRevision: currentRevision,
+  }
+}
+
+const cloneCanvasConfig = (config: SessionCanvasConfig): SessionCanvasConfig => ({
+  canvasSize: {
+    width: config.canvasSize.width,
+    height: config.canvasSize.height,
+  },
+  boundsPolicy: config.boundsPolicy.mode === 'bounded'
+    ? {
+        mode: 'bounded',
+        bounds: {
+          ...config.boundsPolicy.bounds,
+        },
+      }
+    : {
+        mode: 'unbounded',
+      },
+})
 
 export const buildListSessionsResponse = (summaries: SessionSummaryRecord[]): ListSessionsResponse => ({
   sessions: summaries.map((summary) => ({
@@ -74,9 +404,10 @@ export const buildListSessionsResponse = (summaries: SessionSummaryRecord[]): Li
     displayName: `Canvas ${summary.id.slice(0, 8)}`,
     participantCount: summary.participantCount,
     canvasSize: {
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
+      width: (sessions.get(summary.id)?.canvasConfig.canvasSize.width ?? DEFAULT_CANVAS_CONFIG.canvasSize.width),
+      height: (sessions.get(summary.id)?.canvasConfig.canvasSize.height ?? DEFAULT_CANVAS_CONFIG.canvasSize.height),
     },
+    canvasConfig: cloneCanvasConfig(sessions.get(summary.id)?.canvasConfig ?? DEFAULT_CANVAS_CONFIG),
   })),
 })
 
@@ -157,6 +488,14 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
 }
 
 const verifyDatabaseConnectivity = async (): Promise<void> => {
+  // Check that DATABASE_URL is set
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      'DATABASE_URL environment variable is not set. ' +
+      'Please set DATABASE_URL to your PostgreSQL connection string.'
+    )
+  }
+
   const databaseTarget = describeDatabaseTarget(process.env.DATABASE_URL)
 
   writeLog('info', 'database_connectivity_check_started', {
@@ -192,6 +531,42 @@ export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tile
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+const isCanvasSizePreset = (value: unknown): value is CanvasSizePreset =>
+  value === 'classic' || value === 'expanded' || value === 'vast'
+
+export const isCreateSessionRequest = (value: unknown): value is CreateSessionRequest => {
+  if (!isObjectRecord(value)) {
+    return false
+  }
+
+  if (value.canvasPreset === undefined) {
+    return true
+  }
+
+  return isCanvasSizePreset(value.canvasPreset)
+}
+
+export const resolveCanvasConfigFromPreset = (preset: CanvasSizePreset | undefined): SessionCanvasConfig => {
+  const normalizedPreset: CanvasSizePreset = preset ?? 'expanded'
+  const multiplier = CANVAS_PRESET_MULTIPLIER[normalizedPreset] ?? CANVAS_PRESET_MULTIPLIER.expanded
+
+  return {
+    canvasSize: {
+      width: Number((CANVAS_WIDTH * multiplier).toFixed(4)),
+      height: Number((CANVAS_HEIGHT * multiplier).toFixed(4)),
+    },
+    boundsPolicy: {
+      mode: 'bounded',
+      bounds: {
+        minX: Number((defaultBounds.minX * multiplier).toFixed(4)),
+        maxX: Number((defaultBounds.maxX * multiplier).toFixed(4)),
+        minY: Number((defaultBounds.minY * multiplier).toFixed(4)),
+        maxY: Number((defaultBounds.maxY * multiplier).toFixed(4)),
+      },
+    },
+  }
+}
 
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value)
@@ -356,16 +731,23 @@ export const toRejectReason = (reason: string): PlaceTileRejectReason => {
 export const createAuthoritativeSessionState = (
   sessionId: string,
   now: number = Date.now(),
-): AuthoritativeSessionState => ({
-  session: {
-    id: sessionId,
-    tiles: [],
-    createdAt: now,
-    updatedAt: now,
-  },
-  clients: new Map(),
-  lastOpSeq: 0,
-})
+  canvasConfig: SessionCanvasConfig = DEFAULT_CANVAS_CONFIG,
+): AuthoritativeSessionState => {
+  const resolvedCanvasConfig = cloneCanvasConfig(canvasConfig)
+
+  return {
+    session: {
+      id: sessionId,
+      tiles: [],
+      boundsPolicy: resolvedCanvasConfig.boundsPolicy,
+      createdAt: now,
+      updatedAt: now,
+    },
+    canvasConfig: resolvedCanvasConfig,
+    clients: new Map(),
+    lastOpSeq: 0,
+  }
+}
 
 export const shouldCleanupSession = (
   state: AuthoritativeSessionState,
@@ -386,10 +768,15 @@ export const shouldCleanupSession = (
 export const cleanupSessions = (
   now: number = Date.now(),
   staleAfterMs: number = DEFAULT_SESSION_STALE_MS,
+  preserveSessionId?: string,
 ): string[] => {
   const removedSessionIds: string[] = []
 
   for (const [sessionId, state] of sessions) {
+    if (preserveSessionId && sessionId === preserveSessionId) {
+      continue
+    }
+
     if (shouldCleanupSession(state, now, staleAfterMs)) {
       sessions.delete(sessionId)
       removedSessionIds.push(sessionId)
@@ -400,7 +787,7 @@ export const cleanupSessions = (
 }
 
 export const getSessionState = (sessionId: string): AuthoritativeSessionState => {
-  cleanupSessions()
+  cleanupSessions(Date.now(), DEFAULT_SESSION_STALE_MS, sessionId)
 
   const existing = sessions.get(sessionId)
   if (existing) {
@@ -523,7 +910,7 @@ export const applyPlaceTile = (
   event?: TilePlacedPayload
 } => {
   const opSeq = nextOpSeq(state)
-  const validation = validatePlacement(payload.shape, payload.transform, state.session.tiles, defaultBounds)
+  const validation = validatePlacement(payload.shape, payload.transform, state.session.tiles, state.canvasConfig.boundsPolicy)
 
   if (!validation.valid) {
     return {
@@ -722,17 +1109,33 @@ app.get('/sessions', async (_req, res) => {
 })
 
 // Session creation endpoint
-app.post('/sessions', async (_req, res) => {
+app.post('/sessions', sessionCreateRateLimit, async (req, res) => {
+  if (!isCreateSessionRequest(req.body ?? {})) {
+    res.status(400).json({ error: 'Invalid session creation payload' })
+    return
+  }
+
   try {
     const sessionId = crypto.randomUUID()
-    getSessionState(sessionId)
+    const canvasConfig = resolveCanvasConfigFromPreset(req.body?.canvasPreset)
+    const sessionState = createAuthoritativeSessionState(sessionId, Date.now(), canvasConfig)
+    sessions.set(sessionId, sessionState)
 
     // Initialize canvas in database to satisfy foreign key constraints
     await loadSessionRecord(sessionId)
 
-    writeLog('info', 'session_created', { sessionId })
+    writeLog('info', 'session_created', {
+      sessionId,
+      canvasPreset: req.body?.canvasPreset ?? 'expanded',
+      canvasSize: canvasConfig.canvasSize,
+    })
 
-    res.status(200).json({ session: { id: sessionId } })
+    res.status(200).json({
+      session: {
+        id: sessionId,
+        canvasConfig,
+      },
+    })
   } catch (error) {
     writeLog('error', 'session_creation_failed', { error })
     res.status(500).json({ error: 'Failed to create session' })
@@ -777,6 +1180,34 @@ configureRealtimeAdapter()
 // ─── Connection Middleware ───────────────────────────────────────────────────
 
 io.use((socket, next) => {
+  const now = Date.now()
+  pruneSocketAuthRateLimitBuckets(now)
+
+  const addressHeader = socket.handshake.headers['x-forwarded-for']
+  const forwardedFor = typeof addressHeader === 'string' ? addressHeader.split(',')[0]?.trim() : undefined
+  const rateLimitKey = forwardedFor || socket.handshake.address || socket.conn.remoteAddress || 'unknown'
+
+  const currentBucket = socketAuthRateLimitBuckets.get(rateLimitKey)
+
+  if (!currentBucket || currentBucket.resetAt <= now) {
+    socketAuthRateLimitBuckets.set(rateLimitKey, {
+      count: 1,
+      resetAt: now + SOCKET_AUTH_RATE_LIMIT_WINDOW_MS,
+    })
+  } else if (currentBucket.count >= SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((currentBucket.resetAt - now) / 1_000))
+    writeLog('warn', 'socket_auth_rate_limited', {
+      rateLimitKey,
+      retryAfterSeconds,
+      windowMs: SOCKET_AUTH_RATE_LIMIT_WINDOW_MS,
+      maxAttempts: SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS,
+    })
+    return next(new Error(`Too many connection attempts. Retry after ${retryAfterSeconds}s.`))
+  } else {
+    currentBucket.count += 1
+    socketAuthRateLimitBuckets.set(rateLimitKey, currentBucket)
+  }
+
   const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
 
   writeLog('debug', 'socket_auth_received', {
@@ -829,6 +1260,7 @@ io.on('connection', (socket) => {
     const connectionState = await initializeParticipantPresence(sessionId, clientId, joinedAt)
     const sessionState = getSessionState(sessionId)
     sessionState.session = connectionState.snapshot.session
+    sessionState.session.boundsPolicy = sessionState.canvasConfig.boundsPolicy
     sessionState.lastOpSeq = connectionState.snapshot.lastOpSeq
     sessionState.clients = new Map(connectionState.snapshot.clients.map((client) => [client.clientId, client]))
 
@@ -838,7 +1270,15 @@ io.on('connection', (socket) => {
       roomSize: io.sockets.adapter.rooms.get(sessionId)?.size ?? 0,
     })
 
-    socket.emit('session_snapshot', connectionState.snapshot)
+    socket.emit('session_snapshot', {
+      ...connectionState.snapshot,
+      session: {
+        ...connectionState.snapshot.session,
+        boundsPolicy: sessionState.canvasConfig.boundsPolicy,
+      },
+      canvasConfig: sessionState.canvasConfig,
+      realtimeCapabilities: getRealtimeCapabilities(sessionId),
+    })
 
     socket.to(sessionId).emit('client_joined', { client: connectionState.joinedClient })
   }
@@ -894,7 +1334,13 @@ io.on('connection', (socket) => {
         }
       }
 
-      const validation = validatePlacement(payload.shape, payload.transform, record.session.tiles, defaultBounds)
+      const sessionState = getSessionState(sessionId)
+      const validation = validatePlacement(
+        payload.shape,
+        payload.transform,
+        record.session.tiles,
+        sessionState.canvasConfig.boundsPolicy,
+      )
 
       if (!validation.valid) {
         writeLog('info', 'place_tile_rejected', {
@@ -936,6 +1382,15 @@ io.on('connection', (socket) => {
       // already applied operations.
       if (result.event && 'tile' in result.event && 'opSeq' in result && !placeAck.rejected && !placeAck.idempotent) {
         io.to(sessionId).emit('tile_placed', result.event)
+        const chunkId = worldToChunk(result.event.tile.transform.position.x, result.event.tile.transform.position.y)
+        io.to(chunkRoomName(sessionId, chunkId)).emit('chunk_tile_placed', {
+          canvasId: sessionId,
+          chunkId,
+          tile: result.event.tile,
+          placedBy: result.event.placedBy,
+          opSeq: result.event.opSeq,
+          revision: result.event.revision,
+        })
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }
     } catch (error) {
@@ -1007,6 +1462,18 @@ io.on('connection', (socket) => {
       // second tile_removed broadcast.
       if (result.event && 'tileId' in result.event && 'opSeq' in result && removeAck.removed && !removeAck.idempotent) {
         io.to(sessionId).emit('tile_removed', result.event)
+        const removedTile = record.session.tiles.find((tile) => tile.id === payload.tileId)
+        if (removedTile) {
+          const chunkId = worldToChunk(removedTile.transform.position.x, removedTile.transform.position.y)
+          io.to(chunkRoomName(sessionId, chunkId)).emit('chunk_tile_removed', {
+            canvasId: sessionId,
+            chunkId,
+            tileId: result.event.tileId,
+            removedBy: result.event.removedBy,
+            opSeq: result.event.opSeq,
+            revision: result.event.revision,
+          })
+        }
         await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
       }
     } catch (error) {
@@ -1034,6 +1501,197 @@ io.on('connection', (socket) => {
       clientId,
       position: payload.position,
     })
+  })
+
+  socket.on('subscribe_chunks', async (payload) => {
+    if (!isSubscribeChunksPayload(payload) || payload.canvasId !== sessionId) {
+      return
+    }
+
+    const capabilities = getRealtimeCapabilities(sessionId)
+    if (!capabilities.chunkStreamingEnabled) {
+      writeLog('debug', 'subscribe_chunks_ignored_by_flag', {
+        sessionId,
+        clientId,
+      })
+      return
+    }
+
+    const chunks = Array.from(new Set(payload.chunks))
+    const payloadMode = resolvePayloadMode(payload.payloadMode, capabilities)
+    for (const chunkId of chunks) {
+      socket.join(chunkRoomName(sessionId, chunkId))
+    }
+
+    chunkTelemetry.subscribeEvents += chunks.length
+    emitChunkTelemetry('chunk_subscribe', {
+      sessionId,
+      clientId,
+      chunkCount: chunks.length,
+      payloadMode,
+      totalSubscribeEvents: chunkTelemetry.subscribeEvents,
+    })
+
+    try {
+      const chunkRead = await listTilesByChunksWithParity(sessionId, chunkIdsToCoordinates(chunks))
+      const snapshot = buildChunkSnapshot(
+        sessionId,
+        chunks,
+        chunkRead.tiles,
+        chunkRead.opSeq,
+        chunkRead.revision,
+        payloadMode,
+      )
+
+      const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), 'utf8')
+      chunkTelemetry.snapshotEvents += 1
+      if (payloadMode === 'aggregate') {
+        chunkTelemetry.snapshotBytesAggregate += snapshotBytes
+      } else {
+        chunkTelemetry.snapshotBytesFine += snapshotBytes
+      }
+
+      emitChunkTelemetry('chunk_snapshot', {
+        sessionId,
+        clientId,
+        payloadMode,
+        chunkCount: chunks.length,
+        snapshotBytes,
+        totalSnapshotEvents: chunkTelemetry.snapshotEvents,
+        snapshotBytesFine: chunkTelemetry.snapshotBytesFine,
+        snapshotBytesAggregate: chunkTelemetry.snapshotBytesAggregate,
+      })
+
+      socket.emit('chunk_snapshot', snapshot)
+
+      if (!chunkRead.parityMatched) {
+        writeLog('warn', 'chunk_snapshot_parity_fallback', {
+          sessionId,
+          clientId,
+          chunks,
+        })
+      }
+
+      if (payload.clientOffsetByChunk) {
+        for (const chunkId of chunks) {
+          const clientCursor = payload.clientOffsetByChunk[chunkId]
+          if (!clientCursor) {
+            continue
+          }
+
+          if (clientCursor.opSeq > chunkRead.opSeq || clientCursor.revision > chunkRead.revision) {
+            chunkTelemetry.resyncEvents += 1
+            emitChunkTelemetry('chunk_resync_required', {
+              sessionId,
+              clientId,
+              chunkId,
+              payloadMode,
+              currentOpSeq: chunkRead.opSeq,
+              currentRevision: chunkRead.revision,
+              totalResyncEvents: chunkTelemetry.resyncEvents,
+            })
+            socket.emit('chunk_resync_required', {
+              canvasId: sessionId,
+              chunkId,
+              payloadMode,
+              coordination: buildCoordinationMetadata(),
+              currentOpSeq: chunkRead.opSeq,
+              currentRevision: chunkRead.revision,
+              reason: 'REVISION_MISMATCH',
+            })
+          }
+        }
+      }
+    } catch (error) {
+      writeLog('error', 'subscribe_chunks_failed', {
+        sessionId,
+        clientId,
+        error,
+      })
+    }
+  })
+
+  socket.on('unsubscribe_chunks', (payload) => {
+    if (!isUnsubscribeChunksPayload(payload) || payload.canvasId !== sessionId) {
+      return
+    }
+
+    const capabilities = getRealtimeCapabilities(sessionId)
+    if (!capabilities.chunkStreamingEnabled) {
+      return
+    }
+
+    const chunks = Array.from(new Set(payload.chunks))
+    chunkTelemetry.unsubscribeEvents += chunks.length
+    emitChunkTelemetry('chunk_unsubscribe', {
+      sessionId,
+      clientId,
+      chunkCount: chunks.length,
+      totalUnsubscribeEvents: chunkTelemetry.unsubscribeEvents,
+    })
+
+    for (const chunkId of chunks) {
+      socket.leave(chunkRoomName(sessionId, chunkId))
+    }
+  })
+
+  socket.on('request_chunk_snapshot', async (payload) => {
+    if (!isRequestChunkSnapshotPayload(payload) || payload.canvasId !== sessionId) {
+      return
+    }
+
+    const capabilities = getRealtimeCapabilities(sessionId)
+    if (!capabilities.chunkStreamingEnabled) {
+      return
+    }
+
+    try {
+      const chunkRead = await listTilesByChunksWithParity(sessionId, chunkIdsToCoordinates(payload.chunks))
+      const payloadMode = resolvePayloadMode(payload.payloadMode, capabilities)
+      const snapshot = buildChunkSnapshot(
+        sessionId,
+        payload.chunks,
+        chunkRead.tiles,
+        chunkRead.opSeq,
+        chunkRead.revision,
+        payloadMode,
+      )
+
+      const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), 'utf8')
+      chunkTelemetry.snapshotEvents += 1
+      if (payloadMode === 'aggregate') {
+        chunkTelemetry.snapshotBytesAggregate += snapshotBytes
+      } else {
+        chunkTelemetry.snapshotBytesFine += snapshotBytes
+      }
+
+      emitChunkTelemetry('chunk_snapshot', {
+        sessionId,
+        clientId,
+        payloadMode,
+        chunkCount: payload.chunks.length,
+        snapshotBytes,
+        totalSnapshotEvents: chunkTelemetry.snapshotEvents,
+        snapshotBytesFine: chunkTelemetry.snapshotBytesFine,
+        snapshotBytesAggregate: chunkTelemetry.snapshotBytesAggregate,
+      })
+
+      socket.emit('chunk_snapshot', snapshot)
+
+      if (!chunkRead.parityMatched) {
+        writeLog('warn', 'chunk_snapshot_parity_fallback', {
+          sessionId,
+          clientId,
+          chunks: payload.chunks,
+        })
+      }
+    } catch (error) {
+      writeLog('error', 'request_chunk_snapshot_failed', {
+        sessionId,
+        clientId,
+        error,
+      })
+    }
   })
 
   socket.on('selection_update', (payload) => {
@@ -1068,19 +1726,27 @@ io.on('connection', (socket) => {
   socket.on('request_snapshot', async () => {
     try {
       const record = await loadSessionReplayRecord(sessionId)
+      const sessionState = getSessionState(sessionId)
       const snapshot = {
         session: record.session,
+        canvasConfig: sessionState.canvasConfig,
         clients: record.clients,
         lastOpSeq: record.lastOpSeq,
         revision: record.revision,
       }
 
-      const sessionState = getSessionState(sessionId)
       sessionState.session = snapshot.session
+      sessionState.session.boundsPolicy = sessionState.canvasConfig.boundsPolicy
       sessionState.lastOpSeq = snapshot.lastOpSeq
       sessionState.clients = new Map(snapshot.clients.map((client) => [client.clientId, client]))
 
-      socket.emit('session_snapshot', snapshot)
+      socket.emit('session_snapshot', {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          boundsPolicy: sessionState.canvasConfig.boundsPolicy,
+        },
+      })
     } catch (error) {
       writeLog('error', 'request_snapshot_failed', {
         sessionId,
@@ -1174,6 +1840,12 @@ if (process.env.NODE_ENV !== 'test') {
     corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
     logLevel: ACTIVE_LOG_LEVEL,
     databaseTarget: describeDatabaseTarget(process.env.DATABASE_URL),
+    featureChunkStreamingEnabled: isChunkStreamingEnabledByDefault,
+    featureChunkAggregateEnabled: isAggregatePayloadEnabledByDefault,
+    featureChunkCanaryEnabled: isChunkCanaryEnabled,
+    featureChunkCanarySessionCount: canarySessionIds.size,
+    featureMultiReplicaReady: isMultiReplicaReady,
+    replicaId: REPLICA_ID,
   })
 
   void verifyDatabaseConnectivity()

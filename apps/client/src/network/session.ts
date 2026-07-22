@@ -1,8 +1,25 @@
 import { resolveServerUrl } from './serverUrl'
+import type { CanvasSizePreset } from '../../../server/src/contracts'
 
 const SERVER_URL = resolveServerUrl()
 const SESSION_STORAGE_KEY = 'zzyix_session_id'
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
+
+export type CreateSessionOptions = {
+  canvasPreset: CanvasSizePreset
+}
+
+export type ChunkId = `${number}:${number}`
+
+export const toChunkId = (chunkX: number, chunkY: number): ChunkId => `${chunkX}:${chunkY}`
+
+export const parseChunkId = (chunkId: ChunkId): { x: number; y: number } => {
+  const [rawX, rawY] = chunkId.split(':')
+  return {
+    x: Number(rawX),
+    y: Number(rawY),
+  }
+}
 
 export type SessionSummary = {
   id: string
@@ -37,8 +54,14 @@ export const clearStoredSessionId = (): void => {
   sessionStorage.removeItem(SESSION_STORAGE_KEY)
 }
 
-export const createSession = async (): Promise<string> => {
-  const response = await fetch(`${SERVER_URL}/sessions`, { method: 'POST' })
+export const createSession = async (options?: CreateSessionOptions): Promise<string> => {
+  const response = await fetch(`${SERVER_URL}/sessions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(options ?? {}),
+  })
   if (!response.ok) throw new Error(`Failed to create session: ${response.status}`)
 
   const data = (await response.json()) as { session: { id: string } }

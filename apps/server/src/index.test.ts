@@ -8,10 +8,12 @@ import {
   getSessionState,
   handlePlaceTileRequest,
   handleRemoveTileRequest,
+  isCreateSessionRequest,
   isValidTileId,
   invokeAckSafely,
   isPlaceTilePayload,
   isRemoveTilePayload,
+  resolveCanvasConfigFromPreset,
   isSelectionUpdatePayload,
   isOriginAllowed,
   resolveCorsOrigin,
@@ -34,12 +36,26 @@ describe('authoritative handler semantics', () => {
           displayName: 'Canvas aaaaaaaa',
           participantCount: 2,
           canvasSize: { width: 10.4, height: 6.8 },
+          canvasConfig: {
+            canvasSize: { width: 10.4, height: 6.8 },
+            boundsPolicy: {
+              mode: 'bounded',
+              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+            },
+          },
         },
         {
           id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
           displayName: 'Canvas bbbbbbbb',
           participantCount: 0,
           canvasSize: { width: 10.4, height: 6.8 },
+          canvasConfig: {
+            canvasSize: { width: 10.4, height: 6.8 },
+            boundsPolicy: {
+              mode: 'bounded',
+              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+            },
+          },
         },
       ],
     })
@@ -77,6 +93,31 @@ describe('authoritative handler semantics', () => {
     }
     expect(result.event).toBeUndefined()
     expect(state.session.tiles).toHaveLength(0)
+  })
+
+  it('accepts far placement when session bounds policy is unbounded', () => {
+    const state = createAuthoritativeSessionState('session-unbounded', 1, {
+      canvasSize: { width: 10.4, height: 6.8 },
+      boundsPolicy: { mode: 'unbounded' },
+    })
+
+    const result = applyPlaceTile(
+      state,
+      {
+        tileId: 'abababab-abab-4bab-8bab-abababababab',
+        shape: 'square',
+        color: '#fff',
+        material: 'ceramic',
+        transform: {
+          position: vec2(99, 0),
+          rotation: 0,
+        },
+      },
+      'client-a',
+    )
+
+    expect(result.ack.rejected).toBe(false)
+    expect(state.session.tiles).toHaveLength(1)
   })
 
   it('emits tile_placed payload only after successful state mutation', () => {
@@ -252,6 +293,40 @@ describe('authoritative handler semantics', () => {
     expect(isRemoveTilePayload(null)).toBe(false)
     expect(isRemoveTilePayload({ tileId: 123 })).toBe(false)
     expect(isRemoveTilePayload({ tileId: 'abc' })).toBe(true)
+  })
+
+  it('validates create session request presets', () => {
+    expect(isCreateSessionRequest({})).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'classic' })).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'expanded' })).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'vast' })).toBe(true)
+    expect(isCreateSessionRequest({ canvasPreset: 'invalid' })).toBe(false)
+    expect(isCreateSessionRequest(null)).toBe(false)
+  })
+
+  it('resolves larger bounded canvas config for expanded and vast presets', () => {
+    const classic = resolveCanvasConfigFromPreset('classic')
+    const expanded = resolveCanvasConfigFromPreset('expanded')
+    const vast = resolveCanvasConfigFromPreset('vast')
+
+    expect(classic.canvasSize.width).toBe(10.4)
+    expect(classic.canvasSize.height).toBe(6.8)
+
+    expect(expanded.canvasSize.width).toBe(20.8)
+    expect(expanded.canvasSize.height).toBe(13.6)
+    if (expanded.boundsPolicy.mode !== 'bounded') {
+      throw new Error('expected bounded policy for expanded preset')
+    }
+    expect(expanded.boundsPolicy.bounds.maxX).toBe(10.4)
+    expect(expanded.boundsPolicy.bounds.maxY).toBe(6.8)
+
+    expect(vast.canvasSize.width).toBe(31.2)
+    expect(vast.canvasSize.height).toBe(20.4)
+    if (vast.boundsPolicy.mode !== 'bounded') {
+      throw new Error('expected bounded policy for vast preset')
+    }
+    expect(vast.boundsPolicy.bounds.minX).toBe(-15.6)
+    expect(vast.boundsPolicy.bounds.minY).toBe(-10.2)
   })
 
   it('accepts only non-negative integer expectedRevision values in payload guards', () => {

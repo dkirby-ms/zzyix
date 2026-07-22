@@ -21,6 +21,7 @@ type ControlsPanelProps = {
   onUndo: () => void
   clearDisabled: boolean
   onClear: () => void
+  onReturnToLobby: () => void
 }
 
 const shapes: TileShape[] = ['square', 'triangle', 'rectangle', 'l-shape']
@@ -45,6 +46,7 @@ export const ControlsPanel = ({
   onUndo,
   clearDisabled,
   onClear,
+  onReturnToLobby,
 }: ControlsPanelProps) => {
   return (
     <aside className="controls-shell" aria-label="Mosaic controls">
@@ -133,9 +135,15 @@ export const ControlsPanel = ({
         </div>
       </section>
 
+      <section>
+        <div className="pill-row">
+          <button type="button" onClick={onReturnToLobby}>Return to Lobby</button>
+        </div>
+      </section>
+
       <section className="hint-list">
         <h2>Keys</h2>
-        <p>R rotate clockwise (+90°), Shift+R counter-clockwise (−90°), [ / ] fine rotation (±15°), F mirror, Z undo. Right-drag to rotate, middle-drag to pan.</p>
+        <p>R rotate clockwise (+90°), Shift+R counter-clockwise (−90°), [ / ] fine rotation (±15°), F mirror, Z undo. Scroll to zoom, middle-drag to pan, right-drag to rotate.</p>
       </section>
     </aside>
   )

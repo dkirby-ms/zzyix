@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  defaultBoundsPolicy,
   defaultBounds,
   solveGuidedPlacement,
   validatePlacement,
@@ -59,5 +60,35 @@ describe('placementSolver', () => {
     expect(guided.valid).toBe(true)
     expect(guided.state).toBe('valid')
     expect(guided.magnetStrength).toBe(0) // snapping disabled
+  })
+
+  it('supports explicit bounded policy mode', () => {
+    const result = validatePlacement(
+      'square',
+      {
+        position: vec2(defaultBounds.maxX + 0.3, 0),
+        rotation: 0,
+      },
+      [],
+      defaultBoundsPolicy,
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.reason.startsWith('out-of-bounds')).toBe(true)
+  })
+
+  it('supports unbounded-ready policy mode', () => {
+    const result = validatePlacement(
+      'square',
+      {
+        position: vec2(defaultBounds.maxX + 30, 0),
+        rotation: 0,
+      },
+      [],
+      { mode: 'unbounded' },
+    )
+
+    expect(result.valid).toBe(true)
+    expect(result.reason).toBe('ok')
   })
 })
