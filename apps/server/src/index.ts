@@ -105,8 +105,11 @@ const CHUNK_ROOM_PREFIX = 'chunk'
 const REPLICA_ID = process.env.REPLICA_ID ?? process.env.HOSTNAME ?? `local-${process.pid}`
 const SESSION_CREATE_RATE_LIMIT_WINDOW_MS = Number(process.env.SESSION_CREATE_RATE_LIMIT_WINDOW_MS ?? 60_000)
 const SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS = Number(process.env.SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS ?? 20)
+const SOCKET_AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000)
+const SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 60)
 
 const sessionCreateRateLimitBuckets = new Map<string, { count: number; resetAt: number }>()
+const socketAuthRateLimitBuckets = new Map<string, { count: number; resetAt: number }>()
 
 const pruneSessionCreateRateLimitBuckets = (now: number): void => {
   if (sessionCreateRateLimitBuckets.size < 1_000) {
@@ -116,6 +119,18 @@ const pruneSessionCreateRateLimitBuckets = (now: number): void => {
   for (const [key, bucket] of sessionCreateRateLimitBuckets) {
     if (bucket.resetAt <= now) {
       sessionCreateRateLimitBuckets.delete(key)
+    }
+  }
+}
+
+const pruneSocketAuthRateLimitBuckets = (now: number): void => {
+  if (socketAuthRateLimitBuckets.size < 2_000) {
+    return
+  }
+
+  for (const [key, bucket] of socketAuthRateLimitBuckets) {
+    if (bucket.resetAt <= now) {
+      socketAuthRateLimitBuckets.delete(key)
     }
   }
 }
@@ -1210,6 +1225,34 @@ configureRealtimeAdapter()
 // ─── Connection Middleware ───────────────────────────────────────────────────
 
 io.use((socket, next) => {
+  const now = Date.now()
+  pruneSocketAuthRateLimitBuckets(now)
+
+  const addressHeader = socket.handshake.headers['x-forwarded-for']
+  const forwardedFor = typeof addressHeader === 'string' ? addressHeader.split(',')[0]?.trim() : undefined
+  const rateLimitKey = forwardedFor || socket.handshake.address || socket.conn.remoteAddress || 'unknown'
+
+  const currentBucket = socketAuthRateLimitBuckets.get(rateLimitKey)
+
+  if (!currentBucket || currentBucket.resetAt <= now) {
+    socketAuthRateLimitBuckets.set(rateLimitKey, {
+      count: 1,
+      resetAt: now + SOCKET_AUTH_RATE_LIMIT_WINDOW_MS,
+    })
+  } else if (currentBucket.count >= SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((currentBucket.resetAt - now) / 1_000))
+    writeLog('warn', 'socket_auth_rate_limited', {
+      rateLimitKey,
+      retryAfterSeconds,
+      windowMs: SOCKET_AUTH_RATE_LIMIT_WINDOW_MS,
+      maxAttempts: SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS,
+    })
+    return next(new Error(`Too many connection attempts. Retry after ${retryAfterSeconds}s.`))
+  } else {
+    currentBucket.count += 1
+    socketAuthRateLimitBuckets.set(rateLimitKey, currentBucket)
+  }
+
   const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
 
   writeLog('debug', 'socket_auth_received', {
