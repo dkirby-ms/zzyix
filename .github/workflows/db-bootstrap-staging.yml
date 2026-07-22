@@ -61,7 +61,7 @@ jobs:
             # Parse and validate database connection metadata before starting migrations.
             DB_URL="${{ secrets.SERVER_DATABASE_URL }}"
             export DB_URL
-            mapfile -t db_parts < <(python - <<'PY'
+            mapfile -t db_parts < <(python3 - <<'PY'
             from urllib.parse import urlparse, unquote
             import os
             import sys
