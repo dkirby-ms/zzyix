@@ -146,7 +146,7 @@ jobs:
           inlineScript: |
             az extension add --name containerapp --upgrade --allow-preview true
 
-      - name: Deploy Server Container App (Bootstrap)
+      - name: Deploy Server Container App
         uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
         with:
           inlineScript: |

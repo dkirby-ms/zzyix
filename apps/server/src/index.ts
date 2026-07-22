@@ -49,6 +49,7 @@ import {
   persistTilePlacement,
   persistTileRemoval,
 } from './db/index.js'
+import { applyDatabaseMigrationsIfNeeded } from './db/migrate.js'
 import type { SessionSummaryRecord } from './db/repository.js'
 import { defaultBounds, validatePlacement } from './domain/placementSolver.js'
 import { startRetentionJob } from './jobs/retention.js'
@@ -1850,6 +1851,13 @@ if (process.env.NODE_ENV !== 'test') {
 
   void verifyDatabaseConnectivity()
     .then(() => {
+      return applyDatabaseMigrationsIfNeeded()
+    })
+    .then((migrationsApplied) => {
+      writeLog('info', 'database_migration_check_complete', {
+        migrationsApplied,
+      })
+
       httpServer.listen(PORT, HOST, () => {
         writeLog('info', 'server_listening', {
           host: HOST,
