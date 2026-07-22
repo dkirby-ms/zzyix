@@ -3,6 +3,7 @@ import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
+import { rateLimit } from 'express-rate-limit'
 import { RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
 import type {
   CanvasSizePreset,
@@ -103,25 +104,10 @@ const CANVAS_PRESET_MULTIPLIER: Record<CanvasSizePreset, number> = {
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
 const CHUNK_ROOM_PREFIX = 'chunk'
 const REPLICA_ID = process.env.REPLICA_ID ?? process.env.HOSTNAME ?? `local-${process.pid}`
-const SESSION_CREATE_RATE_LIMIT_WINDOW_MS = Number(process.env.SESSION_CREATE_RATE_LIMIT_WINDOW_MS ?? 60_000)
-const SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS = Number(process.env.SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS ?? 20)
 const SOCKET_AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000)
 const SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 60)
 
-const sessionCreateRateLimitBuckets = new Map<string, { count: number; resetAt: number }>()
 const socketAuthRateLimitBuckets = new Map<string, { count: number; resetAt: number }>()
-
-const pruneSessionCreateRateLimitBuckets = (now: number): void => {
-  if (sessionCreateRateLimitBuckets.size < 1_000) {
-    return
-  }
-
-  for (const [key, bucket] of sessionCreateRateLimitBuckets) {
-    if (bucket.resetAt <= now) {
-      sessionCreateRateLimitBuckets.delete(key)
-    }
-  }
-}
 
 const pruneSocketAuthRateLimitBuckets = (now: number): void => {
   if (socketAuthRateLimitBuckets.size < 2_000) {
@@ -135,44 +121,13 @@ const pruneSocketAuthRateLimitBuckets = (now: number): void => {
   }
 }
 
-const getRequestRateLimitKey = (req: express.Request): string => {
-  return req.ip || req.socket.remoteAddress || 'unknown'
-}
-
-const enforceSessionCreateRateLimit: express.RequestHandler = (req, res, next) => {
-  const now = Date.now()
-  pruneSessionCreateRateLimitBuckets(now)
-
-  const key = getRequestRateLimitKey(req)
-  const current = sessionCreateRateLimitBuckets.get(key)
-
-  if (!current || current.resetAt <= now) {
-    sessionCreateRateLimitBuckets.set(key, {
-      count: 1,
-      resetAt: now + SESSION_CREATE_RATE_LIMIT_WINDOW_MS,
-    })
-    next()
-    return
-  }
-
-  if (current.count >= SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1_000))
-    res.setHeader('Retry-After', retryAfterSeconds.toString())
-    writeLog('warn', 'session_create_rate_limited', {
-      ip: req.ip,
-      key,
-      windowMs: SESSION_CREATE_RATE_LIMIT_WINDOW_MS,
-      maxRequests: SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS,
-      retryAfterSeconds,
-    })
-    res.status(429).json({ error: 'Too many requests. Please try again later.' })
-    return
-  }
-
-  current.count += 1
-  sessionCreateRateLimitBuckets.set(key, current)
-  next()
-}
+const sessionCreateRateLimit = rateLimit({
+  windowMs: Number(process.env.SESSION_CREATE_RATE_LIMIT_WINDOW_MS ?? 60_000),
+  limit: Number(process.env.SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS ?? 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' },
+})
 
 const parseBooleanFlag = (value: string | undefined, fallback: boolean): boolean => {
   if (value === undefined) {
@@ -1154,7 +1109,7 @@ app.get('/sessions', async (_req, res) => {
 })
 
 // Session creation endpoint
-app.post('/sessions', enforceSessionCreateRateLimit, async (req, res) => {
+app.post('/sessions', sessionCreateRateLimit, async (req, res) => {
   if (!isCreateSessionRequest(req.body ?? {})) {
     res.status(400).json({ error: 'Invalid session creation payload' })
     return
