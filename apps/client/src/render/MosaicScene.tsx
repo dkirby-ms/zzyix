@@ -5,6 +5,7 @@ import {
   ExtrudeGeometry,
   Group,
   MathUtils,
+  MOUSE,
   OrthographicCamera,
   PlaneGeometry,
   Shape,
@@ -463,6 +464,8 @@ const SceneContents = ({
         enableRotate={false}
         enablePan={false}
         enableZoom={true}
+        // Keep zoom on wheel only; drag interactions are handled by the interaction plane.
+        mouseButtons={{ LEFT: MOUSE.PAN, MIDDLE: MOUSE.PAN, RIGHT: MOUSE.PAN }}
         minZoom={cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom}
         maxZoom={cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom}
         minPolarAngle={Math.PI / 2}
@@ -501,7 +504,6 @@ export const MosaicScene = ({
     Math.min(cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom, 58 * (10.4 / Math.max(10.4, maxDimension))),
   )
   const containerRef = useRef<HTMLDivElement>(null)
-  const fakeCursorRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -512,53 +514,39 @@ export const MosaicScene = ({
     }
 
     const handleMouseDown = (e: MouseEvent) => {
+      if (e.button === 1) {
+        // Prevent browser autoscroll and use a standard pan cursor while middle-dragging.
+        e.preventDefault()
+        container.style.cursor = 'grabbing'
+      }
       if (e.button === 2) {
-        // Right mouse button pressed - show fake cursor at this position
-        if (fakeCursorRef.current) {
-          fakeCursorRef.current.style.left = `${e.clientX}px`
-          fakeCursorRef.current.style.top = `${e.clientY}px`
-          fakeCursorRef.current.style.display = 'block'
-        }
-        container.style.cursor = 'none'
+        container.style.cursor = 'ew-resize'
       }
     }
 
     const handleMouseUp = () => {
-      // Hide fake cursor
-      if (fakeCursorRef.current) {
-        fakeCursorRef.current.style.display = 'none'
-      }
+      container.style.cursor = 'auto'
+    }
+
+    const handleMouseLeave = () => {
       container.style.cursor = 'auto'
     }
 
     container.addEventListener('contextmenu', handleContextMenu)
     container.addEventListener('mousedown', handleMouseDown)
+    container.addEventListener('mouseleave', handleMouseLeave)
     document.addEventListener('mouseup', handleMouseUp)
 
     return () => {
       container.removeEventListener('contextmenu', handleContextMenu)
       container.removeEventListener('mousedown', handleMouseDown)
+      container.removeEventListener('mouseleave', handleMouseLeave)
       document.removeEventListener('mouseup', handleMouseUp)
     }
   }, [])
 
   return (
     <>
-      <div
-        ref={fakeCursorRef}
-        style={{
-          position: 'fixed',
-          width: '8px',
-          height: '8px',
-          backgroundColor: '#333',
-          borderRadius: '50%',
-          pointerEvents: 'none',
-          display: 'none',
-          transform: 'translate(-4px, -4px)',
-          zIndex: 9999,
-          boxShadow: '0 0 0 2px rgba(255, 255, 255, 0.5)',
-        }}
-      />
       <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
         <Canvas
           shadows="percentage"

@@ -143,7 +143,7 @@ export const ControlsPanel = ({
 
       <section className="hint-list">
         <h2>Keys</h2>
-        <p>R rotate clockwise (+90°), Shift+R counter-clockwise (−90°), [ / ] fine rotation (±15°), F mirror, Z undo. Right-drag to rotate, middle-drag to pan.</p>
+        <p>R rotate clockwise (+90°), Shift+R counter-clockwise (−90°), [ / ] fine rotation (±15°), F mirror, Z undo. Scroll to zoom, middle-drag to pan, right-drag to rotate.</p>
       </section>
     </aside>
   )
