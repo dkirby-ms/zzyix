@@ -152,12 +152,25 @@ jobs:
                 --output tsv
             } | tr -d '\r')"
 
+            SERVER_WORKLOAD_PROFILE="$({
+              az containerapp show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${SERVER_CONTAINER_APP_NAME}" \
+                --query properties.workloadProfileName \
+                --output tsv
+            } | tr -d '\r')"
+
             if [[ -z "${SERVER_IMAGE}" || "${SERVER_IMAGE}" == "null" ]]; then
               echo "Unable to resolve current server image from Container App ${SERVER_CONTAINER_APP_NAME}."
               exit 1
             fi
 
             echo "Using server image for migration job: ${SERVER_IMAGE}"
+            if [[ -n "${SERVER_WORKLOAD_PROFILE}" && "${SERVER_WORKLOAD_PROFILE}" != "null" ]]; then
+              echo "Using workload profile for migration job: ${SERVER_WORKLOAD_PROFILE}"
+            else
+              echo "Server app workload profile not set; using ACA default profile for migration job."
+            fi
 
             if az containerapp job show --resource-group "${RESOURCE_GROUP}" --name "${DB_BOOTSTRAP_JOB_NAME}" >/dev/null 2>&1; then
               echo "Deleting existing job ${DB_BOOTSTRAP_JOB_NAME} before recreate."
@@ -182,6 +195,13 @@ jobs:
               )
             fi
 
+            create_profile_args=()
+            if [[ -n "${SERVER_WORKLOAD_PROFILE}" && "${SERVER_WORKLOAD_PROFILE}" != "null" ]]; then
+              create_profile_args=(
+                --workload-profile-name "${SERVER_WORKLOAD_PROFILE}"
+              )
+            fi
+
             az containerapp job create \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${DB_BOOTSTRAP_JOB_NAME}" \
@@ -197,7 +217,8 @@ jobs:
               --args "dist/db/migrate.js" \
               --env-vars "NODE_ENV=production" "DATABASE_URL=secretref:database-url" "PGSSLMODE=require" \
               --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
-              ${create_registry_args[@]}
+              ${create_registry_args[@]} \
+              ${create_profile_args[@]}
 
             execution_name="$({
               az containerapp job start \
