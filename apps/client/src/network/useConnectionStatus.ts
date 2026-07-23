@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSocket } from './useSocketConnection'
-
+import type { MutableRefObject } from 'react'
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnecting' | 'disconnected' | 'error'
 
 export interface ConnectionState {
@@ -8,11 +7,19 @@ export interface ConnectionState {
   lastError?: string
 }
 
+type ConnectionStatusEvent = 'connect' | 'disconnect' | 'connect_error'
+
+type ConnectionStatusSocket = {
+  connected: boolean
+  on: (event: ConnectionStatusEvent, listener: (...args: any[]) => void) => unknown
+  off: (event: ConnectionStatusEvent, listener: (...args: any[]) => void) => unknown
+}
+
 /**
  * Hook to track Socket.io connection state
  * Pass the socket reference from useSocketConnection
  */
-export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket | null>): ConnectionState => {
+export const useConnectionStatus = (socketRef: MutableRefObject<ConnectionStatusSocket | null>): ConnectionState => {
   const [state, setState] = useState<ConnectionState>({
     status: 'connecting',
   })
@@ -28,7 +35,7 @@ export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket 
   }
 
   useEffect(() => {
-    let activeSocket: AppSocket | null = null
+    let activeSocket: ConnectionStatusSocket | null = null
 
     const handleConnect = () => {
       setConnectionState({ status: 'connected' })
@@ -50,13 +57,13 @@ export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket 
       })
     }
 
-    const unbindSocketEvents = (socket: AppSocket): void => {
+    const unbindSocketEvents = (socket: ConnectionStatusSocket): void => {
       socket.off('connect', handleConnect)
       socket.off('disconnect', handleDisconnect)
       socket.off('connect_error', handleConnectError)
     }
 
-    const bindSocket = (socket: AppSocket | null): void => {
+    const bindSocket = (socket: ConnectionStatusSocket | null): void => {
       if (activeSocket === socket) {
         return
       }
