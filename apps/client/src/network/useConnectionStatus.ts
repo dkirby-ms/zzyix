@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSocket } from './useSocketConnection'
-
+import type { MutableRefObject } from 'react'
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnecting' | 'disconnected' | 'error'
 
 export interface ConnectionState {
@@ -8,11 +7,19 @@ export interface ConnectionState {
   lastError?: string
 }
 
+type ConnectionStatusEvent = 'connect' | 'disconnect' | 'connect_error'
+
+type ConnectionStatusSocket = {
+  connected: boolean
+  on: (event: ConnectionStatusEvent, listener: (...args: any[]) => void) => unknown
+  off: (event: ConnectionStatusEvent, listener: (...args: any[]) => void) => unknown
+}
+
 /**
  * Hook to track Socket.io connection state
  * Pass the socket reference from useSocketConnection
  */
-export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket | null>): ConnectionState => {
+export const useConnectionStatus = (socketRef: MutableRefObject<ConnectionStatusSocket | null>): ConnectionState => {
   const [state, setState] = useState<ConnectionState>({
     status: 'connecting',
   })
@@ -28,23 +35,16 @@ export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket 
   }
 
   useEffect(() => {
-    const socket = socketRef.current
-    if (!socket) {
-      setConnectionState({ status: 'disconnected' })
-      return
-    }
+    let activeSocket: ConnectionStatusSocket | null = null
 
-    // Track connection events
     const handleConnect = () => {
       setConnectionState({ status: 'connected' })
     }
 
     const handleDisconnect = (reason: string) => {
-      // Check if it's a normal disconnect or an error-based disconnect
       if (reason === 'client namespace disconnect') {
         setConnectionState({ status: 'disconnected' })
       } else {
-        // Network error or unexpected disconnect - will try to reconnect
         setConnectionState({ status: 'disconnecting' })
       }
     }
@@ -57,22 +57,50 @@ export const useConnectionStatus = (socketRef: React.MutableRefObject<AppSocket 
       })
     }
 
-    // Socket.io reserved events
-    socket.on('connect', handleConnect)
-    socket.on('disconnect', handleDisconnect)
-    socket.on('connect_error', handleConnectError)
-
-    // Initialize state based on current connection status
-    if (socket.connected) {
-      setConnectionState({ status: 'connected' })
-    } else {
-      setConnectionState({ status: 'connecting' })
-    }
-
-    return () => {
+    const unbindSocketEvents = (socket: ConnectionStatusSocket): void => {
       socket.off('connect', handleConnect)
       socket.off('disconnect', handleDisconnect)
       socket.off('connect_error', handleConnectError)
+    }
+
+    const bindSocket = (socket: ConnectionStatusSocket | null): void => {
+      if (activeSocket === socket) {
+        return
+      }
+
+      if (activeSocket) {
+        unbindSocketEvents(activeSocket)
+      }
+
+      activeSocket = socket
+
+      if (!socket) {
+        setConnectionState({ status: 'disconnected' })
+        return
+      }
+
+      socket.on('connect', handleConnect)
+      socket.on('disconnect', handleDisconnect)
+      socket.on('connect_error', handleConnectError)
+
+      if (socket.connected) {
+        setConnectionState({ status: 'connected' })
+      } else {
+        setConnectionState({ status: 'connecting' })
+      }
+    }
+
+    bindSocket(socketRef.current)
+
+    const pollInterval = globalThis.setInterval(() => {
+      bindSocket(socketRef.current)
+    }, 200)
+
+    return () => {
+      globalThis.clearInterval(pollInterval)
+      if (activeSocket) {
+        unbindSocketEvents(activeSocket)
+      }
     }
   }, [socketRef])
 
