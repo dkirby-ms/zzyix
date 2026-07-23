@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import { lookup } from 'node:dns/promises'
 import express from 'express'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
@@ -493,20 +494,99 @@ const DB_CONNECT_RETRY_BASE_MS = Number(process.env.DB_CONNECT_RETRY_BASE_MS ?? 
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-const verifyDatabaseConnectivity = async (): Promise<void> => {
-  if (!process.env.DATABASE_URL) {
+const resolveDatabaseUrl = (): string => {
+  const rawUrl = process.env.DATABASE_URL
+  if (!rawUrl) {
     throw new Error(
       'DATABASE_URL environment variable is not set. ' +
       'Please set DATABASE_URL to your PostgreSQL connection string.'
     )
   }
 
-  const databaseTarget = describeDatabaseTarget(process.env.DATABASE_URL)
+  const databaseUrl = rawUrl.trim()
+  if (!databaseUrl) {
+    throw new Error('DATABASE_URL is empty after trimming whitespace')
+  }
+
+  if (databaseUrl.startsWith('secretref:')) {
+    throw new Error(
+      'DATABASE_URL still contains a secret reference token. ' +
+      'In ACA, the environment variable must resolve to the real Postgres URL value.'
+    )
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(databaseUrl)
+  } catch {
+    throw new Error('DATABASE_URL is not a valid URL')
+  }
+
+  if (parsed.protocol !== 'postgres:' && parsed.protocol !== 'postgresql:') {
+    throw new Error('DATABASE_URL must start with postgres:// or postgresql://')
+  }
+
+  if (!parsed.hostname) {
+    throw new Error('DATABASE_URL is missing a hostname')
+  }
+
+  process.env.DATABASE_URL = databaseUrl
+  return databaseUrl
+}
+
+const verifyDatabaseHostnameResolution = async (databaseUrl: string): Promise<void> => {
+  const parsed = new URL(databaseUrl)
+  const hostname = parsed.hostname
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= DB_CONNECT_MAX_ATTEMPTS; attempt++) {
+    try {
+      const addresses = await lookup(hostname, { all: true })
+      writeLog('info', 'database_dns_resolution_succeeded', {
+        hostname,
+        attempt,
+        addressCount: addresses.length,
+        families: Array.from(new Set(addresses.map((entry) => entry.family))).sort(),
+      })
+      return
+    } catch (error) {
+      lastError = error
+      const retryDelayMs = DB_CONNECT_RETRY_BASE_MS * attempt
+
+      if (attempt < DB_CONNECT_MAX_ATTEMPTS) {
+        writeLog('warn', 'database_dns_resolution_retrying', {
+          hostname,
+          attempt,
+          maxAttempts: DB_CONNECT_MAX_ATTEMPTS,
+          retryDelayMs,
+          error,
+        })
+        await sleep(retryDelayMs)
+      } else {
+        writeLog('error', 'database_dns_resolution_failed', {
+          hostname,
+          attempt,
+          maxAttempts: DB_CONNECT_MAX_ATTEMPTS,
+          error,
+        })
+      }
+    }
+  }
+
+  throw lastError
+}
+
+const verifyDatabaseConnectivity = async (): Promise<void> => {
+  const databaseUrl = resolveDatabaseUrl()
+
+  const databaseTarget = describeDatabaseTarget(databaseUrl)
 
   writeLog('info', 'database_connectivity_check_started', {
     databaseTarget,
     maxAttempts: DB_CONNECT_MAX_ATTEMPTS,
   })
+
+  await verifyDatabaseHostnameResolution(databaseUrl)
 
   let lastError: unknown
 
@@ -1202,8 +1282,6 @@ const configureRealtimeAdapter = (): void => {
   })
 }
 
-configureRealtimeAdapter()
-
 // ─── Connection Middleware ───────────────────────────────────────────────────
 
 io.use((socket, next) => {
@@ -1880,6 +1958,8 @@ if (process.env.NODE_ENV !== 'test') {
       return applyDatabaseMigrationsIfNeeded()
     })
     .then((migrationsApplied) => {
+      configureRealtimeAdapter()
+
       writeLog('info', 'database_migration_check_complete', {
         migrationsApplied,
       })
