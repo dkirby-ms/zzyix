@@ -28,6 +28,17 @@
 export const SCHEMA_VERSION = '1.0.0'
 export const RUNTIME_CHUNK_WORLD_SIZE = 8
 
+// ─── Chat v1 Constraints ─────────────────────────────────────────────────────
+// Shared constants that lock the v1 chat feature limits.
+// Both server handlers and client UI MUST respect these values.
+export const CHAT_CONFIG = {
+  retentionDays: 30,
+  maxMessageLength: 1000,
+  replayPageSize: 100,
+  maxReplayPageSize: 500,
+  ackTimeoutMs: 5000,
+} as const
+
 // ─── Domain primitives ────────────────────────────────────────────────────────
 
 export type Vec2 = { x: number; y: number }
@@ -446,6 +457,50 @@ export type ChunkResyncRequiredPayload = {
   reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
 }
 
+// ─── Chat ────────────────────────────────────────────────────────────────────
+
+export type ChatMessage = {
+  id: string
+  canvasId: string
+  senderClientId: string
+  text: string
+  serverSeq: number
+  clientMessageId?: string
+  clientTs?: number
+  serverTs: number
+}
+
+export type SendChatMessagePayload = {
+  canvasId: string
+  text: string
+  clientMessageId: string
+  clientTs: number
+}
+
+export type SendChatMessageRejectReason =
+  | 'INVALID_PAYLOAD'
+  | 'FORBIDDEN_CANVAS'
+  | 'MESSAGE_TOO_LONG'
+  | 'RATE_LIMITED'
+  | 'PERSISTENCE_FAILED'
+
+export type SendChatMessageAck =
+  | { accepted: true; serverSeq: number; idempotent?: boolean }
+  | { accepted: false; reason: SendChatMessageRejectReason }
+
+export type RequestChatReplayPayload = {
+  canvasId: string
+  afterSeq: number
+  limit?: number
+}
+
+export type ChatReplayPayload = {
+  canvasId: string
+  messages: ChatMessage[]
+  hasMore: boolean
+  nextAfterSeq: number
+}
+
 // ── Typed event maps ──────────────────────────────────────────────────────────
 // Pass these to Server<C, S, I, D> and Socket<C, S, I, D>.
 
@@ -467,6 +522,10 @@ export interface ClientToServerEvents {
   unsubscribe_chunks: (payload: UnsubscribeChunksPayload) => void
   /** Request chunk-scoped snapshots without reconnecting. */
   request_chunk_snapshot: (payload: RequestChunkSnapshotPayload) => void
+  /** Send a chat message to the canvas channel; server responds via acknowledgement. */
+  send_chat_message: (payload: SendChatMessagePayload, ack: (response: SendChatMessageAck) => void) => void
+  /** Request a replay of chat messages after a given sequence number. */
+  request_chat_replay: (payload: RequestChatReplayPayload) => void
 }
 
 /** Events emitted by the server, received by clients. */
@@ -495,6 +554,10 @@ export interface ServerToClientEvents {
   chunk_tile_removed: (payload: ChunkTileRemovedPayload) => void
   /** Emitted when chunk offsets diverge and chunk snapshot replay is required. */
   chunk_resync_required: (payload: ChunkResyncRequiredPayload) => void
+  /** Broadcast to all sockets in the canvas channel when a chat message is received. */
+  chat_message: (payload: ChatMessage) => void
+  /** Sent to a single socket in response to request_chat_replay. */
+  chat_replay: (payload: ChatReplayPayload) => void
 }
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */

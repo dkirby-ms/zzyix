@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-
 import type { ClientPresence, Session, TileInstance } from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
-import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema.js'
+import { canvases, chatMessages, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema.js'
 import { getDatabaseBundle, type DatabaseClient } from './client.js'
 
 export type AuthoritativeSessionRecord = {
@@ -98,6 +98,10 @@ export type SessionSummaryRecord = {
   id: string
   participantCount: number
 }
+
+export type PersistedChatMessageResult =
+  | { accepted: true; message: { id: string; serverSeq: number; serverTs: number }; idempotent?: boolean }
+  | { accepted: false; reason: 'DUPLICATE_CLIENT_MESSAGE_ID' | 'DB_ERROR' }
 
 export type ChunkCoordinate = {
   x: number
@@ -973,13 +977,128 @@ export const loadSessionReplayRecord = async (sessionId: string): Promise<Replay
   }
 }
 
+export const persistChatMessage = async (params: {
+  canvasId: string
+  senderClientId: string
+  text: string
+  clientMessageId: string
+  clientTs: number
+}): Promise<PersistedChatMessageResult> => {
+  const db = getDatabaseBundle().db
+  try {
+    // Check for idempotent duplicate first
+    const existing = await db
+      .select({
+        id: chatMessages.id,
+        serverSeq: chatMessages.serverSeq,
+        serverTs: chatMessages.serverTs,
+      })
+      .from(chatMessages)
+      .where(
+        and(
+          eq(chatMessages.canvasId, params.canvasId),
+          eq(chatMessages.senderClientId, params.senderClientId),
+          eq(chatMessages.clientMessageId, params.clientMessageId),
+        ),
+      )
+      .limit(1)
+
+    if (existing.length > 0) {
+      return {
+        accepted: true,
+        message: {
+          id: existing[0].id,
+          serverSeq: existing[0].serverSeq,
+          serverTs: existing[0].serverTs.getTime(),
+        },
+        idempotent: true,
+      }
+    }
+
+    const inserted = await db
+      .insert(chatMessages)
+      .values({
+        canvasId: params.canvasId,
+        senderClientId: params.senderClientId,
+        text: params.text,
+        clientMessageId: params.clientMessageId,
+        clientTs: params.clientTs,
+      })
+      .returning({
+        id: chatMessages.id,
+        serverSeq: chatMessages.serverSeq,
+        serverTs: chatMessages.serverTs,
+      })
+
+    return {
+      accepted: true,
+      message: {
+        id: inserted[0].id,
+        serverSeq: inserted[0].serverSeq,
+        serverTs: inserted[0].serverTs.getTime(),
+      },
+    }
+  } catch {
+    return { accepted: false, reason: 'DB_ERROR' }
+  }
+}
+
+export const loadChatReplay = async (params: {
+  canvasId: string
+  afterSeq: number
+  limit: number
+}): Promise<{ messages: Array<{ id: string; senderClientId: string; text: string; serverSeq: number; clientMessageId: string | null; clientTs: number | null; serverTs: number }>; hasMore: boolean; nextAfterSeq: number }> => {
+  const db = getDatabaseBundle().db
+  const fetchLimit = params.limit + 1
+
+  const rows = await db
+    .select({
+      id: chatMessages.id,
+      senderClientId: chatMessages.senderClientId,
+      text: chatMessages.text,
+      serverSeq: chatMessages.serverSeq,
+      clientMessageId: chatMessages.clientMessageId,
+      clientTs: chatMessages.clientTs,
+      serverTs: chatMessages.serverTs,
+    })
+    .from(chatMessages)
+    .where(
+      and(
+        eq(chatMessages.canvasId, params.canvasId),
+        sql`${chatMessages.serverSeq} > ${params.afterSeq}`,
+      ),
+    )
+    .orderBy(asc(chatMessages.serverSeq))
+    .limit(fetchLimit)
+
+  const hasMore = rows.length > params.limit
+  const pageRows = hasMore ? rows.slice(0, params.limit) : rows
+  const lastSeq = pageRows.length > 0 ? pageRows[pageRows.length - 1].serverSeq : params.afterSeq
+
+  return {
+    messages: pageRows.map((r) => ({
+      id: r.id,
+      senderClientId: r.senderClientId,
+      text: r.text,
+      serverSeq: r.serverSeq,
+      clientMessageId: r.clientMessageId,
+      clientTs: r.clientTs,
+      serverTs: r.serverTs.getTime(),
+    })),
+    hasMore,
+    nextAfterSeq: lastSeq,
+  }
+}
+
 export const pruneRetention = async (params: {
   operationCutoffMs: number
   snapshotCutoffMs: number
-}): Promise<{ deletedOperations: number; deletedSnapshots: number; deletedIdempotencyKeys: number }> => {
+  chatCutoffMs: number
+}): Promise<{ deletedOperations: number; deletedSnapshots: number; deletedIdempotencyKeys: number; deletedChatMessages: number }> => {
   const { db } = getDatabaseBundle()
   const operationCutoff = new Date(Date.now() - params.operationCutoffMs)
   const snapshotCutoff = new Date(Date.now() - params.snapshotCutoffMs)
+  const chatCutoff = new Date(Date.now() - params.chatCutoffMs)
   const now = new Date()
 
   const staleSnapshots = await db
@@ -997,6 +1116,11 @@ export const pruneRetention = async (params: {
     .from(idempotencyKeys)
     .where(lte(idempotencyKeys.expiresAt, now))
 
+  const staleChatMessages = await db
+    .select({ id: chatMessages.id })
+    .from(chatMessages)
+    .where(lte(chatMessages.serverTs, chatCutoff))
+
   if (staleSnapshots.length > 0) {
     await db.delete(snapshots).where(inArray(snapshots.id, staleSnapshots.map((entry) => entry.id)))
   }
@@ -1009,9 +1133,14 @@ export const pruneRetention = async (params: {
     await db.delete(idempotencyKeys).where(lte(idempotencyKeys.expiresAt, now))
   }
 
+  if (staleChatMessages.length > 0) {
+    await db.delete(chatMessages).where(inArray(chatMessages.id, staleChatMessages.map((entry) => entry.id)))
+  }
+
   return {
     deletedOperations: staleOperations.length,
     deletedSnapshots: staleSnapshots.length,
     deletedIdempotencyKeys: staleIdempotencyKeys.length,
+    deletedChatMessages: staleChatMessages.length,
   }
 }

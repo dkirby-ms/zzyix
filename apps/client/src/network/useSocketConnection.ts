@@ -16,6 +16,8 @@ import type {
   ChunkTilePlacedPayload,
   ChunkTileRemovedPayload,
   ChunkResyncRequiredPayload,
+  ChatMessage,
+  ChatReplayPayload,
 } from '../../../server/src/contracts'
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
@@ -38,6 +40,8 @@ export const useSocketConnection = (
   onChunkTileRemoved?: (payload: ChunkTileRemovedPayload) => void,
   onChunkResyncRequired?: (payload: ChunkResyncRequiredPayload) => void,
   enableChunkStreaming: boolean = true,
+  onChatMessage?: (payload: ChatMessage) => void,
+  onChatReplay?: (payload: ChatReplayPayload) => void,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
 
@@ -95,6 +99,12 @@ export const useSocketConnection = (
     if (enableChunkStreaming && onChunkResyncRequired) {
       socket.on('chunk_resync_required', onChunkResyncRequired)
     }
+    if (onChatMessage) {
+      socket.on('chat_message', onChatMessage)
+    }
+    if (onChatReplay) {
+      socket.on('chat_replay', onChatReplay)
+    }
 
     socketRef.current = socket
     if (socketActionRef) {
@@ -132,6 +142,12 @@ export const useSocketConnection = (
       if (enableChunkStreaming && onChunkResyncRequired) {
         socket.off('chunk_resync_required', onChunkResyncRequired)
       }
+      if (onChatMessage) {
+        socket.off('chat_message', onChatMessage)
+      }
+      if (onChatReplay) {
+        socket.off('chat_replay', onChatReplay)
+      }
       socket.disconnect()
       socketRef.current = null
       if (socketActionRef) {
@@ -156,6 +172,8 @@ export const useSocketConnection = (
     onChunkTileRemoved,
     onChunkResyncRequired,
     enableChunkStreaming,
+    onChatMessage,
+    onChatReplay,
   ])
 
   return socketRef

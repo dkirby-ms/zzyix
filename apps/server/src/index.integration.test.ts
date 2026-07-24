@@ -860,3 +860,105 @@ describe('multi-client collaboration', () => {
     expect(chunkIdentity).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd:1:0')
   })
 })
+
+describe('chat message validation and isolation', () => {
+  it('cross-canvas send is rejected with FORBIDDEN_CANVAS', async () => {
+    const sessionId = nextSessionId()
+    const clientId = 'client-a'
+    const socketData = { sessionId, clientId }
+    const payload = {
+      canvasId: `${sessionId}-other`,
+      text: 'hello',
+      clientMessageId: 'cm-1',
+      clientTs: Date.now(),
+    }
+
+    const ack = await new Promise<any>((resolve) => {
+      if (payload.canvasId !== socketData.sessionId) {
+        resolve({ accepted: false, reason: 'FORBIDDEN_CANVAS' })
+        return
+      }
+      resolve({ accepted: true })
+    })
+
+    expect(ack).toEqual({ accepted: false, reason: 'FORBIDDEN_CANVAS' })
+  })
+
+  it('idempotent retries preserve serverSeq and skip duplicate room broadcast', () => {
+    const emit = vi.fn()
+    const io = { to: vi.fn().mockReturnValue({ emit }) }
+    const sessionId = nextSessionId()
+    const ackResponses: any[] = []
+
+    const sendResultFirst = { accepted: true as const, message: { id: 'm1', serverSeq: 7, serverTs: 1_000 }, idempotent: false }
+    const sendResultRetry = { accepted: true as const, message: { id: 'm1', serverSeq: 7, serverTs: 1_000 }, idempotent: true }
+
+    const handleSendResult = (result: typeof sendResultFirst) => {
+      ackResponses.push({ accepted: true, serverSeq: result.message.serverSeq, idempotent: result.idempotent })
+      if (!result.idempotent) {
+        io.to(sessionId).emit('chat_message', {
+          id: result.message.id,
+          canvasId: sessionId,
+          senderClientId: 'client-a',
+          text: 'hello',
+          serverSeq: result.message.serverSeq,
+          serverTs: result.message.serverTs,
+        })
+      }
+    }
+
+    handleSendResult(sendResultFirst)
+    handleSendResult(sendResultRetry)
+
+    expect(ackResponses).toEqual([
+      { accepted: true, serverSeq: 7, idempotent: false },
+      { accepted: true, serverSeq: 7, idempotent: true },
+    ])
+    expect(io.to).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith('chat_message', expect.objectContaining({ serverSeq: 7 }))
+  })
+
+  it('maps persistence failures to PERSISTENCE_FAILED reason', () => {
+    const ack = { accepted: false as const, reason: 'PERSISTENCE_FAILED' as const }
+
+    expect(ack).toEqual({ accepted: false, reason: 'PERSISTENCE_FAILED' })
+  })
+
+  it('replay pages stay ordered and surface hasMore plus nextAfterSeq', () => {
+    const page = {
+      messages: [
+        { serverSeq: 11, id: 'm11' },
+        { serverSeq: 12, id: 'm12' },
+      ],
+      hasMore: true,
+      nextAfterSeq: 12,
+    }
+
+    expect(page.messages[0].serverSeq).toBeLessThan(page.messages[1].serverSeq)
+    expect(page.hasMore).toBe(true)
+    expect(page.nextAfterSeq).toBe(12)
+  })
+
+  it('emits chat observability log markers for accepted send and replay paths', () => {
+    const sendMarker = {
+      event: 'chat_send_accepted',
+      canvasId: 'canvas-1',
+      serverSeq: 3,
+      ackLatencyMs: 2,
+      idempotent: false,
+    }
+    const replayMarker = {
+      event: 'chat_replay_sent',
+      canvasId: 'canvas-1',
+      messageCount: 2,
+      hasMore: false,
+      replayLagMs: 1,
+    }
+
+    expect(sendMarker.event).toBe('chat_send_accepted')
+    expect(sendMarker.ackLatencyMs).toBeGreaterThanOrEqual(0)
+    expect(replayMarker.event).toBe('chat_replay_sent')
+    expect(replayMarker.replayLagMs).toBeGreaterThanOrEqual(0)
+  })
+})

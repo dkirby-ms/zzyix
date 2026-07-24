@@ -5,7 +5,7 @@ import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
 import { rateLimit } from 'express-rate-limit'
-import { RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
+import { CHAT_CONFIG, RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
 import type {
   CanvasSizePreset,
   CreateSessionRequest,
@@ -35,6 +35,11 @@ import type {
   ChunkPayloadMode,
   RealtimeCapabilities,
   ChunkCoordinationMetadata,
+  SendChatMessagePayload,
+  SendChatMessageAck,
+  RequestChatReplayPayload,
+  ChatMessage,
+  ChatReplayPayload,
 } from './contracts.js'
 import {
   closeDatabaseBundle,
@@ -49,6 +54,8 @@ import {
   persistSnapshotIfNeeded,
   persistTilePlacement,
   persistTileRemoval,
+  persistChatMessage,
+  loadChatReplay,
 } from './db/index.js'
 import { applyDatabaseMigrationsIfNeeded } from './db/migrate.js'
 import type { SessionSummaryRecord } from './db/repository.js'
@@ -204,6 +211,15 @@ const chunkTelemetry = {
   snapshotEvents: 0,
   snapshotBytesFine: 0,
   snapshotBytesAggregate: 0,
+}
+
+const chatTelemetry = {
+  sendAccepted: 0,
+  sendRejected: 0,
+  ackLatencyMsTotal: 0,
+  replayRequests: 0,
+  replayLagMsTotal: 0,
+  perCanvasVolume: new Map<string, number>(),
 }
 
 const emitChunkTelemetry = (
@@ -788,6 +804,25 @@ export const isSelectionUpdatePayload = (payload: unknown): payload is Selection
     }
   }
 
+  return true
+}
+
+const isSendChatMessagePayload = (payload: unknown): payload is SendChatMessagePayload => {
+  if (!isObjectRecord(payload)) return false
+  if (typeof payload.canvasId !== 'string' || payload.canvasId.length === 0) return false
+  if (typeof payload.text !== 'string' || payload.text.length === 0) return false
+  if (typeof payload.clientMessageId !== 'string' || payload.clientMessageId.length === 0) return false
+  if (!isFiniteNumber(payload.clientTs)) return false
+  return true
+}
+
+const isRequestChatReplayPayload = (payload: unknown): payload is RequestChatReplayPayload => {
+  if (!isObjectRecord(payload)) return false
+  if (typeof payload.canvasId !== 'string' || payload.canvasId.length === 0) return false
+  if (!isFiniteNumber(payload.afterSeq) || !Number.isInteger(payload.afterSeq) || payload.afterSeq < 0) return false
+  if (payload.limit !== undefined) {
+    if (!isFiniteNumber(payload.limit) || !Number.isInteger(payload.limit) || payload.limit < 1) return false
+  }
   return true
 }
 
@@ -1797,6 +1832,122 @@ io.on('connection', (socket) => {
         error,
       })
     }
+  })
+
+  socket.on('send_chat_message', async (payload, ack) => {
+    if (!isSendChatMessagePayload(payload)) {
+      invokeAckSafely(ack, { accepted: false, reason: 'INVALID_PAYLOAD' } satisfies SendChatMessageAck)
+      chatTelemetry.sendRejected++
+      return
+    }
+
+    if (payload.canvasId !== socket.data.sessionId) {
+      invokeAckSafely(ack, { accepted: false, reason: 'FORBIDDEN_CANVAS' } satisfies SendChatMessageAck)
+      chatTelemetry.sendRejected++
+      return
+    }
+
+    if (payload.text.length > CHAT_CONFIG.maxMessageLength) {
+      invokeAckSafely(ack, { accepted: false, reason: 'MESSAGE_TOO_LONG' } satisfies SendChatMessageAck)
+      chatTelemetry.sendRejected++
+      return
+    }
+
+    const sendStartedAt = Date.now()
+    const result = await persistChatMessage({
+      canvasId: payload.canvasId,
+      senderClientId: socket.data.clientId,
+      text: payload.text,
+      clientMessageId: payload.clientMessageId,
+      clientTs: payload.clientTs,
+    })
+
+    const ackLatencyMs = Date.now() - sendStartedAt
+
+    if (!result.accepted) {
+      writeLog('warn', 'chat_send_db_error', { canvasId: payload.canvasId, clientId: socket.data.clientId })
+      invokeAckSafely(ack, { accepted: false, reason: 'PERSISTENCE_FAILED' } satisfies SendChatMessageAck)
+      chatTelemetry.sendRejected++
+      return
+    }
+
+    const message: ChatMessage = {
+      id: result.message.id,
+      canvasId: payload.canvasId,
+      senderClientId: socket.data.clientId,
+      text: payload.text,
+      serverSeq: result.message.serverSeq,
+      clientMessageId: payload.clientMessageId,
+      clientTs: payload.clientTs,
+      serverTs: result.message.serverTs,
+    }
+
+    invokeAckSafely(ack, { accepted: true, serverSeq: result.message.serverSeq, idempotent: result.idempotent } satisfies SendChatMessageAck)
+    if (!result.idempotent) {
+      io.to(socket.data.sessionId).emit('chat_message', message)
+    }
+
+    chatTelemetry.sendAccepted++
+    chatTelemetry.ackLatencyMsTotal += ackLatencyMs
+    chatTelemetry.perCanvasVolume.set(payload.canvasId, (chatTelemetry.perCanvasVolume.get(payload.canvasId) ?? 0) + 1)
+
+    writeLog('debug', 'chat_send_accepted', {
+      canvasId: payload.canvasId,
+      serverSeq: result.message.serverSeq,
+      ackLatencyMs,
+      idempotent: result.idempotent,
+    })
+  })
+
+  socket.on('request_chat_replay', async (payload) => {
+    if (!isRequestChatReplayPayload(payload)) {
+      writeLog('warn', 'chat_replay_invalid_payload', { clientId: socket.data.clientId })
+      return
+    }
+
+    if (payload.canvasId !== socket.data.sessionId) {
+      writeLog('warn', 'chat_replay_forbidden_canvas', { canvasId: payload.canvasId, clientId: socket.data.clientId })
+      return
+    }
+
+    const replayStartedAt = Date.now()
+    const requestedLimit = Math.min(payload.limit ?? CHAT_CONFIG.replayPageSize, CHAT_CONFIG.maxReplayPageSize)
+
+    const result = await loadChatReplay({
+      canvasId: payload.canvasId,
+      afterSeq: payload.afterSeq,
+      limit: requestedLimit,
+    })
+
+    const replayLagMs = Date.now() - replayStartedAt
+
+    const replayPayload: ChatReplayPayload = {
+      canvasId: payload.canvasId,
+      messages: result.messages.map((m) => ({
+        id: m.id,
+        canvasId: payload.canvasId,
+        senderClientId: m.senderClientId,
+        text: m.text,
+        serverSeq: m.serverSeq,
+        clientMessageId: m.clientMessageId ?? undefined,
+        clientTs: m.clientTs ?? undefined,
+        serverTs: m.serverTs,
+      })),
+      hasMore: result.hasMore,
+      nextAfterSeq: result.nextAfterSeq,
+    }
+
+    socket.emit('chat_replay', replayPayload)
+
+    chatTelemetry.replayRequests++
+    chatTelemetry.replayLagMsTotal += replayLagMs
+
+    writeLog('debug', 'chat_replay_sent', {
+      canvasId: payload.canvasId,
+      messageCount: result.messages.length,
+      hasMore: result.hasMore,
+      replayLagMs,
+    })
   })
 
   socket.on('selection_update', (payload) => {

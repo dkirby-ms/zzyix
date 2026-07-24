@@ -40,13 +40,17 @@ import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../se
 import type {
   BoundsPolicy,
   CanvasSizePreset,
+  ChatMessage,
+  ChatReplayPayload,
   ClientJoinedPayload,
   ClientLeftPayload,
   PlaceTileAck,
   PlaceTilePayload,
   PointerUpdatePayload,
+  RequestChatReplayPayload,
   SelectionUpdatePayload,
   ResyncRequiredPayload,
+  SendChatMessagePayload,
   SessionSnapshotPayload,
   TilePlacedPayload,
   TileRemovedPayload,
@@ -56,9 +60,11 @@ import type {
   ChunkTileRemovedPayload,
   ChunkPayloadMode,
   RealtimeCapabilities,
+  SendChatMessageRejectReason,
 } from '../../server/src/contracts'
 import { MosaicScene } from './render/MosaicScene'
 import { ControlsPanel } from './ui/ControlsPanel'
+import { ChatPanel } from './ui/ChatPanel'
 import { LobbyScreen } from './ui/LobbyScreen'
 import { palettes } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
@@ -175,6 +181,10 @@ function App() {
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
+  const [chatMessages, setChatMessages] = useState<Record<string, ChatMessage[]>>({})
+  const [chatState, setChatState] = useState<'idle' | 'replaying'>('idle')
+  const [chatError, setChatError] = useState<string | null>(null)
+  const pendingReplayRef = useRef<{ canvasId: string; afterSeq: number } | null>(null)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
   const pointerEmitThrottleRef = useRef<{
     lastSentAt: number
@@ -445,6 +455,96 @@ function App() {
     }))
   }, [])
 
+  const handleChatMessage = useCallback((message: ChatMessage) => {
+    setChatMessages((prev) => {
+      const canvasKey = message.canvasId
+      const existing = prev[canvasKey] ?? []
+      // Avoid duplicates from replay merge
+      if (existing.some((m) => m.id === message.id)) {
+        return prev
+      }
+      return {
+        ...prev,
+        [canvasKey]: [...existing, message],
+      }
+    })
+  }, [])
+
+  const requestChatReplay = useCallback((canvasId: string, afterSeq: number = 0) => {
+    if (!socketActionRef.current?.connected) {
+      pendingReplayRef.current = { canvasId, afterSeq }
+      return
+    }
+    setChatState('replaying')
+    socketActionRef.current.emit('request_chat_replay', {
+      canvasId,
+      afterSeq,
+      limit: undefined, // Use server CHAT_CONFIG.replayPageSize as default
+    } satisfies RequestChatReplayPayload)
+  }, [])
+
+  const handleChatReplay = useCallback((replay: ChatReplayPayload) => {
+    setChatMessages((prev) => {
+      const canvasKey = replay.canvasId
+      const existing = prev[canvasKey] ?? []
+      // Merge replay messages (prepend to avoid duplicates with live messages)
+      const merged = [...replay.messages]
+      for (const liveMsg of existing) {
+        if (!replay.messages.some((m) => m.id === liveMsg.id)) {
+          merged.push(liveMsg)
+        }
+      }
+      merged.sort((a, b) => a.serverSeq - b.serverSeq)
+      return {
+        ...prev,
+        [canvasKey]: merged,
+      }
+    })
+    if (replay.hasMore) {
+      requestChatReplay(replay.canvasId, replay.nextAfterSeq)
+    } else {
+      pendingReplayRef.current = null
+      setChatState('idle')
+    }
+  }, [requestChatReplay])
+
+  const formatChatRejectReason = useCallback((reason: SendChatMessageRejectReason): string => {
+    switch (reason) {
+      case 'FORBIDDEN_CANVAS':
+        return 'Unable to send: this message is for a different canvas.'
+      case 'MESSAGE_TOO_LONG':
+        return 'Unable to send: message is too long.'
+      case 'RATE_LIMITED':
+        return 'Unable to send: sending too quickly. Please try again.'
+      case 'PERSISTENCE_FAILED':
+        return 'Unable to send due to a server error. Please retry.'
+      case 'INVALID_PAYLOAD':
+      default:
+        return 'Unable to send: invalid message payload.'
+    }
+  }, [])
+
+  const sendChatMessage = useCallback((canvasId: string, text: string) => {
+    if (!socketActionRef.current?.connected || !canvasId) return
+    setChatError(null)
+
+    const now = Date.now()
+    const clientMessageId = `${clientId}-${now}`
+
+    socketActionRef.current.emit('send_chat_message', {
+      canvasId,
+      text,
+      clientMessageId,
+      clientTs: now,
+    } satisfies SendChatMessagePayload, (ack) => {
+      if (!ack.accepted) {
+        setChatError(formatChatRejectReason(ack.reason))
+      } else {
+        setChatError(null)
+      }
+    })
+  }, [clientId, formatChatRejectReason])
+
   const activeCollaborators = useMemo(
     () => Object.values(collaborators).filter((collaborator) => collaborator.present),
     [collaborators],
@@ -577,6 +677,8 @@ function App() {
     onChunkTileRemoved,
     onChunkResyncRequired,
     realtimeCapabilities?.chunkStreamingEnabled ?? false,
+    handleChatMessage,
+    handleChatReplay,
   )
 
   const connectionState = useConnectionStatus(socketRef)
@@ -720,6 +822,30 @@ function App() {
     }
     selectionEmitThrottleRef.current = { lastSentAt: 0, lastTileId: undefined, pendingTileId: undefined, timeoutId: null }
   }, [sessionId])
+
+  // Request chat replay and reset chat state when session changes
+  useEffect(() => {
+    if (!sessionId) {
+      setChatMessages({})
+      setChatState('idle')
+      setChatError(null)
+      pendingReplayRef.current = null
+      return
+    }
+
+    // Request replay for the new session
+    requestChatReplay(sessionId, 0)
+  }, [sessionId, requestChatReplay])
+
+  useEffect(() => {
+    const pendingReplay = pendingReplayRef.current
+    if (!pendingReplay || !socketActionRef.current?.connected) {
+      return
+    }
+
+    pendingReplayRef.current = null
+    requestChatReplay(pendingReplay.canvasId, pendingReplay.afterSeq)
+  }, [connectionState.status, requestChatReplay])
 
   useEffect(() => {
     const cleanupId = window.setInterval(() => {
@@ -966,7 +1092,8 @@ function App() {
           </div>
         )}
 
-        <MosaicScene
+        <div className="canvas-content-wrapper">
+          <MosaicScene
           tiles={sequencedState.tiles}
           activeShape={shape}
           ghost={{
@@ -1012,6 +1139,16 @@ function App() {
             })
           }}
         />
+          {sessionId && (
+            <ChatPanel
+              messages={chatMessages[sessionId] ?? []}
+              clientId={clientId}
+              onSendMessage={(text) => sendChatMessage(sessionId, text)}
+              isReplaying={chatState === 'replaying'}
+              sendError={chatError}
+            />
+          )}
+        </div>
 
         {ghostVisible && (
           <div className="debug-overlay">

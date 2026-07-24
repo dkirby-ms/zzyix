@@ -13,15 +13,20 @@ describe('retention job', () => {
       deletedOperations: 1,
       deletedSnapshots: 2,
       deletedIdempotencyKeys: 3,
+      deletedChatMessages: 4,
     })
 
     const result = await runRetentionPass()
 
     expect(pruneRetention).toHaveBeenCalledOnce()
+    expect(pruneRetention).toHaveBeenCalledWith(expect.objectContaining({
+      chatCutoffMs: expect.any(Number),
+    }))
     expect(result).toEqual({
       deletedOperations: 1,
       deletedSnapshots: 2,
       deletedIdempotencyKeys: 3,
+      deletedChatMessages: 4,
     })
   })
 })

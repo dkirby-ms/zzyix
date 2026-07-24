@@ -762,4 +762,158 @@ describe('App lobby-first behavior', () => {
     const enabledSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     expect(enabledSocketCall[16]).toBe(true)
   })
+
+  it('continues chat replay pagination when hasMore is true', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn()
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock; connected: boolean } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: true,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onChatReplay = socketCall[18] as (payload: any) => void
+
+    expect(emitMock).toHaveBeenCalledWith('request_chat_replay', {
+      canvasId: 'session-1',
+      afterSeq: 0,
+      limit: undefined,
+    })
+
+    act(() => {
+      onChatReplay({
+        canvasId: 'session-1',
+        messages: [
+          {
+            id: 'm1',
+            canvasId: 'session-1',
+            senderClientId: 'client-2',
+            text: 'first',
+            serverSeq: 1,
+            serverTs: Date.now(),
+          },
+        ],
+        hasMore: true,
+        nextAfterSeq: 1,
+      })
+    })
+
+    expect(emitMock).toHaveBeenCalledWith('request_chat_replay', {
+      canvasId: 'session-1',
+      afterSeq: 1,
+      limit: undefined,
+    })
+  })
+
+  it('queues replay request until reconnect provides a connected socket', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitDisconnected = vi.fn()
+    const emitConnected = vi.fn()
+
+    useSocketConnectionMock
+      .mockImplementationOnce((...args: unknown[]) => {
+        const actionRef = args[7] as { current: { emit: typeof emitDisconnected; connected: boolean } | null } | undefined
+        const socketRef = {
+          current: {
+            emit: emitDisconnected,
+            on: vi.fn(),
+            off: vi.fn(),
+            connected: false,
+          },
+        }
+        if (actionRef) {
+          actionRef.current = socketRef.current
+        }
+        return socketRef as any
+      })
+      .mockImplementation((...args: unknown[]) => {
+        const actionRef = args[7] as { current: { emit: typeof emitConnected; connected: boolean } | null } | undefined
+        const socketRef = {
+          current: {
+            emit: emitConnected,
+            on: vi.fn(),
+            off: vi.fn(),
+            connected: true,
+          },
+        }
+        if (actionRef) {
+          actionRef.current = socketRef.current
+        }
+        return socketRef as any
+      })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    expect(emitDisconnected).not.toHaveBeenCalledWith('request_chat_replay', expect.anything())
+
+    await waitFor(() => {
+      expect(emitConnected).toHaveBeenCalledWith('request_chat_replay', {
+        canvasId: 'session-1',
+        afterSeq: 0,
+        limit: undefined,
+      })
+    })
+  })
+
+  it('shows user-visible chat rejection feedback when send ack is rejected', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn((eventName: string, _payload: any, ack?: (value: any) => void) => {
+      if (eventName === 'send_chat_message' && typeof ack === 'function') {
+        ack({ accepted: false, reason: 'PERSISTENCE_FAILED' })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock; connected: boolean } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: true,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('Type a message... (Enter to send, Shift+Enter for newline)'), {
+      target: { value: 'hello chat' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Unable to send due to a server error. Please retry.')
+  })
 })

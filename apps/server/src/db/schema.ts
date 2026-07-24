@@ -155,3 +155,28 @@ export const snapshots = pgTable(
     canvasOpSeqUnique: uniqueIndex('snapshots_canvas_id_op_seq_unique').on(table.canvasId, table.opSeq),
   }),
 )
+
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    canvasId: uuid('canvas_id')
+      .notNull()
+      .references(() => canvases.id, { onDelete: 'cascade' }),
+    senderClientId: text('sender_client_id').notNull(),
+    text: text('text').notNull(),
+    serverSeq: bigint('server_seq', { mode: 'number' }).generatedByDefaultAsIdentity().notNull(),
+    clientMessageId: text('client_message_id'),
+    clientTs: bigint('client_ts', { mode: 'number' }),
+    serverTs: timestamp('server_ts', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    canvasSeqUnique: unique('chat_messages_canvas_id_server_seq_unique').on(table.canvasId, table.serverSeq),
+    canvasSeqIndex: index('chat_messages_canvas_seq_idx').on(table.canvasId, table.serverSeq),
+    idempotencyIndex: uniqueIndex('chat_messages_idempotency_idx').on(
+      table.canvasId,
+      table.senderClientId,
+      table.clientMessageId,
+    ),
+  }),
+)

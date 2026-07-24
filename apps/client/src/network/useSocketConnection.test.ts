@@ -204,4 +204,49 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(socket.off).toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
     expect(socket.disconnect).toHaveBeenCalledTimes(1)
   })
+
+  it('subscribes and unsubscribes chat listeners when callbacks are provided', () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+
+    const callbacks = {
+      onSnapshot: vi.fn(),
+      onTilePlaced: vi.fn(),
+      onTileRemoved: vi.fn(),
+      onChatMessage: vi.fn(),
+      onChatReplay: vi.fn(),
+    }
+
+    const { unmount } = renderHook(() =>
+      useSocketConnection(
+        'http://localhost:3001',
+        'session-1',
+        'client-1',
+        callbacks.onSnapshot,
+        callbacks.onTilePlaced,
+        callbacks.onTileRemoved,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        callbacks.onChatMessage,
+        callbacks.onChatReplay,
+      ),
+    )
+
+    expect(socket.on).toHaveBeenCalledWith('chat_message', callbacks.onChatMessage)
+    expect(socket.on).toHaveBeenCalledWith('chat_replay', callbacks.onChatReplay)
+
+    unmount()
+
+    expect(socket.off).toHaveBeenCalledWith('chat_message', callbacks.onChatMessage)
+    expect(socket.off).toHaveBeenCalledWith('chat_replay', callbacks.onChatReplay)
+  })
 })
