@@ -8,18 +8,23 @@
 
 Implemented low-risk runtime bundle mitigation plus conditional canvas lazy-loading, validated build/test/lint, and recorded gate results with explicit deferred scope.
 
+Completed follow-on review remediation for loading fallback token correctness, lazy boundary fault containment, and fallback test coverage.
+
 ## Changes
 
 ### Added
 
 * apps/client/src/ui/CanvasLoadingFallback.tsx - Added suspense fallback UI for lazy-loaded canvas stack.
 * apps/client/src/ui/CanvasLoadingFallback.css - Added loading fallback styling.
+* apps/client/src/ui/CanvasLoadingFallback.test.tsx - Added smoke coverage for fallback accessibility and spinner markup.
 
 ### Modified
 
-* apps/client/src/App.tsx - Removed root toast provider wiring and introduced `React.lazy` + `Suspense` split for `MosaicScene`.
+* apps/client/src/App.tsx - Removed root toast provider wiring, introduced `React.lazy` + `Suspense` split for `MosaicScene`, and wrapped lazy canvas subtree with a retry-capable error boundary.
+* apps/client/src/ui/CanvasLoadingFallback.css - Replaced undefined CSS variables with valid semantic token names.
 * .copilot-tracking/plans/2026-07-25/client-bundle-mitigation-plan.instructions.md - Marked completed steps and conditional execution note for Step 3.1.
 * .copilot-tracking/plans/logs/2026-07-25/client-bundle-mitigation-log.md - Recorded deviations and follow-on work.
+* .copilot-tracking/details/2026-07-25/client-bundle-mitigation-details.md - Added remediation phase specification for review findings.
 * .copilot-tracking/changes/2026-07-25/client-bundle-mitigation-changes.md - Consolidated measured outcomes and deferred scope.
 
 ### Removed
@@ -78,7 +83,25 @@ Implemented low-risk runtime bundle mitigation plus conditional canvas lazy-load
 ### Validation Status
 
 * `npm run lint --workspace=apps/client` - passed
-* `npm run test --workspace=apps/client -- --run` - passed (54 tests)
+* `npm run test --workspace=apps/client -- --run` - passed (55 tests)
+* `npm run build --workspace=apps/client` - passed
+
+## Phase 5 Remediation Outcomes
+
+### Review Finding Fixes Applied
+
+* IV-001 fixed: corrected fallback CSS tokens in `apps/client/src/ui/CanvasLoadingFallback.css`
+	* `--radius-xl` -> `--radius-component`
+	* `--color-surface` -> `--color-surface-primary`
+	* `--color-text-muted` -> `--color-feedback-muted`
+	* `--color-brand` -> `--color-accent-primary`
+* IV-002 fixed: wrapped the `MosaicScene` suspense region with `CanvasErrorBoundary` in `apps/client/src/App.tsx` and added retry affordance for chunk-load failures.
+* IV-003 fixed: added `apps/client/src/ui/CanvasLoadingFallback.test.tsx` with assertions for status role, spinner `aria-hidden`, and loading text.
+
+### Remediation Validation Status
+
+* `npm run lint --workspace=apps/client` - passed
+* `npm run test --workspace=apps/client -- --run` - passed (55 tests)
 * `npm run build --workspace=apps/client` - passed
 
 ### Bundle Delta Reporting
@@ -114,17 +137,20 @@ Gate interpretation:
 
 ## Release Summary
 
-Files affected: 5 (2 added, 3 modified, 0 removed).
+Files affected: 8 (3 added, 5 modified, 0 removed).
 
 Created:
 
 * `apps/client/src/ui/CanvasLoadingFallback.tsx` - suspense fallback component.
 * `apps/client/src/ui/CanvasLoadingFallback.css` - fallback visual styling.
+* `apps/client/src/ui/CanvasLoadingFallback.test.tsx` - fallback smoke test coverage.
 
 Modified:
 
-* `apps/client/src/App.tsx` - toast runtime wiring removal and lazy-loaded canvas boundary.
+* `apps/client/src/App.tsx` - toast runtime wiring removal, lazy-loaded canvas boundary, and lazy-load failure containment.
+* `apps/client/src/ui/CanvasLoadingFallback.css` - corrected semantic design token usage.
 * `.copilot-tracking/plans/2026-07-25/client-bundle-mitigation-plan.instructions.md` - completed checklist with conditional notes.
+* `.copilot-tracking/details/2026-07-25/client-bundle-mitigation-details.md` - remediation phase scope and success criteria.
 * `.copilot-tracking/plans/logs/2026-07-25/client-bundle-mitigation-log.md` - deviations and follow-on entries.
 
 No dependency, infrastructure, or deployment configuration changes were required.

@@ -96,6 +96,19 @@ Implement a focused follow-on optimization task to reduce client bundle overhead
 * [x] Step 4.4: Produce deferred-scope summary artifact
   * Write .copilot-tracking/changes/2026-07-25/client-bundle-mitigation-changes.md with completed work, measured deltas, deferred scope, rationale, and ownership for follow-on items
 
+### [x] Implementation Phase 5: Review Remediation and Reliability Hardening
+
+<!-- parallelizable: false -->
+
+* [x] Step 5.1: Remediate loading fallback CSS token defects
+  * Details: .copilot-tracking/details/2026-07-25/client-bundle-mitigation-details.md (Phase 5)
+* [x] Step 5.2: Add lazy boundary error containment and retry flow
+  * Details: .copilot-tracking/details/2026-07-25/client-bundle-mitigation-details.md (Phase 5)
+* [x] Step 5.3: Add loading fallback smoke test coverage
+  * Details: .copilot-tracking/details/2026-07-25/client-bundle-mitigation-details.md (Phase 5)
+* [x] Step 5.4: Re-run client validation after remediation
+  * Run lint, test, and build for client package
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-25/client-bundle-mitigation-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.

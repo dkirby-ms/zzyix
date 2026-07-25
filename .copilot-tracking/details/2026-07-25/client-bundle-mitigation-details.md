@@ -186,6 +186,61 @@ Required sections:
 Dependencies:
 * Phase 3 completion
 
+## Implementation Phase 5: Review Remediation and Reliability Hardening
+
+<!-- parallelizable: false -->
+
+### Step 5.1: Correct CanvasLoadingFallback design token usage
+
+Resolve undefined CSS variable usage in the suspense loading fallback so semantic design tokens are applied consistently.
+
+Files:
+* apps/client/src/ui/CanvasLoadingFallback.css
+
+Success criteria:
+* All fallback styling tokens reference defined semantic variables.
+* No layout or behavior changes outside token substitutions.
+
+Dependencies:
+* Phase 4 completion
+
+### Step 5.2: Add error containment around lazy canvas boundary
+
+Wrap the lazy `MosaicScene` suspense path with an error boundary so chunk-load failures do not unmount the full app.
+
+Files:
+* apps/client/src/App.tsx
+
+Success criteria:
+* Canvas lazy subtree is wrapped in an error boundary.
+* Boundary renders recoverable UI with retry action.
+* No behavior regression in success path.
+
+Dependencies:
+* Step 5.1 completion
+
+### Step 5.3: Add loading fallback smoke test
+
+Add a focused render test for accessibility and markup contract of `CanvasLoadingFallback`.
+
+Files:
+* apps/client/src/ui/CanvasLoadingFallback.test.tsx
+
+Success criteria:
+* Test asserts fallback `role="status"`.
+* Test asserts spinner exists with `aria-hidden="true"`.
+* Test asserts loading text is rendered.
+
+Dependencies:
+* Step 5.2 completion
+
+### Step 5.4: Validate remediation changes
+
+Validation commands:
+* npm run lint --workspace=apps/client
+* npm run test --workspace=apps/client -- --run
+* npm run build --workspace=apps/client
+
 ## Dependencies
 
 * Node.js npm workspace tooling

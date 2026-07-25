@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import {
   applyChunkSubscriptionBudgets,
   shouldRecomputeVisibleChunks,
@@ -87,6 +87,50 @@ const MosaicScene = lazy(async () => {
   const module = await import('./render/MosaicScene')
   return { default: module.MosaicScene }
 })
+
+type CanvasErrorBoundaryProps = {
+  children: ReactNode
+}
+
+type CanvasErrorBoundaryState = {
+  hasError: boolean
+  retryKey: number
+}
+
+class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErrorBoundaryState> {
+  state: CanvasErrorBoundaryState = {
+    hasError: false,
+    retryKey: 0,
+  }
+
+  static getDerivedStateFromError(): Partial<CanvasErrorBoundaryState> {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    console.error('Canvas lazy-load failed', error, errorInfo)
+  }
+
+  private readonly handleRetry = (): void => {
+    this.setState((previousState) => ({
+      hasError: false,
+      retryKey: previousState.retryKey + 1,
+    }))
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="canvas-loading-fallback" role="alert">
+          <span>Canvas failed to load.</span>
+          <button type="button" onClick={this.handleRetry}>Retry</button>
+        </div>
+      )
+    }
+
+    return <div key={this.state.retryKey}>{this.props.children}</div>
+  }
+}
 
 type ZoomTier = 'fine' | 'aggregate'
 
@@ -968,54 +1012,56 @@ function App() {
           </div>
         )}
 
-        <Suspense fallback={<CanvasLoadingFallback />}>
-          <MosaicScene
-            tiles={sequencedState.tiles}
-            activeShape={shape}
-            ghost={{
-              transform: ghost.current,
-              confidence: ghost.confidence,
-              color,
-              material,
-              visible: ghostVisible,
-            }}
-            onPointerMove={updatePointer}
-            onPointerDown={updatePointer}
-            onPointerUp={attemptPlace}
-            onRotateDrag={(deltaX) =>
-              setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
-            }
-            remoteCursors={remoteCursors}
-            remoteSelections={remoteSelections}
-            worldBounds={worldBounds}
-            cameraPan={cameraPan}
-            cameraPolicy={cameraPolicy}
-            onCameraPan={(deltaX, deltaY) => {
-              setCameraPan((prev) => ({
-                x: prev.x - deltaX * cameraPolicy.panSensitivity,
-                y: prev.y + deltaY * cameraPolicy.panSensitivity,
-              }))
-            }}
-            onViewportChanged={onViewportChanged}
-            onZoomTierChanged={(zoom) => {
-              const previousTier = zoomTierRef.current
-              const nextTier = resolveZoomTier(previousTier, zoom)
-              if (nextTier === previousTier) {
-                return
+        <CanvasErrorBoundary>
+          <Suspense fallback={<CanvasLoadingFallback />}>
+            <MosaicScene
+              tiles={sequencedState.tiles}
+              activeShape={shape}
+              ghost={{
+                transform: ghost.current,
+                confidence: ghost.confidence,
+                color,
+                material,
+                visible: ghostVisible,
+              }}
+              onPointerMove={updatePointer}
+              onPointerDown={updatePointer}
+              onPointerUp={attemptPlace}
+              onRotateDrag={(deltaX) =>
+                setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
               }
+              remoteCursors={remoteCursors}
+              remoteSelections={remoteSelections}
+              worldBounds={worldBounds}
+              cameraPan={cameraPan}
+              cameraPolicy={cameraPolicy}
+              onCameraPan={(deltaX, deltaY) => {
+                setCameraPan((prev) => ({
+                  x: prev.x - deltaX * cameraPolicy.panSensitivity,
+                  y: prev.y + deltaY * cameraPolicy.panSensitivity,
+                }))
+              }}
+              onViewportChanged={onViewportChanged}
+              onZoomTierChanged={(zoom) => {
+                const previousTier = zoomTierRef.current
+                const nextTier = resolveZoomTier(previousTier, zoom)
+                if (nextTier === previousTier) {
+                  return
+                }
 
-              zoomTierRef.current = nextTier
-              setZoomTier(nextTier)
-              clientTelemetryRef.current.tierTransitions += 1
-              console.info('chunk_zoom_tier_transition', {
-                from: previousTier,
-                to: nextTier,
-                zoom,
-                totalTransitions: clientTelemetryRef.current.tierTransitions,
-              })
-            }}
-          />
-        </Suspense>
+                zoomTierRef.current = nextTier
+                setZoomTier(nextTier)
+                clientTelemetryRef.current.tierTransitions += 1
+                console.info('chunk_zoom_tier_transition', {
+                  from: previousTier,
+                  to: nextTier,
+                  zoom,
+                  totalTransitions: clientTelemetryRef.current.tierTransitions,
+                })
+              }}
+            />
+          </Suspense>
+        </CanvasErrorBoundary>
 
         {ghostVisible && (
           <div className="debug-overlay">

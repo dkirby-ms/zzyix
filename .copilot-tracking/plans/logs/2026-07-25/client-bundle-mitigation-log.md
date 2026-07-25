@@ -3,6 +3,13 @@
 
 ## Discrepancy Log
 
+### Remediation Closure
+
+* RC-01: Review findings IV-001, IV-002, and IV-003 resolved in a follow-on remediation phase.
+  * Source: .copilot-tracking/reviews/2026-07-25/client-bundle-mitigation-plan-review.md
+  * Implementation: CSS token corrections, suspense error boundary with retry, and fallback smoke test coverage.
+  * Validation: lint/test/build all passed post-remediation.
+
 ### Unaddressed Research Items
 
 * DR-01: Bundle gate metric is still not contractually explicit across raw, gzip, or initial-route measurements.
@@ -71,3 +78,6 @@
 * WI-05: Perform package-attribution run (visualizer/rollup stats) for `MosaicScene` chunk to identify next low-risk reductions. (medium)
   * Source: DD-03
   * Dependency: WI-02 completion
+* WI-06: Add targeted tests for `CanvasErrorBoundary` retry behavior and failure rendering path. (low)
+  * Source: remediation phase reliability hardening
+  * Dependency: none
