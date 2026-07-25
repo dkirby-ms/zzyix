@@ -98,6 +98,13 @@ describe('authoritative snapshot reconciliation', () => {
       markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
       loadSessionReplayRecord: vi.fn().mockResolvedValue({
         session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+        canvasConfig: {
+          canvasSize: { width: 31.2, height: 20.4 },
+          boundsPolicy: {
+            mode: 'bounded',
+            bounds: { minX: -15.6, maxX: 15.6, minY: -10.2, maxY: 10.2 },
+          },
+        },
         clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
         lastOpSeq: 3,
         revision: 4,
@@ -116,6 +123,13 @@ describe('authoritative snapshot reconciliation', () => {
       joinedClient: { clientId: 'client-a', joinedAt: 1_000 },
       snapshot: {
         session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
+        canvasConfig: {
+          canvasSize: { width: 31.2, height: 20.4 },
+          boundsPolicy: {
+            mode: 'bounded',
+            bounds: { minX: -15.6, maxX: 15.6, minY: -10.2, maxY: 10.2 },
+          },
+        },
         clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
         lastOpSeq: 3,
         revision: 4,

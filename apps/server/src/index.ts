@@ -401,16 +401,19 @@ const cloneCanvasConfig = (config: SessionCanvasConfig): SessionCanvasConfig => 
 })
 
 export const buildListSessionsResponse = (summaries: SessionSummaryRecord[]): ListSessionsResponse => ({
-  sessions: summaries.map((summary) => ({
-    id: summary.id,
-    displayName: `Canvas ${summary.id.slice(0, 8)}`,
-    participantCount: summary.participantCount,
-    canvasSize: {
-      width: (sessions.get(summary.id)?.canvasConfig.canvasSize.width ?? DEFAULT_CANVAS_CONFIG.canvasSize.width),
-      height: (sessions.get(summary.id)?.canvasConfig.canvasSize.height ?? DEFAULT_CANVAS_CONFIG.canvasSize.height),
-    },
-    canvasConfig: cloneCanvasConfig(sessions.get(summary.id)?.canvasConfig ?? DEFAULT_CANVAS_CONFIG),
-  })),
+  sessions: summaries.map((summary) => {
+    const resolvedCanvasConfig = sessions.get(summary.id)?.canvasConfig ?? summary.canvasConfig ?? DEFAULT_CANVAS_CONFIG
+    return {
+      id: summary.id,
+      displayName: `Canvas ${summary.id.slice(0, 8)}`,
+      participantCount: summary.participantCount,
+      canvasConfig: cloneCanvasConfig(resolvedCanvasConfig),
+      canvasSize: {
+        width: resolvedCanvasConfig.canvasSize.width,
+        height: resolvedCanvasConfig.canvasSize.height,
+      },
+    }
+  }),
 })
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
@@ -965,6 +968,7 @@ export const initializeParticipantPresence = async (
   joinedClient: ClientPresence
   snapshot: {
     session: Session
+    canvasConfig: SessionCanvasConfig
     clients: ClientPresence[]
     lastOpSeq: number
     revision: number
@@ -977,6 +981,7 @@ export const initializeParticipantPresence = async (
     joinedClient,
     snapshot: {
       session: record.session,
+      canvasConfig: cloneCanvasConfig(record.canvasConfig ?? DEFAULT_CANVAS_CONFIG),
       clients: record.clients,
       lastOpSeq: record.lastOpSeq,
       revision: record.revision,
@@ -1229,7 +1234,7 @@ app.post('/sessions', sessionCreateRateLimit, async (req, res) => {
     sessions.set(sessionId, sessionState)
 
     // Initialize canvas in database to satisfy foreign key constraints
-    await loadSessionRecord(sessionId)
+    await loadSessionRecord(sessionId, canvasConfig)
 
     writeLog('info', 'session_created', {
       sessionId,
@@ -1364,6 +1369,7 @@ io.on('connection', (socket) => {
     socket.join(sessionId)
     const connectionState = await initializeParticipantPresence(sessionId, clientId, joinedAt)
     const sessionState = getSessionState(sessionId)
+    sessionState.canvasConfig = cloneCanvasConfig(connectionState.snapshot.canvasConfig)
     sessionState.session = connectionState.snapshot.session
     sessionState.session.boundsPolicy = sessionState.canvasConfig.boundsPolicy
     sessionState.lastOpSeq = connectionState.snapshot.lastOpSeq
@@ -1832,6 +1838,7 @@ io.on('connection', (socket) => {
     try {
       const record = await loadSessionReplayRecord(sessionId)
       const sessionState = getSessionState(sessionId)
+      sessionState.canvasConfig = cloneCanvasConfig(record.canvasConfig)
       const snapshot = {
         session: record.session,
         canvasConfig: sessionState.canvasConfig,

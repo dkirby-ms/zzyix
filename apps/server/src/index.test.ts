@@ -61,6 +61,34 @@ describe('authoritative handler semantics', () => {
     })
   })
 
+  it('uses persisted canvas config from summary records when no in-memory session is present', () => {
+    const payload = buildListSessionsResponse([
+      {
+        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+        participantCount: 1,
+        canvasConfig: {
+          canvasSize: { width: 31.2, height: 20.4 },
+          boundsPolicy: {
+            mode: 'bounded',
+            bounds: { minX: -15.6, maxX: 15.6, minY: -10.2, maxY: 10.2 },
+          },
+        },
+      },
+    ])
+
+    expect(payload.sessions[0]).toMatchObject({
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      canvasSize: { width: 31.2, height: 20.4 },
+      canvasConfig: {
+        canvasSize: { width: 31.2, height: 20.4 },
+        boundsPolicy: {
+          mode: 'bounded',
+          bounds: { minX: -15.6, maxX: 15.6, minY: -10.2, maxY: 10.2 },
+        },
+      },
+    })
+  })
+
   it('maps placement solver reject reasons to a closed deterministic set', () => {
     expect(toRejectReason('out-of-bounds (correction 0.123)')).toBe('OUT_OF_BOUNDS')
     expect(toRejectReason('overlap (depth 0.456)')).toBe('OVERLAP')

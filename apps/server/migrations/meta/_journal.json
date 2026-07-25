@@ -29,6 +29,13 @@
       "when": 1784635200000,
       "tag": "0003_tidy_chunk_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784987532000,
+      "tag": "0004_store_canvas_config",
+      "breakpoints": true
     }
   ]
 }
