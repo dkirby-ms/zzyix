@@ -62,6 +62,8 @@ import { ControlsPanel } from './ui/ControlsPanel'
 import { LobbyScreen } from './ui/LobbyScreen'
 import { palettes } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
+import { ToastProvider, ToastViewport } from './ui/primitives/Toast'
+import { TooltipProvider } from './ui/primitives/Tooltip'
 import {
   COLLABORATION_EMIT_INTERVAL_MS,
   COLLABORATOR_CLEANUP_INTERVAL_MS,
@@ -894,28 +896,24 @@ function App() {
     })
   }
 
-  if (mode === 'lobby') {
-    return (
-      <main className="lobby-shell">
-        <div className="backdrop-gradient" />
-        <LobbyScreen
-          sessions={sessions}
-          loading={lobbyLoading}
-          error={lobbyError}
-          previousSessionId={previousSessionId}
-          creating={creatingSession}
-          joiningSessionId={joiningSessionId}
-          onRefresh={() => void loadSessions()}
-          selectedCanvasPreset={selectedCanvasPreset}
-          onCanvasPresetChange={setSelectedCanvasPreset}
-          onCreate={() => void handleCreateSession()}
-          onJoin={handleJoinSession}
-        />
-      </main>
-    )
-  }
-
-  return (
+  const content = mode === 'lobby' ? (
+    <main className="lobby-shell">
+      <div className="backdrop-gradient" />
+      <LobbyScreen
+        sessions={sessions}
+        loading={lobbyLoading}
+        error={lobbyError}
+        previousSessionId={previousSessionId}
+        creating={creatingSession}
+        joiningSessionId={joiningSessionId}
+        onRefresh={() => void loadSessions()}
+        selectedCanvasPreset={selectedCanvasPreset}
+        onCanvasPresetChange={setSelectedCanvasPreset}
+        onCreate={() => void handleCreateSession()}
+        onJoin={handleJoinSession}
+      />
+    </main>
+  ) : (
     <main className={invalidPulse ? 'app-shell invalid-pulse' : 'app-shell'}>
       <div className="backdrop-gradient" />
       <ControlsPanel
@@ -1037,6 +1035,15 @@ function App() {
         )}
       </section>
     </main>
+  )
+
+  return (
+    <TooltipProvider delayDuration={250} skipDelayDuration={300}>
+      <ToastProvider swipeDirection="right">
+        {content}
+        <ToastViewport />
+      </ToastProvider>
+    </TooltipProvider>
   )
 }
 

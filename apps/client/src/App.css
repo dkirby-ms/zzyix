@@ -1,12 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Sora:wght@400;500;600&display=swap');
 
 :root {
-  --ink: #2f251f;
-  --warm: #f6ecdd;
-  --panel: rgba(247, 240, 227, 0.78);
-  --panel-border: rgba(75, 56, 42, 0.18);
-  --accent: #ca7a4c;
-  --radius: 18px;
+  --ink: var(--color-text-primary);
+  --warm: var(--color-surface-primary);
+  --panel: var(--color-surface-panel);
+  --panel-border: var(--color-border-subtle);
+  --accent: var(--color-accent-primary);
+  --radius: var(--radius-component);
 }
 
 * {
@@ -20,7 +20,7 @@
   padding: 1rem;
   position: relative;
   color: var(--ink);
-  font-family: 'Sora', sans-serif;
+  font-family: var(--font-body, 'Sora', sans-serif);
 }
 
 .lobby-panel {
@@ -44,7 +44,7 @@
 .lobby-header h1 {
   margin: 0;
   font-size: 1.55rem;
-  font-family: 'Fraunces', serif;
+  font-family: var(--font-display, 'Fraunces', serif);
 }
 
 .lobby-header p {
@@ -101,7 +101,7 @@
 
 .lobby-error {
   margin: 0.75rem 0;
-  color: #8c3434;
+  color: var(--color-feedback-error);
   font-size: 0.9rem;
 }
 
@@ -159,7 +159,7 @@
   padding: 1rem;
   position: relative;
   color: var(--ink);
-  font-family: 'Sora', sans-serif;
+  font-family: var(--font-body, 'Sora', sans-serif);
 }
 
 .backdrop-gradient {
@@ -185,7 +185,7 @@
 .controls-shell h1 {
   margin: 0;
   font-size: 1.45rem;
-  font-family: 'Fraunces', serif;
+  font-family: var(--font-display, 'Fraunces', serif);
 }
 
 .controls-shell p {
@@ -234,9 +234,11 @@ button {
   font-family: inherit;
   border-radius: 999px;
   padding: 0.5rem 0.82rem;
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
   font-size: 0.86rem;
   cursor: pointer;
-  transition: transform 120ms ease, background 180ms ease, border-color 180ms ease;
+  transition: transform var(--transition-standard), background var(--transition-standard), border-color var(--transition-standard);
 }
 
 button:hover {
@@ -253,6 +255,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button:focus-visible,
+.swatch:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .color-row {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -261,12 +269,13 @@ button:disabled {
 
 .swatch {
   border-radius: 12px;
-  min-height: 36px;
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
   border: 2px solid rgba(41, 27, 19, 0.12);
 }
 
 .swatch.active {
-  outline: 2px solid #2a1f19;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: 2px;
 }
 
@@ -304,15 +313,15 @@ button:disabled {
 }
 
 .status-strip[data-state='valid'] {
-  box-shadow: 0 0 0 1px rgba(89, 145, 106, 0.34) inset;
+  box-shadow: 0 0 0 1px var(--color-status-valid-ring) inset;
 }
 
 .status-strip[data-state='near-valid'] {
-  box-shadow: 0 0 0 1px rgba(163, 130, 78, 0.38) inset;
+  box-shadow: 0 0 0 1px var(--color-status-near-valid-ring) inset;
 }
 
 .status-strip[data-state='invalid'] {
-  box-shadow: 0 0 0 1px rgba(170, 83, 83, 0.38) inset;
+  box-shadow: 0 0 0 1px var(--color-status-invalid-ring) inset;
 }
 
 .collaborator-roster {
@@ -429,6 +438,20 @@ button:disabled {
   word-break: break-all;
 }
 
-.debug-state-valid        { color: #5ddb7a; }
-.debug-state-near-valid   { color: #f0c040; }
-.debug-state-invalid      { color: #e05555; }
+.debug-state-valid        { color: var(--color-feedback-success); }
+.debug-state-near-valid   { color: var(--color-feedback-warning); }
+.debug-state-invalid      { color: var(--color-feedback-error); }
+
+@media (prefers-reduced-motion: reduce) {
+  button {
+    transition: none;
+  }
+
+  button:hover {
+    transform: none;
+  }
+
+  .invalid-pulse .status-strip {
+    animation: none;
+  }
+}

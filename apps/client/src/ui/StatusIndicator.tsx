@@ -1,5 +1,6 @@
 import React from 'react'
 import type { ConnectionState } from '../network/useConnectionStatus'
+import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from './primitives/Tooltip'
 import './StatusIndicator.css'
 
 export interface StatusIndicatorProps {
@@ -24,11 +25,35 @@ const getStatusDisplay = (status: ConnectionState): { text: string; className: s
 
 export const StatusIndicator: React.FC<StatusIndicatorProps> = ({ connectionState }) => {
   const display = getStatusDisplay(connectionState)
+  const lastError = connectionState.lastError?.trim()
+  const hasErrorDetails = display.className === 'status-error' && Boolean(lastError)
 
-  return (
-    <div className={`status-indicator ${display.className}`} title={connectionState.lastError}>
+  const indicator = (
+    <div className={`status-indicator ${display.className}`}>
       <div className="status-dot" />
       <span className="status-text">{display.text}</span>
     </div>
+  )
+
+  if (!hasErrorDetails) {
+    return indicator
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="status-indicator-trigger"
+          aria-label="View connection error details"
+        >
+          {indicator}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start">
+        {lastError}
+        <TooltipArrow />
+      </TooltipContent>
+    </Tooltip>
   )
 }

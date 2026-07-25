@@ -1,0 +1,26 @@
+.ui-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-control-gap);
+}
+
+.ui-toggle-group-item {
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  border-radius: var(--radius-action);
+  border: 1px solid var(--color-border-subtle);
+  background: transparent;
+  color: var(--color-text-primary);
+  padding: 0 var(--space-3);
+}
+
+.ui-toggle-group-item[data-state='on'] {
+  background: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+  color: var(--color-white);
+}
+
+.ui-toggle-group-item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
