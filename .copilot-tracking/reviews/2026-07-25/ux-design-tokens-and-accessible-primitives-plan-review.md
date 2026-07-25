@@ -11,131 +11,134 @@
 
 ## Validation Scope Resolution
 
-* Source priority used: attached/open artifact files, then discovered matching plan and research by date and task description
+* Source priority used: attached and open artifacts first, then discovered related plan and research by date and task description
 * Scope outcome: single artifact set for 2026-07-25 task
+* Conversation-context inclusion: enabled and applied to select current changes log attachment as primary artifact
 
 ## Findings Summary
 
 * Critical: 1
 * Major: 4
-* Minor: 5
+* Minor: 6
 
 ## RPI Phase Validation
 
 * Phase 1: Pass
-	* Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-001-validation.md
-	* Findings: 0 critical, 0 major, 2 minor
-* Phase 2: Pass
-	* Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-002-validation.md
-	* Findings: 0 critical, 0 major, 2 minor
-* Phase 3: Needs Rework
-	* Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-003-validation.md
-	* Findings: 0 critical, 1 major, 1 minor
-* Phase 4: Needs Rework
-	* Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-004-validation.md
-	* Findings: 1 critical, 1 major, 1 minor
+  * Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-001-validation.md
+  * Findings: 0 critical, 0 major, 2 minor
+* Phase 2: Partial
+  * Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-002-validation.md
+  * Findings: 0 critical, 1 major, 0 minor
+* Phase 3: Pass
+  * Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-003-validation.md
+  * Findings: 0 critical, 0 major, 0 minor
+* Phase 4: Failed
+  * Output: .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-004-validation.md
+  * Findings: 1 critical, 0 major, 1 minor
 
 ## Implementation Quality Validation
 
-* Status: Completed (file persistence blocked in validator session; findings captured here)
-* Requested output path: .copilot-tracking/reviews/implementation/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-implementation-validation.md
-* Findings: 0 critical, 3 major, 1 minor
+* Status: Failed
+* Output: .copilot-tracking/reviews/implementation/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-implementation-validation.md
+* Findings: 0 critical, 3 major, 3 minor
 
-### Quality Findings (Synthesized)
+## Synthesized Findings
 
-#### Critical
+### Critical
 
-1. Bundle-size acceptance gate failed and blocks Phase 4 completion
-	* Evidence:
-		* .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:100
-		* .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:59
-		* .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:62
-		* Latest build artifact: dist/assets/index-DSDpNY_z.js 1,572.83 kB (gzip 442.31 kB)
+1. Bundle-size acceptance gate failed and blocks Phase 4 completion.
+   * Evidence:
+     * .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:100
+     * .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:62
+     * .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:63
 
-#### Major
+### Major
 
-1. Status error tooltip trigger is not reliably keyboard-focusable
-	* Evidence:
-		* apps/client/src/ui/StatusIndicator.tsx:31
-		* apps/client/src/ui/StatusIndicator.tsx:43
-2. Phase 4 Step 4.2 remains unchecked, so minor validation remediation was not completed before closure
-	* Evidence:
-		* .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:102
-		* .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:104
-3. Testing gaps for newly added primitive wrappers and new accessibility interaction paths
-	* Evidence:
-		* apps/client/src/ui/primitives/Tooltip.tsx
-		* apps/client/src/ui/primitives/Dialog.tsx
-		* apps/client/src/ui/primitives/AlertDialog.tsx
-		* apps/client/src/ui/primitives/ToggleGroup.tsx
-		* apps/client/src/ui/primitives/Tabs.tsx
-		* apps/client/src/ui/primitives/Toast.tsx
+1. Changes-log artifact mismatch: `VisuallyHidden.css` is documented as removed but remains in repository.
+   * Evidence:
+     * .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:52
+     * apps/client/src/ui/primitives/VisuallyHidden.css:1
+2. Touch-target minimum is not guaranteed for the status error-details trigger path.
+   * Evidence:
+     * apps/client/src/ui/StatusIndicator.css:14
+     * apps/client/src/ui/StatusIndicator.tsx:45
+3. Wrapper test coverage is insufficient for newly added primitive surfaces.
+   * Evidence:
+     * apps/client/src/ui/primitives/Tooltip.test.tsx:1
+     * apps/client/src/ui/primitives/Dialog.tsx:1
+     * apps/client/src/ui/primitives/AlertDialog.tsx:1
+     * apps/client/src/ui/primitives/ToggleGroup.tsx:1
+     * apps/client/src/ui/primitives/Tabs.tsx:1
+     * apps/client/src/ui/primitives/Toast.tsx:1
+4. Phase 2 status remains partial until artifact mismatch is resolved.
+   * Evidence:
+     * .copilot-tracking/reviews/rpi/2026-07-25/ux-design-tokens-and-accessible-primitives-plan-002-validation.md
 
-#### Minor
+### Minor
 
-1. Plan-command deviation from pnpm to npm is documented, but reduces procedural traceability
-	* Evidence:
-		* .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:53
-		* .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:58
-2. Global reduced-motion baseline is broad and may suppress useful non-essential affordance transitions
-	* Evidence:
-		* apps/client/src/styles/base.css:25
-		* apps/client/src/styles/base.css:30
-3. Semantic token migration in App.css remains partial by design and should continue incrementally
-	* Evidence:
-		* apps/client/src/App.css:249
-		* apps/client/src/App.css:288
-		* apps/client/src/App.css:431
-4. No enforcement rule yet for icon adapter usage, allowing future direct lucide imports
-	* Evidence:
-		* apps/client/src/ui/icons/index.ts:20
-5. Duplicate visually-hidden utility definitions increase style drift risk
-	* Evidence:
-		* apps/client/src/styles/base.css:13
-		* apps/client/src/ui/primitives/VisuallyHidden.css:1
+1. Validation command form deviated from plan toolchain (`pnpm` planned, `npm` used).
+   * Evidence:
+     * .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:97
+     * .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:56
+2. Phase-attribution traceability in release changes is broad and increases manual validation effort.
+   * Evidence:
+     * .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:19
+3. `classnames` helper is duplicated across multiple primitive wrapper files.
+   * Evidence:
+     * apps/client/src/ui/primitives/Tooltip.tsx:5
+     * apps/client/src/ui/primitives/Dialog.tsx:5
+     * apps/client/src/ui/primitives/AlertDialog.tsx:5
+     * apps/client/src/ui/primitives/ToggleGroup.tsx:5
+     * apps/client/src/ui/primitives/Tabs.tsx:5
+     * apps/client/src/ui/primitives/Toast.tsx:5
+4. Semantic token migration remains partial in `App.css` by design and should continue incrementally.
+   * Evidence:
+     * apps/client/src/App.css:170
+     * apps/client/src/App.css:231
+     * apps/client/src/App.css:308
+5. Global reduced-motion baseline may suppress some desirable non-essential transitions.
+   * Evidence:
+     * apps/client/src/styles/base.css:25
+6. Icon-adapter convention exists but lacks automated enforcement.
+   * Evidence:
+     * apps/client/src/ui/icons/index.ts:1
 
 ## Validation Commands
 
-* npm run lint
-	* Status: Pass
-* npm run test --workspace=apps/client
-	* Status: Pass
-	* Result: 6 passed files, 46 passed tests
-* npm run build --workspace=apps/client
-	* Status: Pass with warning
-	* Warning: chunk >500 kB, largest JS asset 1,572.83 kB
-
-### Diagnostics
-
-* Checked files for compile/lint diagnostics
-	* apps/client/src/ui/StatusIndicator.tsx: no errors
-	* apps/client/src/App.tsx: no errors
-	* apps/client/src/styles/base.css: no errors
+* `npm run lint`
+  * Status: Pass
+* `npm run test --workspace=apps/client`
+  * Status: Pass
+  * Result: 8 passed files, 49 passed tests
+* `npm run build --workspace=apps/client`
+  * Status: Pass with warning
+  * Warning: chunk-size warning for large JS asset
+  * Output highlights:
+    * dist/assets/index-BSwV22kq.js: 1,573.06 kB (gzip 442.38 kB)
 
 ## Missing Work and Deviations
 
 * Missing work
-	* Implement Phase 4 Step 4.2 remediation loop before phase closure
-	* Resolve keyboard accessibility gap for status error tooltip trigger
-	* Bring bundle delta under acceptance threshold or re-baseline gate with explicit approval
-	* Add tests for primitive wrappers and accessibility interaction paths
+  * Satisfy bundle-size acceptance threshold or formally approve/redefine gate metric.
+  * Resolve Phase 2 artifact mismatch by either removing `apps/client/src/ui/primitives/VisuallyHidden.css` or correcting the changes log.
+  * Add accessibility-focused tests for newly introduced wrappers beyond tooltip/status flows.
+  * Enforce 44x44 touch-target guarantee for the status error-details trigger path.
 * Deviations
-	* Validation command execution used npm equivalents instead of plan-specified pnpm filters due environment limitations
-	* Implementation validator could not persist its own output file in subagent context; findings were captured in this review log
+  * Validation command execution used npm workspace commands instead of plan-specified pnpm commands due environment constraints.
 
 ## Follow-Up Recommendations
 
 ### Deferred From Scope
 
-* Integrate currently unconsumed wrappers into first production call sites with acceptance tests
-* Add import-boundary lint rule enforcing icon imports through apps/client/src/ui/icons/index.ts
-* Continue semantic token replacement for remaining hardcoded color values in App.css
+* Continue semantic-token replacement for remaining hardcoded style values in `apps/client/src/App.css`.
+* Consolidate duplicated `classnames` logic into shared utility.
+* Add lint rule or import-boundary rule to enforce icon usage via `apps/client/src/ui/icons/index.ts`.
 
 ### Discovered During Review
 
-* Clarify bundle-size gate metric definition (total dist delta, JS-only delta, or gzip delta)
-* Standardize plan validation command language to repository-available toolchain
-* Consolidate visually-hidden utility to one canonical definition
+* Clarify bundle-size gate definition (raw total bytes vs JS-only vs gzip delta) and codify it in plan templates.
+* Standardize validation command language across plans to repository-available tooling.
+* Align release changes logs with repository state before review closure.
 
 ## Overall Status
 
@@ -143,12 +146,12 @@
 
 Status rationale:
 
-* Critical bundle-size gate failure remains unresolved
-* Major accessibility issue remains for keyboard-triggered error details
-* Phase 4 remediation step is not complete
+* Critical bundle-size gate remains failed.
+* Major correctness and accessibility gaps remain unresolved.
+* Phase 2 remains partial until artifact-state mismatch is fixed.
 
 ## Reviewer Notes
 
-* RPI validation completed across all four phases with outputs saved in .copilot-tracking/reviews/rpi/2026-07-25/
-* Full-quality implementation validation completed; findings merged into this review due subagent file-write limitation
-* Command validation was independently re-run in current workspace and corroborates lint/test pass, build pass-with-warning, and unresolved size gate
+* RPI validation was refreshed for all four phases and outputs were updated under .copilot-tracking/reviews/rpi/2026-07-25/.
+* Implementation quality validation was completed and persisted under .copilot-tracking/reviews/implementation/2026-07-25/.
+* Command validation was re-run in this workspace and corroborates lint/test pass and build pass-with-warning, with unresolved bundle-size gate failure as the blocker.

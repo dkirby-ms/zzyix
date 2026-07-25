@@ -14,17 +14,17 @@ ms.topic: review
 
 ## Phase Status
 
-**pass**
+**Passed**
 
-Rationale: All Phase 1 implementation steps are present in the repository and match the expected outputs. One procedural deviation exists in validation command execution path, but equivalent checks were documented as completed.
+Rationale: All Phase 1 checklist items and intent were implemented and represented in the changes log. One procedural deviation exists for command execution path (pnpm planned vs npm fallback used), with explicit documentation and no evidence of missing Phase 1 deliverables.
 
 ## Plan-to-Implementation Coverage
 
 | Phase 1 Item | Expected | Observed | Coverage | Evidence |
 |---|---|---|---|---|
-| Step 1.1 | Create primitive and semantic token files plus base styles | Token files and base styling files exist with required categories and utilities | Complete | Plan step: `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:53`; details: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:12`; files listed in changes: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:15`, `:16`, `:17`, `:18`; file evidence: `apps/client/src/styles/tokens/primitives.css:2`, `:15`, `:25`, `:33`, `:38`, `:52`, `:56`, `:63`; `apps/client/src/styles/tokens/semantic.css:2`, `:13`, `:36`, `:43`, `:50`, `:54`; `apps/client/src/styles/base.css:8`, `:13`, `:25` |
-| Step 1.2 | Wire global styles import in client bootstrap | Global style chain imported in bootstrap and import chain resolves primitives -> semantic -> base | Complete | Plan step: `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:55`; details: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:34`; changes log: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:37`; file evidence: `apps/client/src/main.tsx:4`; `apps/client/src/styles/index.css:1`, `:2`, `:3` |
-| Step 1.3 | Validate phase changes via lint and build | Validation documented as completed with equivalent npm commands due environment/tooling constraints | Complete with deviation | Plan step: `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:57`; details command expectation: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:57`, `:58`; deviation documented: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:53`; rationale in planning log: `.copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:11` |
+| Step 1.1 | Create primitive and semantic token files plus base styles | Required token/base files exist and include the requested categories and base accessibility utilities | Complete | Plan step: `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:53`; details: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:12`; changes log entries: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:15`, `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:16`, `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:17`, `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:18`; file evidence: `apps/client/src/styles/tokens/primitives.css:2`, `apps/client/src/styles/tokens/primitives.css:15`, `apps/client/src/styles/tokens/primitives.css:25`, `apps/client/src/styles/tokens/primitives.css:33`, `apps/client/src/styles/tokens/primitives.css:38`, `apps/client/src/styles/tokens/primitives.css:52`, `apps/client/src/styles/tokens/primitives.css:56`, `apps/client/src/styles/tokens/primitives.css:63`; `apps/client/src/styles/tokens/semantic.css:2`, `apps/client/src/styles/tokens/semantic.css:36`, `apps/client/src/styles/tokens/semantic.css:43`, `apps/client/src/styles/tokens/semantic.css:50`, `apps/client/src/styles/tokens/semantic.css:54`; `apps/client/src/styles/base.css:8`, `apps/client/src/styles/base.css:13`, `apps/client/src/styles/base.css:25` |
+| Step 1.2 | Wire global styles import in client bootstrap | Bootstrap imports `styles/index.css`; import chain resolves primitives -> semantic -> base | Complete | Plan step: `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:55`; details: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:34`; changes log entry: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:38`; file evidence: `apps/client/src/main.tsx:4`; `apps/client/src/styles/index.css:1`, `apps/client/src/styles/index.css:2`, `apps/client/src/styles/index.css:3` |
+| Step 1.3 | Validate phase changes via lint and build | Validation recorded as executed with npm fallback commands because planned pnpm filter path did not resolve in this environment | Complete with minor deviation | Plan step: `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:57`; detail command expectation: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:57`, `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:58`; deviation log: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:56`, `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:57`; rationale trace: `.copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:14`, `.copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:17` |
 
 ## Findings by Severity
 
@@ -41,18 +41,30 @@ Rationale: All Phase 1 implementation steps are present in the repository and ma
 1. Validation command-path deviation from phase plan
    * Finding: Phase 1 plan requested `pnpm --filter client` commands, while implementation used npm client-scoped commands.
    * Impact: Low risk to functional correctness, but reduces strict procedural traceability to planned execution scripts.
-   * Evidence: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:57`, `:58`; `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:53`; `.copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:11`.
+  * Evidence: `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:57`, `.copilot-tracking/details/2026-07-25/ux-design-tokens-and-accessible-primitives-details.md:58`; `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:56`, `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:57`; `.copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:14`, `.copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:17`.
 
-2. Reduced-motion baseline is broad and may suppress non-essential transitions globally
-   * Finding: Base reduced-motion rule applies to all elements and pseudo-elements with `animation: none !important` and near-zero transition timing.
-   * Impact: Low-medium UX risk for components that may rely on minimal motion cues for affordance; not a requirement violation, but warrants targeted review as primitives/UI migration continues.
-   * Evidence: `apps/client/src/styles/base.css:25`, `:29`, `:30`.
+2. Changes log phase attribution is broad and mixes phase scopes
+  * Finding: The changes document is a release-wide aggregate and includes Phase 2-4 items interleaved with Phase 1 records.
+  * Impact: Low auditability risk for phase-specific validation workflows; increases manual effort to isolate Phase 1 evidence.
+  * Evidence: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:19`, `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:62`, `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:66`.
 
 ## Missing Work and Deviations
 
 * Missing work: None detected for Phase 1 deliverables.
 * Deviations:
   * Phase 1 validation command path differed from plan (documented and justified).
+
+## File Evidence Verification
+
+* Verified all claimed Phase 1 files exist and contain expected implementation evidence:
+  * `apps/client/src/styles/tokens/primitives.css`
+  * `apps/client/src/styles/tokens/semantic.css`
+  * `apps/client/src/styles/base.css`
+  * `apps/client/src/styles/index.css`
+  * `apps/client/src/main.tsx`
+* Checked for Phase 1-relevant modified/added files outside the changes log.
+  * Result: No unlogged files related to Phase 1 scope were found.
+  * Supporting check: `git status --porcelain` compared against Phase 1 entries in changes log.
 
 ## Success Criteria Impact (Phase 1-Relevant)
 

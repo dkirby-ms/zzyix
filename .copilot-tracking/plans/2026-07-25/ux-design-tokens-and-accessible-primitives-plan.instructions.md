@@ -107,6 +107,19 @@ Implement a tokenized and accessible client-side UI foundation for apps/client/s
   * Provide next steps and recommended follow-up planning
   * Avoid large-scale fixes in this phase
 
+### [x] Implementation Phase 5: Post-Review Remediation
+
+<!-- parallelizable: false -->
+
+* [x] Step 5.1: Resolve artifact mismatch for VisuallyHidden stylesheet
+  * Removed stale file and aligned repository state with release changes tracking.
+* [x] Step 5.2: Guarantee 44x44 touch target on status error-details trigger path
+  * Enforced tokenized minimum dimensions for the interactive status trigger.
+* [x] Step 5.3: Expand primitive wrapper smoke-test coverage
+  * Added focused wrapper tests for Dialog, AlertDialog, ToggleGroup, Tabs, and Toast.
+* [x] Step 5.4: Validate remediation changes
+  * Executed client lint and tests with npm workspace commands in this environment.
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.

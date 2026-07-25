@@ -32,6 +32,11 @@ Implement a tokenized and accessible UI foundation in the client app with semant
 * apps/client/src/ui/icons/index.ts - Added local icon adapter exports backed by lucide-react
 * apps/client/src/ui/StatusIndicator.test.tsx - Added accessibility interaction tests for status error tooltip keyboard focus behavior
 * apps/client/src/ui/primitives/Tooltip.test.tsx - Added low-cost smoke test for tooltip wrapper render path
+* apps/client/src/ui/primitives/Dialog.test.tsx - Added smoke coverage for dialog wrapper render path and class-name composition
+* apps/client/src/ui/primitives/AlertDialog.test.tsx - Added smoke coverage for alert dialog wrapper render path and action/cancel controls
+* apps/client/src/ui/primitives/ToggleGroup.test.tsx - Added smoke coverage for toggle group wrapper role and class-name behavior
+* apps/client/src/ui/primitives/Tabs.test.tsx - Added smoke coverage for tabs wrapper tablist/tab/tabpanel render path
+* apps/client/src/ui/primitives/Toast.test.tsx - Added smoke coverage for toast wrapper viewport/title/description render path
 
 ### Modified
 
@@ -42,6 +47,7 @@ Implement a tokenized and accessible UI foundation in the client app with semant
 * apps/client/src/App.css - Migrated selected hardcoded status/debug colors to semantic tokens, added touch-target minimums, focus-visible rules, and reduced-motion fallbacks
 * apps/client/src/ui/StatusIndicator.css - Migrated state colors to semantic status token variables and added reduced-motion fallback
 * apps/client/src/ui/StatusIndicator.tsx - Replaced title-only error affordance with primitive Tooltip composition and keyboard-focusable button trigger for accessible error details
+* apps/client/src/ui/StatusIndicator.css - Enforced explicit tokenized minimum touch-target dimensions for the status trigger path
 * apps/client/src/styles/tokens/semantic.css - Added semantic status background/border/ring aliases used by existing UI states
 * apps/client/src/styles/base.css - Strengthened global focus-visible fallback values and reduced-motion no-animation fallback behavior
 * apps/client/src/ui/primitives/VisuallyHidden.tsx - Consolidated visually-hidden utility usage to shared base class
@@ -68,13 +74,18 @@ Implement a tokenized and accessible UI foundation in the client app with semant
 	* Added focused coverage for status tooltip keyboard interaction and tooltip wrapper render path.
 	* Consolidated duplicate visually-hidden utility definitions to one canonical class in base styles.
 	* Re-ran required validations with npm equivalents per environment constraints.
+* Phase 5 post-review remediation completed for major findings
+	* Removed stale `VisuallyHidden.css` artifact to align repository state with change tracking.
+	* Enforced 44x44 touch-target minimum on `status-indicator-trigger` via semantic token.
+	* Added smoke tests for Dialog, AlertDialog, ToggleGroup, Tabs, and Toast wrappers.
+	* Validation results: `npm run lint --workspace=apps/client` pass, `npm run test --workspace=apps/client -- --run` pass (13 files, 54 tests).
 
 ## Release Summary
 
 Implemented tokenized styling and accessible UI primitive foundations in the client app with additive migration safety.
 
 Code changes summary (excluding .copilot-tracking artifacts):
-* Added 21 files: token/base stylesheet stack, Radix primitive wrappers, icon adapter module, and targeted accessibility test coverage.
+* Added 26 files: token/base stylesheet stack, Radix primitive wrappers, icon adapter module, and targeted accessibility test coverage.
 * Modified 10 files: client dependency manifest, lockfile, app root composition, bootstrap style wiring, existing UI style/component migration targets, and test setup/utilities.
 * Removed 1 file: duplicate visually-hidden utility stylesheet consolidated to base styles.
 

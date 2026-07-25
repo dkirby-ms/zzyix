@@ -271,6 +271,67 @@ When validation failures require changes beyond minor fixes:
 * Recommend additional research and planning rather than inline fixes.
 * Avoid large-scale refactoring within this phase.
 
+## Implementation Phase 5: Post-Review Remediation
+
+<!-- parallelizable: false -->
+
+### Step 5.1: Resolve VisuallyHidden stylesheet artifact mismatch
+
+Remove the stale `VisuallyHidden.css` artifact that was previously logged as removed so repository state matches the release changes record.
+
+Files:
+* apps/client/src/ui/primitives/VisuallyHidden.css - Remove duplicate utility stylesheet
+
+Success criteria:
+* Repository state matches recorded removal in the changes log.
+* No primitive import depends on the removed stylesheet.
+
+Dependencies:
+* Phase 4 completion
+
+### Step 5.2: Guarantee status trigger touch-target minimum
+
+Apply explicit tokenized minimum dimensions to the status error-details trigger to guarantee 44x44 touch targets on that interactive path.
+
+Files:
+* apps/client/src/ui/StatusIndicator.css - Add `min-width` and `min-height` using `--touch-target-min`
+
+Success criteria:
+* Status error-details trigger meets minimum touch target dimensions.
+* Existing indicator visuals and interaction remain unchanged.
+
+Dependencies:
+* Step 5.1 completion
+
+### Step 5.3: Add wrapper smoke tests for remaining primitives
+
+Add lightweight render-path and class/role smoke tests for primitive wrappers that lacked direct coverage.
+
+Files:
+* apps/client/src/ui/primitives/Dialog.test.tsx
+* apps/client/src/ui/primitives/AlertDialog.test.tsx
+* apps/client/src/ui/primitives/ToggleGroup.test.tsx
+* apps/client/src/ui/primitives/Tabs.test.tsx
+* apps/client/src/ui/primitives/Toast.test.tsx
+
+Success criteria:
+* New wrapper tests pass and validate core render roles/classes.
+* Existing client tests remain green.
+
+Dependencies:
+* Step 5.2 completion
+
+### Step 5.4: Validate remediation scope
+
+Validation commands:
+* npm run lint --workspace=apps/client
+* npm run test --workspace=apps/client -- --run
+
+Expected outcome:
+* Lint passes
+* Tests pass with expanded wrapper coverage
+* Bundle-size blocker remains tracked as out-of-scope for this remediation pass
+
 ## Dependencies
 
 * Node.js and pnpm toolchain used by the client workspace

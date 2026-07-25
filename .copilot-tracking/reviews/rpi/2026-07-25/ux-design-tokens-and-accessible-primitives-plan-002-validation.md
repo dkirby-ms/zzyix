@@ -1,6 +1,6 @@
 ---
 title: RPI Validation Phase 002 UX Design Tokens and Accessible Primitives
-description: Validation of Implementation Phase 2 against plan, changes log, research requirements, and repository evidence.
+description: Validation of Implementation Phase 2 against plan, changes log, research requirements, and repository evidence
 ms.date: 2026-07-25
 ms.topic: reference
 ---
@@ -12,7 +12,7 @@ ms.topic: reference
 * Changes: `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md`
 * Research: `.copilot-tracking/research/2026-07-25/ux-design-tokens-research.md`
 * Phase: 002
-* Phase status: pass
+* Phase status: partial
 
 ## Phase Scope Extract
 
@@ -26,7 +26,7 @@ Implementation Phase 2 requires:
 
 Plan evidence:
 
-* `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md` (Lines 61, 65-73)
+* `.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md` (Lines 61-74)
 
 Research requirements for this phase:
 
@@ -36,7 +36,7 @@ Research requirements for this phase:
 
 Research evidence:
 
-* `.copilot-tracking/research/2026-07-25/ux-design-tokens-research.md` (Lines 9-10, 311)
+* `.copilot-tracking/research/2026-07-25/ux-design-tokens-research.md` (Lines 9-10, 269-270, 311, 324-326)
 
 ## Plan to Changes Coverage
 
@@ -44,40 +44,55 @@ Research evidence:
 	 * Claimed in changes log.
 	 * Verified in repository dependency manifest.
 	 * Evidence:
-		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Line 39)
-		 * `apps/client/package.json` (Lines 15-21, 24)
+		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Line 40)
+		 * `apps/client/package.json` (Lines 15-24)
 
 2. Step 2.1 primitive wrappers
 	 * Claimed in changes log for all required wrapper files.
 	 * Verified wrappers exist and each wraps the matching Radix primitive.
 	 * Evidence:
-		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Lines 19, 21, 23, 25, 27, 29, 31)
+		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Lines 19-31)
 		 * `apps/client/src/ui/primitives/Tooltip.tsx` (Lines 2, 7-9, 34)
-		 * `apps/client/src/ui/primitives/Dialog.tsx` (Lines 2, 7-10, 49)
-		 * `apps/client/src/ui/primitives/AlertDialog.tsx` (Lines 2, 7-9, 64)
+		 * `apps/client/src/ui/primitives/Dialog.tsx` (Lines 2, 7-10, 49-58)
+		 * `apps/client/src/ui/primitives/AlertDialog.tsx` (Lines 2, 7-9, 64-74)
 		 * `apps/client/src/ui/primitives/ToggleGroup.tsx` (Lines 2, 7, 15, 23)
 		 * `apps/client/src/ui/primitives/Tabs.tsx` (Lines 2, 7, 15, 23, 31, 39)
-		 * `apps/client/src/ui/primitives/Toast.tsx` (Lines 2, 7, 9, 17, 57)
-		 * `apps/client/src/ui/primitives/VisuallyHidden.tsx` (Lines 2, 7, 16)
+		 * `apps/client/src/ui/primitives/Toast.tsx` (Lines 2, 7, 9, 17, 57-65)
+		 * `apps/client/src/ui/primitives/VisuallyHidden.tsx` (Lines 2, 6-11, 15)
 
 3. Step 2.2 local icon export convention
 	 * Claimed in changes log.
 	 * Verified local icon adapter exists and is the only direct `lucide-react` import in `apps/client/src`.
 	 * Evidence:
-		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Line 33)
-		 * `apps/client/src/ui/icons/index.ts` (Line 20)
+		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Line 32)
+		 * `apps/client/src/ui/icons/index.ts` (Lines 1-20)
 
 4. Step 2.3 root tooltip and toast providers
 	 * Claimed in changes log.
 	 * Verified provider composition at app root with viewport.
 	 * Evidence:
-		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Line 38)
+		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Line 39)
 		 * `apps/client/src/App.tsx` (Lines 65-66, 1041-1046)
 
 5. Step 2.4 phase validation
-	 * Re-verified by running client tests during this validation session.
+	 * Re-verified in this validation session with client lint and targeted primitive-related tests.
 	 * Evidence:
-		 * `npm run test --workspace=apps/client` completed with `6 passed` test files and `46 passed` tests.
+		 * `npm run lint --workspace=apps/client` completed successfully.
+		 * `npm run test --workspace=apps/client -- src/ui/StatusIndicator.test.tsx src/ui/primitives/Tooltip.test.tsx` completed with `2 passed` files and `3 passed` tests.
+
+## File Evidence Verification
+
+1. Claimed change verified in source:
+	 * `apps/client/src/ui/primitives/Tooltip.tsx` through `apps/client/src/ui/primitives/VisuallyHidden.tsx` are present and implemented as wrappers.
+	 * `apps/client/src/ui/icons/index.ts` exists and re-exports icon symbols from `lucide-react`.
+	 * `apps/client/src/App.tsx` contains app-root `TooltipProvider` and `ToastProvider` composition.
+
+2. Claimed change not consistent with repository state:
+	 * Changes log states `apps/client/src/ui/primitives/VisuallyHidden.css` was removed.
+	 * Repository currently still contains `apps/client/src/ui/primitives/VisuallyHidden.css`.
+	 * Evidence:
+		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Lines 50-52)
+		 * `apps/client/src/ui/primitives/VisuallyHidden.css` (Lines 1-11)
 
 ## Findings by Severity
 
@@ -87,37 +102,28 @@ Research evidence:
 
 ### Major
 
-* None.
+1. Changes log contains an inaccurate removal claim for a Phase 2 artifact.
+	 * Impact: The Phase 2 implementation is present, but the release accounting is not fully accurate, which weakens traceability for audits and follow-up implementation work.
+	 * Evidence:
+		 * `.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md` (Lines 50-52)
+		 * `apps/client/src/ui/primitives/VisuallyHidden.css` (Lines 1-11)
+	 * Recommended action: Update the changes log to reflect actual state, or remove the stale file if removal is still intended.
 
 ### Minor
 
-1. Missing enforcement mechanism for icon adapter convention.
-	 * Impact: The local adapter exists, but there is no lint/path-rule guard to prevent future direct `lucide-react` imports in feature code, so architectural drift risk remains.
-	 * Evidence:
-		 * `apps/client/src/ui/icons/index.ts` (Line 20)
-		 * Repository search shows no enforcement rule in phase artifacts.
-	 * Recommendation: Add an import-boundary rule (for example in ESLint/Oxlint config) to require icon imports via `src/ui/icons/index.ts`.
-
-2. Wrapper adoption coverage is limited to provider wiring in `App.tsx` at this phase.
-	 * Impact: Dialog, AlertDialog, Tabs, ToggleGroup, and VisuallyHidden wrappers are implemented but not yet exercised by production component call sites, increasing the chance of integration issues surfacing later.
-	 * Evidence:
-		 * `apps/client/src/App.tsx` (Lines 65-66, 1041-1046)
-		 * Wrapper files present: `apps/client/src/ui/primitives/*.tsx`.
-		 * Repository usage search outside wrapper files currently resolves to provider imports in `App.tsx` only.
-	 * Recommendation: Add at least one real call-site integration and/or unit smoke tests per wrapper before broad rollout.
+* None.
 
 ## Coverage Assessment
 
-* Plan item coverage: 5/5 Phase 2 steps verified as implemented.
-* Requirement alignment: Required primitives, root provider pattern, and icon adapter are present and match research expectations.
-* Quality risk level: low, with minor maintainability and future-integration risks only.
+* Plan item coverage: 5/5 Phase 2 checklist steps are implemented and verifiable in code.
+* Representation accuracy: partial due to one major discrepancy in the changes log artifact.
+* Overall phase result: partial.
 
 ## Open Questions
 
-* None blocking this phase.
+1. Should `apps/client/src/ui/primitives/VisuallyHidden.css` be deleted to match the changes log, or should the changes log be corrected to reflect that it remains in the tree?
 
 ## Concise Recommendations
 
-* Keep phase status as `pass`.
-* Add import-boundary lint rule to enforce icon adapter usage.
-* Add wrapper-level smoke tests or first consumer integrations to reduce deferred integration risk.
+* Keep implementation status as complete for code work, but set validation status to `partial` until the changes-log mismatch is resolved.
+* Resolve the `VisuallyHidden.css` discrepancy by aligning either repository state or release notes.

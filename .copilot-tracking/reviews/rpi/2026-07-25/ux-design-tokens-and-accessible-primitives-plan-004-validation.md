@@ -8,70 +8,91 @@ ms.topic: reference
 
 ## Validation Scope
 
-* Plan: [`.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md`](../../plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md)
-* Changes: [`.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md`](../../changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md)
-* Research: [`.copilot-tracking/research/2026-07-25/ux-design-tokens-research.md`](../../research/2026-07-25/ux-design-tokens-research.md)
+* Plan: .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md
+* Changes: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md
+* Research: .copilot-tracking/research/2026-07-25/ux-design-tokens-research.md
 * Phase validated: Implementation Phase 4 only
 
 ## Phase Status
 
-* Status: needs rework
+* Status: Failed
 
 ## Requirement Coverage
 
-* Step 4.1 Run full project validation: partial
-  * Lint evidence present and passing
-  * Build evidence present and passing with warning
-  * Test evidence present and passing
-  * Bundle-size acceptance threshold not met
-* Step 4.2 Fix minor validation issues: not completed
-* Step 4.3 Report blocking issues: completed
+* Step 4.1 Run full project validation: Partial
+   * Validation execution and outcomes are documented in the changes log.
+   * Bundle-size acceptance threshold is explicitly failed.
+* Step 4.2 Fix minor validation issues: Completed
+   * Targeted remediation claims are reflected by concrete implementation/test updates.
+* Step 4.3 Report blocking issues: Completed
+   * Blocking issue is documented with measured values and follow-on planning references.
 
 ## Findings
 
 ### Critical
 
-1. Bundle-size acceptance gate failed and Phase 4 cannot be considered passing.
-   * Plan requirement: bundle delta must be less than or equal to 30000 bytes in [`.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md#L100`](../../plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md#L100)
-   * Changes log records measured delta of 411138 bytes (1176436 baseline to 1587574 modified), exceeding threshold, in [`.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md#L59-L62`](../../changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md#L59-L62)
-   * Planning log corroborates gate miss in [`.copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md#L26-L29`](../../plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md#L26-L29)
-   * Current build output remains large and emits chunk warning; latest artifact sizes include `dist/assets/index-DSDpNY_z.js` at 1572837 bytes and total `dist` bytes at 1602582 (terminal evidence)
+1. Phase 4 fails the required bundle-size gate.
+    * Required acceptance criterion: bundle delta <= 30000 bytes.
+    * Evidence:
+       * Plan requirement: .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:100
+       * Reported measured failure: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:62
+       * Reported baseline/modified values and computed delta: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:63
+       * Corroborating discrepancy entry: .copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:26
 
 ### Major
 
-1. Planned Step 4.2 remediation work is not implemented in the plan checklist state.
-   * Step 4.2 remains unchecked in [`.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md#L102-L104`](../../plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md#L102-L104)
-   * Impact: validation identified size and build-warning issues, but no recorded minor-fix iteration was completed before phase closure
+* No major findings.
 
 ### Minor
 
-1. Validation execution deviated from plan command form (`pnpm` vs `npm` workspace commands).
-   * Plan expected `pnpm`-oriented lint execution in [`.copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md#L97`](../../plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md#L97)
-   * Changes log documents command deviations in [`.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md#L53-L58`](../../changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md#L53-L58)
-   * Risk: reproducibility friction in environments expecting `pnpm` filter semantics
+1. Validation command execution deviated from the plan's pnpm command form.
+    * Impact: reproducibility friction across environments, but behavior is documented and the substitution rationale is provided.
+    * Evidence:
+       * Plan expects pnpm-based commands: .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:97
+       * Changes log documents deviation and rationale: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:56
+       * Planning log also records the deviation pattern: .copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:14
 
-## Verified Evidence Snapshot
+## Plan Item to Evidence Mapping
 
-* Lint command definitions exist at root and client scope in [`package.json#L22-L24`](../../../package.json#L22-L24)
-* Client build script exists in [`package.json#L20`](../../../package.json#L20) and client package build pipeline in [`apps/client/package.json#L8`](../../../apps/client/package.json#L8)
-* Client test script exists in [`package.json#L27`](../../../package.json#L27) and client package test pipeline in [`apps/client/package.json#L11`](../../../apps/client/package.json#L11)
-* Client dependency additions related to bundle growth are present in [`apps/client/package.json#L15-L24`](../../../apps/client/package.json#L15-L24)
-* Changes log states lint/build/test passed in [`.copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md#L73-L75`](../../changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md#L73-L75)
+1. Step 4.1, run full project validation
+    * Checklist intent: .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:96
+    * Lint/build/test outcomes recorded: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:81
+    * Bundle gate failure recorded: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:84
+2. Step 4.2, fix minor validation issues
+    * Checklist intent: .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:102
+    * Remediation claims: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:66
+    * Verified example code/test evidence:
+       * Keyboard-focusable tooltip trigger button: apps/client/src/ui/StatusIndicator.tsx:45
+       * Keyboard-focus test for error tooltip: apps/client/src/ui/StatusIndicator.test.tsx:11
+       * Tooltip smoke test path: apps/client/src/ui/primitives/Tooltip.test.tsx:6
+       * Canonical visually-hidden utility and reduced-motion fallback: apps/client/src/styles/base.css:13
+3. Step 4.3, report blocking issues
+    * Checklist intent: .copilot-tracking/plans/2026-07-25/ux-design-tokens-and-accessible-primitives-plan.instructions.md:105
+    * Blocking issue documented in changes: .copilot-tracking/changes/2026-07-25/ux-design-tokens-and-accessible-primitives-changes.md:62
+    * Follow-on planning recorded: .copilot-tracking/plans/logs/2026-07-25/ux-design-tokens-and-accessible-primitives-log.md:68
 
 ## Risks
 
-* Release gate risk: Phase 4 success criteria are blocked by bundle-size non-compliance
-* Performance risk: large primary JS bundle and chunk warning indicate higher download/parse costs
-* Process risk: unchecked Step 4.2 weakens traceability for closure readiness
+* Release gate risk: Phase 4 remains non-passable due to bundle-size non-compliance.
+* Performance risk: large bundle growth remains unresolved and may affect client load performance.
 
-## Concise Recommendations
+## Coverage Assessment
 
-1. Treat Phase 4 as open and complete Step 4.2 with targeted optimization changes, then rerun validation.
-2. Reduce client bundle delta to threshold by splitting optional primitives, trimming icon exports/import usage, and evaluating lazy-loading for heavy routes.
-3. Record pre/post size measurements and command outputs in the changes log after remediation.
-4. Align future validation commands with plan tooling or update plan text to the canonical workspace command set.
+* Coverage score for Phase 4 intent: 2.5 out of 3
+* Completed intent areas:
+   * Validation execution and reporting
+   * Minor remediation loop and evidence-backed fixes
+   * Blocking issue documentation with next-step planning
+* Unmet intent area:
+   * Acceptance gate success for bundle-size threshold
+
+## Recommended Next Validations
+
+1. Re-run bundle-size measurement after optimization and verify delta <= 30000 bytes.
+2. Validate that all command substitutions (pnpm vs npm workspace) are explicitly normalized in the plan or execution guidance.
+3. Confirm no new regressions were introduced by optimization work by rerunning client lint, tests, and build.
 
 ## Clarifying Questions
 
-1. Should the 30000-byte threshold be measured as total `dist` delta, JS-only delta, or gzip delta for gate enforcement?
-2. Should the `pnpm` command requirement be updated to npm workspace commands for this repository baseline?
+1. Should the 30000-byte threshold be enforced on raw assets, JS-only assets, or gzip-compressed output?
+2. Should plan command language be updated to npm workspace commands as the canonical form for this repository?

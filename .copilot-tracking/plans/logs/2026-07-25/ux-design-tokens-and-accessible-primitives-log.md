@@ -31,6 +31,11 @@ Gaps and differences identified between research findings and the implementation
   * Implemented fixes: keyboard-focusable status error tooltip trigger, targeted tooltip/accessibility tests, and visually-hidden utility consolidation
   * Validation outcome: `npm run lint` pass, `npm run test --workspace=apps/client` pass (49 tests), `npm run build --workspace=apps/client` pass with unchanged chunk-size warning
   * Rationale: Step 4.2 scope allows minor local fixes; chunk-size optimization requires broader bundle strategy beyond this step
+* DD-06: Post-review remediation executed as an additional implementation phase
+  * Plan originally ended at Phase 4; review identified remaining major findings needing code-level closure.
+  * Implemented remediation: removed stale `VisuallyHidden.css`, enforced 44x44 status trigger touch target, and added smoke tests for Dialog/AlertDialog/ToggleGroup/Tabs/Toast wrappers.
+  * Validation outcome: `npm run lint --workspace=apps/client` pass, `npm run test --workspace=apps/client -- --run` pass (13 files, 54 tests).
+  * Rationale: Required to resolve review-confirmed implementation gaps while preserving the existing bundle-size blocker as tracked follow-on work.
 
 ## Implementation Paths Considered
 
