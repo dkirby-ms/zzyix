@@ -1,0 +1,27 @@
+.canvas-loading-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 360px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border-subtle);
+  background: color-mix(in srgb, var(--color-surface) 84%, transparent);
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+}
+
+.canvas-loading-spinner {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--color-text-muted) 45%, transparent);
+  border-top-color: var(--color-brand);
+  animation: canvas-loading-spin 0.9s linear infinite;
+}
+
+@keyframes canvas-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

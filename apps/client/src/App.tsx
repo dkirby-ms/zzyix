@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   applyChunkSubscriptionBudgets,
   shouldRecomputeVisibleChunks,
@@ -57,12 +57,11 @@ import type {
   ChunkPayloadMode,
   RealtimeCapabilities,
 } from '../../server/src/contracts'
-import { MosaicScene } from './render/MosaicScene'
+import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { ControlsPanel } from './ui/ControlsPanel'
 import { LobbyScreen } from './ui/LobbyScreen'
 import { palettes } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
-import { ToastProvider, ToastViewport } from './ui/primitives/Toast'
 import { TooltipProvider } from './ui/primitives/Tooltip'
 import {
   COLLABORATION_EMIT_INTERVAL_MS,
@@ -83,6 +82,11 @@ const CHUNK_MOVEMENT_HYSTERESIS_RATIO = 0.25
 const CHUNK_ZOOM_HYSTERESIS = 0.5
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
+
+const MosaicScene = lazy(async () => {
+  const module = await import('./render/MosaicScene')
+  return { default: module.MosaicScene }
+})
 
 type ZoomTier = 'fine' | 'aggregate'
 
@@ -964,52 +968,54 @@ function App() {
           </div>
         )}
 
-        <MosaicScene
-          tiles={sequencedState.tiles}
-          activeShape={shape}
-          ghost={{
-            transform: ghost.current,
-            confidence: ghost.confidence,
-            color,
-            material,
-            visible: ghostVisible,
-          }}
-          onPointerMove={updatePointer}
-          onPointerDown={updatePointer}
-          onPointerUp={attemptPlace}
-          onRotateDrag={(deltaX) =>
-            setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
-          }
-          remoteCursors={remoteCursors}
-          remoteSelections={remoteSelections}
-          worldBounds={worldBounds}
-          cameraPan={cameraPan}
-          cameraPolicy={cameraPolicy}
-          onCameraPan={(deltaX, deltaY) => {
-            setCameraPan((prev) => ({
-              x: prev.x - deltaX * cameraPolicy.panSensitivity,
-              y: prev.y + deltaY * cameraPolicy.panSensitivity,
-            }))
-          }}
-          onViewportChanged={onViewportChanged}
-          onZoomTierChanged={(zoom) => {
-            const previousTier = zoomTierRef.current
-            const nextTier = resolveZoomTier(previousTier, zoom)
-            if (nextTier === previousTier) {
-              return
+        <Suspense fallback={<CanvasLoadingFallback />}>
+          <MosaicScene
+            tiles={sequencedState.tiles}
+            activeShape={shape}
+            ghost={{
+              transform: ghost.current,
+              confidence: ghost.confidence,
+              color,
+              material,
+              visible: ghostVisible,
+            }}
+            onPointerMove={updatePointer}
+            onPointerDown={updatePointer}
+            onPointerUp={attemptPlace}
+            onRotateDrag={(deltaX) =>
+              setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
             }
+            remoteCursors={remoteCursors}
+            remoteSelections={remoteSelections}
+            worldBounds={worldBounds}
+            cameraPan={cameraPan}
+            cameraPolicy={cameraPolicy}
+            onCameraPan={(deltaX, deltaY) => {
+              setCameraPan((prev) => ({
+                x: prev.x - deltaX * cameraPolicy.panSensitivity,
+                y: prev.y + deltaY * cameraPolicy.panSensitivity,
+              }))
+            }}
+            onViewportChanged={onViewportChanged}
+            onZoomTierChanged={(zoom) => {
+              const previousTier = zoomTierRef.current
+              const nextTier = resolveZoomTier(previousTier, zoom)
+              if (nextTier === previousTier) {
+                return
+              }
 
-            zoomTierRef.current = nextTier
-            setZoomTier(nextTier)
-            clientTelemetryRef.current.tierTransitions += 1
-            console.info('chunk_zoom_tier_transition', {
-              from: previousTier,
-              to: nextTier,
-              zoom,
-              totalTransitions: clientTelemetryRef.current.tierTransitions,
-            })
-          }}
-        />
+              zoomTierRef.current = nextTier
+              setZoomTier(nextTier)
+              clientTelemetryRef.current.tierTransitions += 1
+              console.info('chunk_zoom_tier_transition', {
+                from: previousTier,
+                to: nextTier,
+                zoom,
+                totalTransitions: clientTelemetryRef.current.tierTransitions,
+              })
+            }}
+          />
+        </Suspense>
 
         {ghostVisible && (
           <div className="debug-overlay">
@@ -1038,12 +1044,7 @@ function App() {
   )
 
   return (
-    <TooltipProvider delayDuration={250} skipDelayDuration={300}>
-      <ToastProvider swipeDirection="right">
-        {content}
-        <ToastViewport />
-      </ToastProvider>
-    </TooltipProvider>
+    <TooltipProvider delayDuration={250} skipDelayDuration={300}>{content}</TooltipProvider>
   )
 }
 
