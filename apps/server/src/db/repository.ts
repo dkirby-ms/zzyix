@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
-import type { ClientPresence, Session, TileInstance } from '../contracts.js'
+import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
+import type { BoundsPolicy, ClientPresence, Session, SessionCanvasConfig, TileInstance } from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
 import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema.js'
@@ -8,6 +9,7 @@ import { getDatabaseBundle, type DatabaseClient } from './client.js'
 
 export type AuthoritativeSessionRecord = {
   session: Session
+  canvasConfig: SessionCanvasConfig
   clients: ClientPresence[]
   lastOpSeq: number
   revision: number
@@ -97,6 +99,7 @@ export type ReplaySessionRecord = AuthoritativeSessionRecord & {
 export type SessionSummaryRecord = {
   id: string
   participantCount: number
+  canvasConfig?: SessionCanvasConfig
 }
 
 export type ChunkCoordinate = {
@@ -114,6 +117,16 @@ export type ChunkTileReadResult = {
 const toMillis = (value: Date): number => value.getTime()
 
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
+const DEFAULT_CANVAS_CONFIG: SessionCanvasConfig = {
+  canvasSize: {
+    width: DEFAULT_BOUNDED_WORLD_BOUNDS.maxX - DEFAULT_BOUNDED_WORLD_BOUNDS.minX,
+    height: DEFAULT_BOUNDED_WORLD_BOUNDS.maxY - DEFAULT_BOUNDED_WORLD_BOUNDS.minY,
+  },
+  boundsPolicy: {
+    mode: 'bounded',
+    bounds: DEFAULT_BOUNDED_WORLD_BOUNDS,
+  },
+}
 
 const worldToChunk = (x: number, y: number, chunkWorldSize: number = CHUNK_WORLD_SIZE): ChunkCoordinate => ({
   x: Math.floor(x / chunkWorldSize),
@@ -169,6 +182,65 @@ const mapClient = (row: typeof participants.$inferSelect): ClientPresence => ({
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
+
+const isBoundsPolicy = (value: unknown): value is BoundsPolicy => {
+  if (!isObjectRecord(value) || typeof value.mode !== 'string') {
+    return false
+  }
+
+  if (value.mode === 'unbounded') {
+    return true
+  }
+
+  if (value.mode !== 'bounded' || !isObjectRecord(value.bounds)) {
+    return false
+  }
+
+  return (
+    typeof value.bounds.minX === 'number' &&
+    typeof value.bounds.maxX === 'number' &&
+    typeof value.bounds.minY === 'number' &&
+    typeof value.bounds.maxY === 'number'
+  )
+}
+
+const normalizeCanvasConfig = (value: unknown): SessionCanvasConfig => {
+  if (!isObjectRecord(value)) {
+    return DEFAULT_CANVAS_CONFIG
+  }
+
+  if (!isObjectRecord(value.canvasSize)) {
+    return DEFAULT_CANVAS_CONFIG
+  }
+
+  if (typeof value.canvasSize.width !== 'number' || typeof value.canvasSize.height !== 'number') {
+    return DEFAULT_CANVAS_CONFIG
+  }
+
+  if (!isBoundsPolicy(value.boundsPolicy)) {
+    return DEFAULT_CANVAS_CONFIG
+  }
+
+  return {
+    canvasSize: {
+      width: value.canvasSize.width,
+      height: value.canvasSize.height,
+    },
+    boundsPolicy: value.boundsPolicy.mode === 'bounded'
+      ? {
+          mode: 'bounded',
+          bounds: {
+            minX: value.boundsPolicy.bounds.minX,
+            maxX: value.boundsPolicy.bounds.maxX,
+            minY: value.boundsPolicy.bounds.minY,
+            maxY: value.boundsPolicy.bounds.maxY,
+          },
+        }
+      : {
+          mode: 'unbounded',
+        },
+  }
+}
 
 const isTileInstance = (value: unknown): value is TileInstance => {
   if (!isObjectRecord(value)) {
@@ -350,11 +422,24 @@ const isPlaceAckResponse = (value: unknown): value is { placed: TileInstance; re
 const isRemoveAckResponse = (value: unknown): value is { removed: true; opSeq: number } =>
   isObjectRecord(value) && value.removed === true && typeof value.opSeq === 'number'
 
-export const loadSessionRecord = async (sessionId: string): Promise<AuthoritativeSessionRecord> => {
+export const loadSessionRecord = async (
+  sessionId: string,
+  canvasConfig?: SessionCanvasConfig,
+): Promise<AuthoritativeSessionRecord> => {
   const { db } = getDatabaseBundle()
 
   const now = new Date()
-  await db.insert(canvases).values({ id: sessionId, createdAt: now, updatedAt: now }).onConflictDoNothing()
+  if (canvasConfig) {
+    await db
+      .insert(canvases)
+      .values({ id: sessionId, canvasConfig, createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({
+        target: canvases.id,
+        set: { canvasConfig },
+      })
+  } else {
+    await db.insert(canvases).values({ id: sessionId, createdAt: now, updatedAt: now }).onConflictDoNothing()
+  }
 
   const [canvas] = await db.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
   if (!canvas) {
@@ -376,6 +461,7 @@ export const loadSessionRecord = async (sessionId: string): Promise<Authoritativ
 
   return {
     session: mapSession(canvas, tileRows),
+    canvasConfig: normalizeCanvasConfig(canvas.canvasConfig),
     clients: participantRows.map(mapClient),
     lastOpSeq: latestOpSeq[0]?.value ?? 0,
     revision: canvas.version,
@@ -471,6 +557,7 @@ export const listSessionSummaries = async (): Promise<SessionSummaryRecord[]> =>
     .select({
       id: canvases.id,
       participantCount: sql<number>`count(${participants.clientId})`,
+      canvasConfig: canvases.canvasConfig,
       updatedAt: canvases.updatedAt,
     })
     .from(canvases)
@@ -481,6 +568,7 @@ export const listSessionSummaries = async (): Promise<SessionSummaryRecord[]> =>
   return rows.map((row) => ({
     id: row.id,
     participantCount: Number(row.participantCount),
+    canvasConfig: normalizeCanvasConfig(row.canvasConfig),
   }))
 }
 

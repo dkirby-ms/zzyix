@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
+import type { SessionCanvasConfig } from '../contracts.js'
 import { materialVariantValues, operationTypeValues, tileShapeValues } from './types.js'
 
 const asSqlLiteralList = (values: readonly string[]) =>
@@ -38,6 +39,7 @@ export const canvases = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     version: integer('version').default(0).notNull(),
+    canvasConfig: jsonb('canvas_config').$type<SessionCanvasConfig>(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
