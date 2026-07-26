@@ -880,8 +880,68 @@ describe('App lobby-first behavior', () => {
     expect(screen.getByRole('status')).toHaveTextContent('')
   })
 
-  it('keeps active selection in sync with keyboard rotation and mirror shortcuts', async () => {
+  it('keeps active selection in sync with keyboard rotation, mirror, and undo shortcuts', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
+
+    const placePayloads: Array<{
+      shape: string
+      color: string
+      material: string
+      transform: { position: { x: number; y: number }; rotation: number; mirrored: boolean }
+    }> = []
+    const removeTilePayloads: Array<{ tileId: string; expectedRevision: number }> = []
+
+    const emitMock = vi.fn((event: string, payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile') {
+        placePayloads.push(payload as {
+          shape: string
+          color: string
+          material: string
+          transform: { position: { x: number; y: number }; rotation: number; mirrored: boolean }
+        })
+        callback?.({
+          rejected: false,
+          placed: {
+            id: `44444444-4444-4444-8444-44444444444${placePayloads.length}`,
+            ...(payload as {
+              shape: string
+              color: string
+              material: string
+              transform: { position: { x: number; y: number }; rotation: number; mirrored: boolean }
+            }),
+            placedBy: 'client-1',
+            createdAt: Date.now(),
+          },
+          opSeq: 20 + placePayloads.length,
+          newRevision: 5 + placePayloads.length,
+        })
+      }
+
+      if (event === 'remove_tile') {
+        removeTilePayloads.push(payload as { tileId: string; expectedRevision: number })
+        callback?.({
+          removed: true,
+          opSeq: 99,
+          newRevision: 12,
+        })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
 
     render(<App />)
 
@@ -892,21 +952,115 @@ describe('App lobby-first behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
-    const initialRotation = screen.getByText('Shape: square').closest('.palette-region')?.querySelector('.tile-palette-summary')
     expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
 
     fireEvent.keyDown(window, { key: 'r' })
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    expect(placePayloads.at(-1)).toMatchObject({
+      transform: {
+        rotation: Math.PI / 2,
+        mirrored: false,
+      },
+    })
+
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
+    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Square' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'ceramic' })).toHaveAttribute('aria-checked', 'true')
 
     expect(screen.getByText('Shape: square')).toBeInTheDocument()
     expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
     expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
     expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
-    expect(initialRotation).toBeTruthy()
 
-    fireEvent.keyDown(window, { key: 'f' })
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+    fireEvent.keyDown(window, { key: 'z' })
 
+    expect(removeTilePayloads.length).toBeGreaterThan(0)
+    expect(removeTilePayloads.at(-1)?.tileId).toBeDefined()
     expect(screen.getByText('Shape: square')).toBeInTheDocument()
     expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
+    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+  })
+
+  it('removes the most recent settled placement when undo is triggered from the keyboard', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        callback({
+          rejected: false,
+          placed: {
+            id: '55555555-5555-4555-8555-555555555555',
+            shape: 'square',
+            color: '#d4614f',
+            material: 'ceramic',
+            transform: {
+              position: { x: 0, y: 0 },
+              rotation: 0,
+              mirrored: false,
+            },
+            placedBy: 'client-1',
+            createdAt: Date.now(),
+          },
+          opSeq: 30,
+          newRevision: 7,
+        })
+      }
+
+      if (event === 'remove_tile' && callback) {
+        callback({
+          removed: true,
+          opSeq: 31,
+          newRevision: 8,
+        })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    fireEvent.keyDown(window, { key: 'z' })
+
+    expect(emitMock).toHaveBeenCalledWith(
+      'remove_tile',
+      expect.objectContaining({ tileId: '55555555-5555-4555-8555-555555555555' }),
+      expect.any(Function),
+    )
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
   })
 
   it('toggles palette open and collapsed state from the palette header', async () => {

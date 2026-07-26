@@ -9,21 +9,21 @@ Gaps and deviations identified during implementation.
 
 ### Implementation Deviations
 
-* DD-01: Pointer-gesture scene tests were not added.
+* DD-01: Pointer-gesture scene tests required a small scene hook to stay deterministic.
   * Plan specifies: Add MosaicScene pointer gesture tests for right-drag rotate and middle-drag pan paths if coverage is missing.
-  * Implementation differs: The workspace did not contain a MosaicScene test file to extend, and the focused App/TilePalette tests were sufficient to verify the reducer-backed state migration.
-  * Rationale: Avoided introducing a new test harness while keeping the validated scope focused.
+  * Implementation differs: MosaicScene now includes a stable `interaction-plane` test hook so the new gesture tests can target the intended branches directly.
+  * Rationale: The hook is test-only and preserves the existing scene behavior while closing the regression gap.
 
 ### Validation Notes
 
-* DN-01: Full validation passed after the client state-slice refactor.
-  * Commands: `npm run lint`, `npm run lint --workspace=apps/client`, `npm run build --workspace=apps/client`, `npm run test --workspace=apps/client`
-  * Result: Passed with no blocking lint or test failures
+* DN-01: Focused regression validation passed for the updated App and MosaicScene tests.
+  * Commands: `npm run test --workspace=apps/client -- --run src/App.test.tsx src/render/MosaicScene.test.tsx`
+  * Result: Passed with 28 tests green
 
 ## Suggested Follow-On Work
 
-* WI-01: Add or restore MosaicScene pointer-gesture tests if that test surface is reintroduced. (low)
+* WI-01: Consider adding a dedicated scene harness if more pointer-button branches need coverage later. (low)
   * Source: Phase 3, Step 3.2
-  * Dependency: A dedicated MosaicScene test file or equivalent scene interaction harness
+  * Dependency: Future scene interaction work
 
 ## User Decisions
