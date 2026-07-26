@@ -62,7 +62,6 @@ import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
 import { LobbyScreen } from './ui/LobbyScreen'
 import { AppHeader } from './ui/AppHeader'
-import { CanvasActionBar } from './ui/CanvasActionBar'
 import { palettes } from './ui/palettes'
 import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
@@ -1000,14 +999,6 @@ function App() {
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
-          <CanvasActionBar
-            rotation={rotation}
-            onRotateFine={() => setRotation((prev) => normalizeAngle(prev + Math.PI / 12))}
-            onRotateFineCcw={() => setRotation((prev) => normalizeAngle(prev - Math.PI / 12))}
-            onMirror={() => setMirrored((prev) => !prev)}
-            canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
-            onUndo={handleUndo}
-          />
           <div className="status-strip" data-state={ghost.confidence}>
             <StatusIndicator connectionState={connectionState} />
             <span>{ghost.confidence.replace('-', ' ')}</span>

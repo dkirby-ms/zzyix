@@ -158,7 +158,6 @@ describe('App lobby-first behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
       expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
       expect(screen.getByRole('banner')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Mirror' })).toBeInTheDocument()
     })
 
     const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
