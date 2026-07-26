@@ -1002,8 +1002,6 @@ function App() {
         <section className="canvas-shell">
           <CanvasActionBar
             rotation={rotation}
-            onRotateCw={() => setRotation((prev) => quantizeRotation(prev + Math.PI / 2))}
-            onRotateCcw={() => setRotation((prev) => quantizeRotation(prev - Math.PI / 2))}
             onRotateFine={() => setRotation((prev) => normalizeAngle(prev + Math.PI / 12))}
             onRotateFineCcw={() => setRotation((prev) => normalizeAngle(prev - Math.PI / 12))}
             onMirror={() => setMirrored((prev) => !prev)}

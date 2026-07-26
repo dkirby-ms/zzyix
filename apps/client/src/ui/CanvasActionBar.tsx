@@ -1,7 +1,5 @@
 type CanvasActionBarProps = {
   rotation: number
-  onRotateCw: () => void
-  onRotateCcw: () => void
   onRotateFine: () => void
   onRotateFineCcw: () => void
   onMirror: () => void
@@ -11,8 +9,6 @@ type CanvasActionBarProps = {
 
 export const CanvasActionBar = ({
   rotation,
-  onRotateCw,
-  onRotateCcw,
   onRotateFine,
   onRotateFineCcw,
   onMirror,
@@ -22,8 +18,6 @@ export const CanvasActionBar = ({
   return (
     <div className="canvas-action-bar">
       <div className="pill-row">
-        <button type="button" onClick={onRotateCcw}>−90°</button>
-        <button type="button" onClick={onRotateCw}>+90°</button>
         <button type="button" onClick={onMirror}>Mirror</button>
       </div>
       <div className="pill-row">
