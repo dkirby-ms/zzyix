@@ -36,6 +36,26 @@ vi.mock('./network/useSocketConnection', () => ({
   useSocketConnection: useSocketConnectionMock,
 }))
 
+vi.mock('./config/debugFlags', () => ({
+  resolveCanvasDebug: vi.fn(() => false),
+}))
+
+vi.mock('./ui/AppHeader', () => ({
+  AppHeader: ({ onReturnToLobby, collaboratorCount }: { onReturnToLobby: () => void; collaboratorCount: number }) => (
+    <div data-testid="app-header" data-collaborator-count={collaboratorCount}>
+      <button type="button" onClick={onReturnToLobby}>Return to Lobby</button>
+    </div>
+  ),
+}))
+
+vi.mock('./ui/CanvasActionBar', () => ({
+  CanvasActionBar: ({ onUndo, canUndo }: { onUndo: () => void; canUndo: boolean }) => (
+    <div data-testid="canvas-action-bar">
+      <button type="button" disabled={!canUndo} onClick={onUndo}>Undo</button>
+    </div>
+  ),
+}))
+
 vi.mock('./ui/ControlsPanel', () => ({
   ControlsPanel: () => <div data-testid="controls-panel">controls</div>,
 }))
@@ -148,6 +168,8 @@ describe('App lobby-first behavior', () => {
     await waitFor(() => {
       expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
       expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+      expect(screen.getByTestId('app-header')).toBeInTheDocument()
+      expect(screen.getByTestId('canvas-action-bar')).toBeInTheDocument()
     })
 
     const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
@@ -761,5 +783,59 @@ describe('App lobby-first behavior', () => {
 
     const enabledSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     expect(enabledSocketCall[16]).toBe(true)
+  })
+
+  it('canvas shell does not produce horizontal overflow at 320px viewport', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 320 })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+    })
+
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth)
+
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1024 })
+  })
+
+  it('AppHeader back button returns to lobby', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('app-header')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to Lobby' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Choose a Canvas')).toBeInTheDocument()
+      expect(screen.queryByTestId('app-header')).not.toBeInTheDocument()
+    })
+  })
+
+  it('debug diagnostics are hidden by default in canvas mode', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+    })
+
+    expect(document.querySelector('.debug-overlay')).toBeNull()
   })
 })

@@ -33,6 +33,7 @@ import {
   type SessionSummary,
 } from './network/session'
 import { resolveServerUrl } from './network/serverUrl'
+import { resolveCanvasDebug } from './config/debugFlags'
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
 import { StatusIndicator } from './ui/StatusIndicator'
@@ -60,6 +61,8 @@ import type {
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { ControlsPanel } from './ui/ControlsPanel'
 import { LobbyScreen } from './ui/LobbyScreen'
+import { AppHeader } from './ui/AppHeader'
+import { CanvasActionBar } from './ui/CanvasActionBar'
 import { palettes } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import { TooltipProvider } from './ui/primitives/Tooltip'
@@ -252,6 +255,7 @@ function App() {
   })
   const clientId = useMemo(() => ensureClientId(), [])
   const serverUrl = useMemo(() => resolveServerUrl(), [])
+  const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const activeTile: ActiveTile = useMemo(
     () => ({
@@ -964,128 +968,126 @@ function App() {
   ) : (
     <main className={invalidPulse ? 'app-shell invalid-pulse' : 'app-shell'}>
       <div className="backdrop-gradient" />
-      <ControlsPanel
-        shape={shape}
-        onShape={setShape}
-        material={material}
-        onMaterial={setMaterial}
-        paletteName={paletteName}
-        onPaletteName={(name) => {
-          setPaletteName(name)
-          setColor(palettes[name][0])
-        }}
-        color={color}
-        onColor={setColor}
-        rotation={rotation}
-        onRotateCw={() => setRotation((prev) => quantizeRotation(prev + Math.PI / 2))}
-        onRotateCcw={() => setRotation((prev) => quantizeRotation(prev - Math.PI / 2))}
-        onRotateFine={() => setRotation((prev) => normalizeAngle(prev + Math.PI / 12))}
-        onRotateFineCcw={() => setRotation((prev) => normalizeAngle(prev - Math.PI / 12))}
-        onMirror={() => setMirrored((prev) => !prev)}
+      <AppHeader
+        onReturnToLobby={returnToLobby}
+        connectionState={connectionState.status}
+        collaboratorCount={activeCollaborators.length}
         canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
         onUndo={handleUndo}
-        clearDisabled
-        onClear={() => {}}
-        onReturnToLobby={returnToLobby}
       />
-
-      <section className="canvas-shell">
-        <div className="status-strip" data-state={ghost.confidence}>
-          <StatusIndicator connectionState={connectionState} />
-          <span>{ghost.confidence.replace('-', ' ')}</span>
-          <span>{sequencedState.tiles.length} placed</span>
-          <span>{activeCollaborators.length} active</span>
-          <span>{zoomTier} zoom</span>
-          <span>
-            bounds {worldBounds.minX.toFixed(1)}..{worldBounds.maxX.toFixed(1)} / {worldBounds.minY.toFixed(1)}..
-            {worldBounds.maxY.toFixed(1)}
-          </span>
-        </div>
-
-        {activeCollaborators.length > 0 && (
-          <div className="collaborator-roster" aria-label="Active collaborators">
-            {activeCollaborators.map((collaborator) => (
-              <span key={collaborator.clientId} className="collaborator-chip">
-                {formatCollaboratorLabel(collaborator.clientId, clientId)}
-              </span>
-            ))}
+      <div className="canvas-workspace">
+        <section className="canvas-shell">
+          <CanvasActionBar
+            rotation={rotation}
+            onRotateCw={() => setRotation((prev) => quantizeRotation(prev + Math.PI / 2))}
+            onRotateCcw={() => setRotation((prev) => quantizeRotation(prev - Math.PI / 2))}
+            onRotateFine={() => setRotation((prev) => normalizeAngle(prev + Math.PI / 12))}
+            onRotateFineCcw={() => setRotation((prev) => normalizeAngle(prev - Math.PI / 12))}
+            onMirror={() => setMirrored((prev) => !prev)}
+            canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
+            onUndo={handleUndo}
+          />
+          <div className="status-strip" data-state={ghost.confidence}>
+            <StatusIndicator connectionState={connectionState} />
+            <span>{ghost.confidence.replace('-', ' ')}</span>
+            <span>{sequencedState.tiles.length} placed</span>
           </div>
-        )}
-
-        <CanvasErrorBoundary>
-          <Suspense fallback={<CanvasLoadingFallback />}>
-            <MosaicScene
-              tiles={sequencedState.tiles}
-              activeShape={shape}
-              ghost={{
-                transform: ghost.current,
-                confidence: ghost.confidence,
-                color,
-                material,
-                visible: ghostVisible,
-              }}
-              onPointerMove={updatePointer}
-              onPointerDown={updatePointer}
-              onPointerUp={attemptPlace}
-              onRotateDrag={(deltaX) =>
-                setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
-              }
-              remoteCursors={remoteCursors}
-              remoteSelections={remoteSelections}
-              worldBounds={worldBounds}
-              cameraPan={cameraPan}
-              cameraPolicy={cameraPolicy}
-              onCameraPan={(deltaX, deltaY) => {
-                setCameraPan((prev) => ({
-                  x: prev.x - deltaX * cameraPolicy.panSensitivity,
-                  y: prev.y + deltaY * cameraPolicy.panSensitivity,
-                }))
-              }}
-              onViewportChanged={onViewportChanged}
-              onZoomTierChanged={(zoom) => {
-                const previousTier = zoomTierRef.current
-                const nextTier = resolveZoomTier(previousTier, zoom)
-                if (nextTier === previousTier) {
-                  return
+          {activeCollaborators.length > 0 && (
+            <div className="collaborator-roster" aria-label="Active collaborators">
+              {activeCollaborators.map((collaborator) => (
+                <span key={collaborator.clientId} className="collaborator-chip">
+                  {formatCollaboratorLabel(collaborator.clientId, clientId)}
+                </span>
+              ))}
+            </div>
+          )}
+          <CanvasErrorBoundary>
+            <Suspense fallback={<CanvasLoadingFallback />}>
+              <MosaicScene
+                tiles={sequencedState.tiles}
+                activeShape={shape}
+                ghost={{
+                  transform: ghost.current,
+                  confidence: ghost.confidence,
+                  color,
+                  material,
+                  visible: ghostVisible,
+                }}
+                onPointerMove={updatePointer}
+                onPointerDown={updatePointer}
+                onPointerUp={attemptPlace}
+                onRotateDrag={(deltaX) =>
+                  setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
                 }
+                remoteCursors={remoteCursors}
+                remoteSelections={remoteSelections}
+                worldBounds={worldBounds}
+                cameraPan={cameraPan}
+                cameraPolicy={cameraPolicy}
+                onCameraPan={(deltaX, deltaY) => {
+                  setCameraPan((prev) => ({
+                    x: prev.x - deltaX * cameraPolicy.panSensitivity,
+                    y: prev.y + deltaY * cameraPolicy.panSensitivity,
+                  }))
+                }}
+                onViewportChanged={onViewportChanged}
+                onZoomTierChanged={(zoom) => {
+                  const previousTier = zoomTierRef.current
+                  const nextTier = resolveZoomTier(previousTier, zoom)
+                  if (nextTier === previousTier) {
+                    return
+                  }
 
-                zoomTierRef.current = nextTier
-                setZoomTier(nextTier)
-                clientTelemetryRef.current.tierTransitions += 1
-                console.info('chunk_zoom_tier_transition', {
-                  from: previousTier,
-                  to: nextTier,
-                  zoom,
-                  totalTransitions: clientTelemetryRef.current.tierTransitions,
-                })
-              }}
-            />
-          </Suspense>
-        </CanvasErrorBoundary>
-
-        {ghostVisible && (
-          <div className="debug-overlay">
-            <div className="debug-row">
-              <span className="debug-label">state</span>
-              <span className={`debug-value debug-state-${ghost.confidence}`}>{ghost.confidence}</span>
+                  zoomTierRef.current = nextTier
+                  setZoomTier(nextTier)
+                  clientTelemetryRef.current.tierTransitions += 1
+                  console.info('chunk_zoom_tier_transition', {
+                    from: previousTier,
+                    to: nextTier,
+                    zoom,
+                    totalTransitions: clientTelemetryRef.current.tierTransitions,
+                  })
+                }}
+              />
+            </Suspense>
+          </CanvasErrorBoundary>
+          {canvasDebug && ghostVisible && (
+            <div className="debug-overlay">
+              <div className="debug-row">
+                <span className="debug-label">state</span>
+                <span className={`debug-value debug-state-${ghost.confidence}`}>{ghost.confidence}</span>
+              </div>
+              <div className="debug-row">
+                <span className="debug-label">reason</span>
+                <span className="debug-value">{ghost.debugReason}</span>
+              </div>
+              <div className="debug-row">
+                <span className="debug-label">pos</span>
+                <span className="debug-value">
+                  {ghost.target.position.x.toFixed(2)}, {ghost.target.position.y.toFixed(2)}
+                </span>
+              </div>
+              <div className="debug-row">
+                <span className="debug-label">tiles</span>
+                <span className="debug-value">{sequencedState.tiles.length}</span>
+              </div>
             </div>
-            <div className="debug-row">
-              <span className="debug-label">reason</span>
-              <span className="debug-value">{ghost.debugReason}</span>
-            </div>
-            <div className="debug-row">
-              <span className="debug-label">pos</span>
-              <span className="debug-value">
-                {ghost.target.position.x.toFixed(2)}, {ghost.target.position.y.toFixed(2)}
-              </span>
-            </div>
-            <div className="debug-row">
-              <span className="debug-label">tiles</span>
-              <span className="debug-value">{sequencedState.tiles.length}</span>
-            </div>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+        <ControlsPanel
+          shape={shape}
+          onShape={setShape}
+          material={material}
+          onMaterial={setMaterial}
+          paletteName={paletteName}
+          onPaletteName={(name) => {
+            setPaletteName(name)
+            setColor(palettes[name][0])
+          }}
+          color={color}
+          onColor={setColor}
+        />
+      </div>
     </main>
   )
 
