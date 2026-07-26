@@ -121,11 +121,11 @@ const TileMesh = ({ tile }: { tile: TileInstance }) => {
 
   const geometry = useMemo(() => createExtrudeGeometry(tile.shape), [tile.shape])
 
-  useFrame(({ clock }) => {
+  useFrame(() => {
     const group = groupRef.current
     if (!group || animationDone.current) return
 
-    const elapsed = (clock.elapsedTime * 1000 - tile.createdAt) / 1000
+    const elapsed = (Date.now() - tile.createdAt) / 1000
     const duration = 0.34
     const t = MathUtils.clamp(elapsed / duration, 0, 1)
     const eased = easeOutCubic(t)
