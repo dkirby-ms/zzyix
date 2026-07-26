@@ -2,13 +2,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from './domain/collaboratorUtils'
+import { resolvePaletteColorSelection } from './ui/palettes'
 import type { SessionSummary } from './network/session'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
-const { createSessionMock, listSessionsMock, useSocketConnectionMock } = vi.hoisted(() => ({
+const { createSessionMock, listSessionsMock, useSocketConnectionMock, resolveCanvasDebugMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn<() => Promise<string>>(),
   listSessionsMock: vi.fn<() => Promise<SessionSummary[]>>(),
   useSocketConnectionMock: vi.fn(() => ({ current: null })),
+  resolveCanvasDebugMock: vi.fn(() => false),
 }))
 
 const sessionState = {
@@ -36,8 +38,8 @@ vi.mock('./network/useSocketConnection', () => ({
   useSocketConnection: useSocketConnectionMock,
 }))
 
-vi.mock('./ui/ControlsPanel', () => ({
-  ControlsPanel: () => <div data-testid="controls-panel">controls</div>,
+vi.mock('./config/debugFlags', () => ({
+  resolveCanvasDebug: resolveCanvasDebugMock,
 }))
 
 vi.mock('./render/MosaicScene', () => ({
@@ -46,6 +48,7 @@ vi.mock('./render/MosaicScene', () => ({
     remoteSelections,
     worldBounds,
     onPointerMove,
+    onPointerUp,
     cameraPolicy,
     cameraPan,
     onCameraPan,
@@ -56,6 +59,7 @@ vi.mock('./render/MosaicScene', () => ({
     remoteSelections?: Array<{ clientId: string; tileId: string }>
     worldBounds?: { minX: number; maxX: number; minY: number; maxY: number }
     onPointerMove?: (x: number, y: number) => void
+    onPointerUp?: () => void
     cameraPolicy?: { minZoom: number; maxZoom: number; panSensitivity: number }
     cameraPan?: { x: number; y: number }
     onCameraPan?: (deltaX: number, deltaY: number) => void
@@ -82,6 +86,9 @@ vi.mock('./render/MosaicScene', () => ({
       </button>
       <button type="button" onClick={() => onPointerMove?.(5, 5)}>
         Move Pointer Far
+      </button>
+      <button type="button" onClick={() => onPointerUp?.()}>
+        Place Tile
       </button>
       <button type="button" onClick={() => onCameraPan?.(10, -5)}>
         Pan Camera
@@ -117,6 +124,8 @@ describe('App lobby-first behavior', () => {
     listSessionsMock.mockReset()
     createSessionMock.mockReset()
     useSocketConnectionMock.mockClear()
+    resolveCanvasDebugMock.mockReset()
+    resolveCanvasDebugMock.mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -131,7 +140,7 @@ describe('App lobby-first behavior', () => {
 
     await screen.findByText('Choose a Canvas')
     expect(screen.getByText('Last used')).toBeInTheDocument()
-    expect(screen.queryByTestId('controls-panel')).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Tile palette controls' })).not.toBeInTheDocument()
     expect(useSocketConnectionMock).toHaveBeenCalled()
     const firstSocketCall = useSocketConnectionMock.mock.calls[0] as unknown[] | undefined
     expect(firstSocketCall?.[1]).toBeNull()
@@ -146,8 +155,9 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
       expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+      expect(screen.getByRole('banner')).toBeInTheDocument()
     })
 
     const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
@@ -165,7 +175,7 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Canvas' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
     expect(createSessionMock).toHaveBeenCalledTimes(1)
@@ -183,7 +193,7 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
@@ -340,7 +350,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
 
     vi.useFakeTimers()
 
@@ -440,7 +450,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -482,7 +492,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -526,7 +536,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -651,7 +661,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -732,7 +742,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
 
     const initialSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     expect(initialSocketCall[16]).toBe(false)
@@ -761,5 +771,545 @@ describe('App lobby-first behavior', () => {
 
     const enabledSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     expect(enabledSocketCall[16]).toBe(true)
+  })
+
+  it('canvas shell does not produce horizontal overflow at 320px viewport', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 320 })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth)
+
+    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 1024 })
+  })
+
+  it('AppHeader back button returns to lobby', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('banner')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: /Back/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Choose a Canvas')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Back/i })).not.toBeInTheDocument()
+      expect(screen.queryByText('Mosaic Atelier')).not.toBeInTheDocument()
+    })
+
+    const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
+    expect(lastSocketCall?.[1]).toBeNull()
+  })
+
+  it('resolvePaletteColorSelection preserves color when the target palette contains it', () => {
+    const resolved = resolvePaletteColorSelection('terracotta', '#5f7588')
+
+    expect(resolved).toEqual({ color: '#5f7588', didFallback: false })
+  })
+
+  it('announces deterministic fallback when palette switch cannot preserve the selected swatch', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Color #2f4557' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
+
+    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
+    expect(screen.getByText('Color: #4e6d7c')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Palette changed to lagoon. #2f4557 unavailable; selected #4e6d7c.',
+    )
+  })
+
+  it('does not announce fallback when palette switch preserves the selected swatch', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Color #5f7588' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'terracotta' }))
+
+    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
+    expect(screen.getByText('Color: #5f7588')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('')
+  })
+
+  it('keeps active selection in sync with keyboard rotation, mirror, and undo shortcuts', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const placePayloads: Array<{
+      shape: string
+      color: string
+      material: string
+      transform: { position: { x: number; y: number }; rotation: number; mirrored: boolean }
+    }> = []
+    const removeTilePayloads: Array<{ tileId: string; expectedRevision: number }> = []
+
+    const emitMock = vi.fn((event: string, payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile') {
+        placePayloads.push(payload as {
+          shape: string
+          color: string
+          material: string
+          transform: { position: { x: number; y: number }; rotation: number; mirrored: boolean }
+        })
+        callback?.({
+          rejected: false,
+          placed: {
+            id: `44444444-4444-4444-8444-44444444444${placePayloads.length}`,
+            ...(payload as {
+              shape: string
+              color: string
+              material: string
+              transform: { position: { x: number; y: number }; rotation: number; mirrored: boolean }
+            }),
+            placedBy: 'client-1',
+            createdAt: Date.now(),
+          },
+          opSeq: 20 + placePayloads.length,
+          newRevision: 5 + placePayloads.length,
+        })
+      }
+
+      if (event === 'remove_tile') {
+        removeTilePayloads.push(payload as { tileId: string; expectedRevision: number })
+        callback?.({
+          removed: true,
+          opSeq: 99,
+          newRevision: 12,
+        })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'r' })
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    expect(placePayloads.at(-1)).toMatchObject({
+      transform: {
+        rotation: Math.PI / 2,
+        mirrored: false,
+      },
+    })
+
+    fireEvent.keyDown(window, { key: 'f' })
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
+    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Square' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'ceramic' })).toHaveAttribute('aria-checked', 'true')
+
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
+    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+    fireEvent.keyDown(window, { key: 'z' })
+
+    expect(removeTilePayloads.length).toBeGreaterThan(0)
+    expect(removeTilePayloads.at(-1)?.tileId).toBeDefined()
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
+    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+  })
+
+  it('removes the most recent settled placement when undo is triggered from the keyboard', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        callback({
+          rejected: false,
+          placed: {
+            id: '55555555-5555-4555-8555-555555555555',
+            shape: 'square',
+            color: '#d4614f',
+            material: 'ceramic',
+            transform: {
+              position: { x: 0, y: 0 },
+              rotation: 0,
+              mirrored: false,
+            },
+            placedBy: 'client-1',
+            createdAt: Date.now(),
+          },
+          opSeq: 30,
+          newRevision: 7,
+        })
+      }
+
+      if (event === 'remove_tile' && callback) {
+        callback({
+          removed: true,
+          opSeq: 31,
+          newRevision: 8,
+        })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    fireEvent.keyDown(window, { key: 'z' })
+
+    expect(emitMock).toHaveBeenCalledWith(
+      'remove_tile',
+      expect.objectContaining({ tileId: '55555555-5555-4555-8555-555555555555' }),
+      expect.any(Function),
+    )
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+  })
+
+  it('toggles palette open and collapsed state from the palette header', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('radiogroup', { name: 'Shape' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
+
+    expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('radiogroup', { name: 'Shape' })).not.toBeInTheDocument()
+  })
+
+  it('keeps active selection after successful placement acknowledgement', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        callback({
+          rejected: false,
+          placed: {
+            id: '33333333-3333-4333-8333-333333333333',
+            shape: 'triangle',
+            color: '#d9efe6',
+            material: 'glass',
+            transform: {
+              position: { x: 0, y: 0 },
+              rotation: 0,
+              mirrored: false,
+            },
+            placedBy: 'client-1',
+            createdAt: Date.now(),
+          },
+          opSeq: 10,
+          newRevision: 2,
+        })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    expect(emitMock).toHaveBeenCalledWith(
+      'place_tile',
+      expect.objectContaining({ shape: 'triangle', material: 'glass', color: '#d9efe6' }),
+      expect.any(Function),
+    )
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'glass' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Color #d9efe6' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Shape: triangle')).toBeInTheDocument()
+    expect(screen.getByText('Material: glass')).toBeInTheDocument()
+    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+  })
+
+  it('removes optimistic placement while preserving active selection when placement ack is rejected', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        callback({
+          rejected: true,
+          placed: null,
+        })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('0 placed')).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'glass' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Color #d9efe6' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Shape: triangle')).toBeInTheDocument()
+    expect(screen.getByText('Material: glass')).toBeInTheDocument()
+    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+  })
+
+  it('persists optimistic placement until delayed placement ack settles', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    let placeAckCallback: ((ack: any) => void) | undefined
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        placeAckCallback = callback
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('1 placed')).toBeInTheDocument()
+    })
+
+    expect(placeAckCallback).toBeDefined()
+    expect(screen.getByText('Shape: triangle')).toBeInTheDocument()
+    expect(screen.getByText('Material: glass')).toBeInTheDocument()
+    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+
+    act(() => {
+      placeAckCallback?.({
+        rejected: false,
+        placed: {
+          id: '44444444-4444-4444-8444-444444444444',
+          shape: 'triangle',
+          color: '#d9efe6',
+          material: 'glass',
+          transform: {
+            position: { x: 0, y: 0 },
+            rotation: 0,
+            mirrored: false,
+          },
+          placedBy: 'client-1',
+          createdAt: Date.now(),
+        },
+        opSeq: 11,
+        newRevision: 3,
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('1 placed')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('debug diagnostics are hidden by default in canvas mode', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+    })
+
+    expect(document.querySelector('.debug-overlay')).toBeNull()
+  })
+
+  it('shows debug diagnostics when debug mode is enabled and pointer is active', async () => {
+    resolveCanvasDebugMock.mockReturnValue(true)
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+
+    await waitFor(() => {
+      expect(document.querySelector('.debug-overlay')).not.toBeNull()
+    })
   })
 })

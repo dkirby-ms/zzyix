@@ -293,6 +293,7 @@ const InteractionPlane = ({
   return (
     <mesh
       ref={meshRef}
+      data-testid="interaction-plane"
       position={[centerX, centerY, -0.02]}
       onPointerMove={handleMove}
       onPointerDown={handleDown}

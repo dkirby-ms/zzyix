@@ -1,14 +1,32 @@
 .status-indicator {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
   letter-spacing: 0.5px;
   user-select: none;
-  transition: all 0.3s ease;
+  transition: background-color var(--transition-standard), border-color var(--transition-standard), color var(--transition-standard);
+}
+
+.status-indicator-trigger {
+  display: inline-flex;
+  align-items: stretch;
+  min-width: var(--touch-target-min);
+  min-height: var(--touch-target-min);
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: help;
+}
+
+.status-indicator-trigger:focus-visible {
+  border-radius: var(--radius-control);
 }
 
 .status-dot {
@@ -29,65 +47,65 @@
 }
 
 .status-connected {
-  background-color: rgba(76, 175, 80, 0.1);
-  color: #4caf50;
-  border: 1px solid rgba(76, 175, 80, 0.3);
+  background-color: var(--color-status-connected-bg);
+  color: var(--color-status-connected);
+  border: 1px solid var(--color-status-connected-border);
 }
 
 .status-connected .status-dot {
-  background-color: #4caf50;
+  background-color: var(--color-status-connected);
   animation: none;
 }
 
 .status-connecting {
-  background-color: rgba(255, 193, 7, 0.1);
-  color: #ffc107;
-  border: 1px solid rgba(255, 193, 7, 0.3);
+  background-color: var(--color-status-connecting-bg);
+  color: var(--color-status-connecting);
+  border: 1px solid var(--color-status-connecting-border);
 }
 
 .status-connecting .status-dot {
-  background-color: #ffc107;
+  background-color: var(--color-status-connecting);
 }
 
 .status-reconnecting {
-  background-color: rgba(255, 152, 0, 0.1);
-  color: #ff9800;
-  border: 1px solid rgba(255, 152, 0, 0.3);
+  background-color: var(--color-status-reconnecting-bg);
+  color: var(--color-status-reconnecting);
+  border: 1px solid var(--color-status-reconnecting-border);
 }
 
 .status-reconnecting .status-dot {
-  background-color: #ff9800;
+  background-color: var(--color-status-reconnecting);
 }
 
 .status-error {
-  background-color: rgba(244, 67, 54, 0.1);
-  color: #f44336;
-  border: 1px solid rgba(244, 67, 54, 0.3);
+  background-color: var(--color-status-error-bg);
+  color: var(--color-status-error);
+  border: 1px solid var(--color-status-error-border);
 }
 
 .status-error .status-dot {
-  background-color: #f44336;
+  background-color: var(--color-status-error);
 }
 
 .status-disconnected {
-  background-color: rgba(158, 158, 158, 0.1);
-  color: #9e9e9e;
-  border: 1px solid rgba(158, 158, 158, 0.3);
+  background-color: var(--color-status-disconnected-bg);
+  color: var(--color-status-disconnected);
+  border: 1px solid var(--color-status-disconnected-border);
 }
 
 .status-disconnected .status-dot {
-  background-color: #9e9e9e;
+  background-color: var(--color-status-disconnected);
   animation: none;
 }
 
 .status-unknown {
-  background-color: rgba(100, 100, 100, 0.1);
-  color: #646464;
-  border: 1px solid rgba(100, 100, 100, 0.3);
+  background-color: var(--color-status-unknown-bg);
+  color: var(--color-status-unknown);
+  border: 1px solid var(--color-status-unknown-border);
 }
 
 .status-unknown .status-dot {
-  background-color: #646464;
+  background-color: var(--color-status-unknown);
   animation: none;
 }
 
@@ -95,4 +113,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-indicator {
+    transition: none;
+  }
+
+  .status-dot {
+    animation: none;
+  }
 }

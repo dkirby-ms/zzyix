@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import {
   applyChunkSubscriptionBudgets,
   shouldRecomputeVisibleChunks,
@@ -33,6 +33,7 @@ import {
   type SessionSummary,
 } from './network/session'
 import { resolveServerUrl } from './network/serverUrl'
+import { resolveCanvasDebug } from './config/debugFlags'
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
 import { StatusIndicator } from './ui/StatusIndicator'
@@ -57,11 +58,14 @@ import type {
   ChunkPayloadMode,
   RealtimeCapabilities,
 } from '../../server/src/contracts'
-import { MosaicScene } from './render/MosaicScene'
-import { ControlsPanel } from './ui/ControlsPanel'
+import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
+import { TilePalette } from './ui/TilePalette'
 import { LobbyScreen } from './ui/LobbyScreen'
+import { AppHeader } from './ui/AppHeader'
 import { palettes } from './ui/palettes'
+import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
+import { TooltipProvider } from './ui/primitives/Tooltip'
 import {
   COLLABORATION_EMIT_INTERVAL_MS,
   COLLABORATOR_CLEANUP_INTERVAL_MS,
@@ -82,7 +86,162 @@ const CHUNK_ZOOM_HYSTERESIS = 0.5
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
 
+const MosaicScene = lazy(async () => {
+  const module = await import('./render/MosaicScene')
+  return { default: module.MosaicScene }
+})
+
+type CanvasErrorBoundaryProps = {
+  children: ReactNode
+}
+
+type CanvasErrorBoundaryState = {
+  hasError: boolean
+  retryKey: number
+}
+
+class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErrorBoundaryState> {
+  state: CanvasErrorBoundaryState = {
+    hasError: false,
+    retryKey: 0,
+  }
+
+  static getDerivedStateFromError(): Partial<CanvasErrorBoundaryState> {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    console.error('Canvas lazy-load failed', error, errorInfo)
+  }
+
+  private readonly handleRetry = (): void => {
+    this.setState((previousState) => ({
+      hasError: false,
+      retryKey: previousState.retryKey + 1,
+    }))
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="canvas-loading-fallback" role="alert">
+          <span>Canvas failed to load.</span>
+          <button type="button" onClick={this.handleRetry}>Retry</button>
+        </div>
+      )
+    }
+
+    return <div key={this.state.retryKey}>{this.props.children}</div>
+  }
+}
+
 type ZoomTier = 'fine' | 'aggregate'
+
+type ActiveTileUiState = {
+  activeTile: ActiveTile
+  paletteName: PaletteName
+  paletteOpen: boolean
+  paletteFallbackAnnouncement: string
+}
+
+type ActiveTileUiAction =
+  | { type: 'set-shape'; shape: TileShape }
+  | { type: 'set-material'; material: ActiveTile['material'] }
+  | { type: 'set-color'; color: string }
+  | { type: 'set-palette'; paletteName: PaletteName }
+  | { type: 'rotate-quarter'; direction: 1 | -1 }
+  | { type: 'rotate-fine'; delta: number }
+  | { type: 'toggle-mirror' }
+  | { type: 'toggle-palette-open' }
+
+const createInitialActiveTileUiState = (): ActiveTileUiState => ({
+  activeTile: {
+    shape: 'square',
+    color: palettes.terracotta[0],
+    material: 'ceramic',
+    rotation: 0,
+    mirrored: false,
+  },
+  paletteName: 'terracotta',
+  paletteOpen: true,
+  paletteFallbackAnnouncement: '',
+})
+
+const activeTileUiReducer = (state: ActiveTileUiState, action: ActiveTileUiAction): ActiveTileUiState => {
+  switch (action.type) {
+    case 'set-shape':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          shape: action.shape,
+        },
+      }
+    case 'set-material':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          material: action.material,
+        },
+      }
+    case 'set-color':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          color: action.color,
+        },
+        paletteFallbackAnnouncement: '',
+      }
+    case 'set-palette': {
+      const { color: nextColor, didFallback } = resolvePaletteColorSelection(action.paletteName, state.activeTile.color)
+
+      return {
+        ...state,
+        paletteName: action.paletteName,
+        activeTile: {
+          ...state.activeTile,
+          color: nextColor,
+        },
+        paletteFallbackAnnouncement: didFallback
+          ? `Palette changed to ${action.paletteName}. ${state.activeTile.color} unavailable; selected ${nextColor}.`
+          : '',
+      }
+    }
+    case 'rotate-quarter':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          rotation: quantizeRotation(state.activeTile.rotation + action.direction * (Math.PI / 2)),
+        },
+      }
+    case 'rotate-fine':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          rotation: normalizeAngle(state.activeTile.rotation + action.delta),
+        },
+      }
+    case 'toggle-mirror':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          mirrored: !state.activeTile.mirrored,
+        },
+      }
+    case 'toggle-palette-open':
+      return {
+        ...state,
+        paletteOpen: !state.paletteOpen,
+      }
+    default:
+      return state
+  }
+}
 
 const resolveZoomTier = (previous: ZoomTier | null, zoom: number): ZoomTier => {
   if (previous === 'aggregate') {
@@ -146,12 +305,7 @@ function App() {
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
   )
-  const [shape, setShape] = useState<TileShape>('square')
-  const [material, setMaterial] = useState<'ceramic' | 'glass' | 'stone'>('ceramic')
-  const [paletteName, setPaletteName] = useState<PaletteName>('terracotta')
-  const [color, setColor] = useState<string>(palettes.terracotta[0])
-  const [rotation, setRotation] = useState(0)
-  const [mirrored, setMirrored] = useState(false)
+  const [activeTileUiState, dispatchActiveTileUi] = useReducer(activeTileUiReducer, undefined, createInitialActiveTileUiState)
   const [ghost, setGhost] = useState(createInitialGhost())
   const [ghostVisible, setGhostVisible] = useState(false)
   const [invalidPulse, setInvalidPulse] = useState(false)
@@ -202,17 +356,13 @@ function App() {
   })
   const clientId = useMemo(() => ensureClientId(), [])
   const serverUrl = useMemo(() => resolveServerUrl(), [])
+  const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
-  const activeTile: ActiveTile = useMemo(
-    () => ({
-      shape,
-      color,
-      material,
-      rotation,
-      mirrored,
-    }),
-    [shape, color, material, rotation, mirrored],
-  )
+  const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
+
+  const handlePaletteChange = useCallback((name: PaletteName): void => {
+    dispatchActiveTileUi({ type: 'set-palette', paletteName: name })
+  }, [])
 
   const loadSessions = useCallback(async (): Promise<void> => {
     setLobbyLoading(true)
@@ -245,6 +395,10 @@ function App() {
 
   const returnToLobby = useCallback((): void => {
     setMode('lobby')
+    setSessionId(null)
+    setRealtimeCapabilities(null)
+    setActiveChunkIds([])
+    setCollaborators({})
   }, [])
 
   const handleJoinSession = useCallback((nextSessionId: string): void => {
@@ -751,20 +905,19 @@ function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key.toLowerCase() === 'r') {
-        const direction = event.shiftKey ? -1 : 1
-        setRotation((prev) => quantizeRotation(prev + direction * (Math.PI / 2)))
+        dispatchActiveTileUi({ type: 'rotate-quarter', direction: event.shiftKey ? -1 : 1 })
       }
 
       if (event.key === ']') {
-        setRotation((prev) => normalizeAngle(prev + Math.PI / 12))
+        dispatchActiveTileUi({ type: 'rotate-fine', delta: Math.PI / 12 })
       }
 
       if (event.key === '[') {
-        setRotation((prev) => normalizeAngle(prev - Math.PI / 12))
+        dispatchActiveTileUi({ type: 'rotate-fine', delta: -Math.PI / 12 })
       }
 
       if (event.key.toLowerCase() === 'f') {
-        setMirrored((prev) => !prev)
+        dispatchActiveTileUi({ type: 'toggle-mirror' })
       }
 
       if (event.key.toLowerCase() === 'z') {
@@ -809,11 +962,11 @@ function App() {
       ...prev,
       target: {
         ...prev.target,
-        rotation,
-        mirrored,
+        rotation: activeTile.rotation,
+        mirrored: activeTile.mirrored,
       },
     }))
-  }, [rotation, mirrored])
+  }, [activeTile.mirrored, activeTile.rotation])
 
   const updatePointer = (x: number, y: number): void => {
     emitPointerMove({ x, y })
@@ -894,149 +1047,137 @@ function App() {
     })
   }
 
-  if (mode === 'lobby') {
-    return (
-      <main className="lobby-shell">
-        <div className="backdrop-gradient" />
-        <LobbyScreen
-          sessions={sessions}
-          loading={lobbyLoading}
-          error={lobbyError}
-          previousSessionId={previousSessionId}
-          creating={creatingSession}
-          joiningSessionId={joiningSessionId}
-          onRefresh={() => void loadSessions()}
-          selectedCanvasPreset={selectedCanvasPreset}
-          onCanvasPresetChange={setSelectedCanvasPreset}
-          onCreate={() => void handleCreateSession()}
-          onJoin={handleJoinSession}
-        />
-      </main>
-    )
-  }
-
-  return (
+  const content = mode === 'lobby' ? (
+    <main className="lobby-shell">
+      <div className="backdrop-gradient" />
+      <LobbyScreen
+        sessions={sessions}
+        loading={lobbyLoading}
+        error={lobbyError}
+        previousSessionId={previousSessionId}
+        creating={creatingSession}
+        joiningSessionId={joiningSessionId}
+        onRefresh={() => void loadSessions()}
+        selectedCanvasPreset={selectedCanvasPreset}
+        onCanvasPresetChange={setSelectedCanvasPreset}
+        onCreate={() => void handleCreateSession()}
+        onJoin={handleJoinSession}
+      />
+    </main>
+  ) : (
     <main className={invalidPulse ? 'app-shell invalid-pulse' : 'app-shell'}>
       <div className="backdrop-gradient" />
-      <ControlsPanel
-        shape={shape}
-        onShape={setShape}
-        material={material}
-        onMaterial={setMaterial}
-        paletteName={paletteName}
-        onPaletteName={(name) => {
-          setPaletteName(name)
-          setColor(palettes[name][0])
-        }}
-        color={color}
-        onColor={setColor}
-        rotation={rotation}
-        onRotateCw={() => setRotation((prev) => quantizeRotation(prev + Math.PI / 2))}
-        onRotateCcw={() => setRotation((prev) => quantizeRotation(prev - Math.PI / 2))}
-        onRotateFine={() => setRotation((prev) => normalizeAngle(prev + Math.PI / 12))}
-        onRotateFineCcw={() => setRotation((prev) => normalizeAngle(prev - Math.PI / 12))}
-        onMirror={() => setMirrored((prev) => !prev)}
+      <AppHeader
+        onReturnToLobby={returnToLobby}
+        connectionState={connectionState.status}
+        collaboratorCount={activeCollaborators.length}
         canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
         onUndo={handleUndo}
-        clearDisabled
-        onClear={() => {}}
-        onReturnToLobby={returnToLobby}
       />
-
-      <section className="canvas-shell">
-        <div className="status-strip" data-state={ghost.confidence}>
-          <StatusIndicator connectionState={connectionState} />
-          <span>{ghost.confidence.replace('-', ' ')}</span>
-          <span>{sequencedState.tiles.length} placed</span>
-          <span>{activeCollaborators.length} active</span>
-          <span>{zoomTier} zoom</span>
-          <span>
-            bounds {worldBounds.minX.toFixed(1)}..{worldBounds.maxX.toFixed(1)} / {worldBounds.minY.toFixed(1)}..
-            {worldBounds.maxY.toFixed(1)}
-          </span>
-        </div>
-
-        {activeCollaborators.length > 0 && (
-          <div className="collaborator-roster" aria-label="Active collaborators">
-            {activeCollaborators.map((collaborator) => (
-              <span key={collaborator.clientId} className="collaborator-chip">
-                {formatCollaboratorLabel(collaborator.clientId, clientId)}
-              </span>
-            ))}
+      <div className="canvas-workspace">
+        <section className="canvas-shell">
+          <div className="status-strip" data-state={ghost.confidence}>
+            <StatusIndicator connectionState={connectionState} />
+            <span>{ghost.confidence.replace('-', ' ')}</span>
+            <span>{sequencedState.tiles.length} placed</span>
           </div>
-        )}
+          {activeCollaborators.length > 0 && (
+            <div className="collaborator-roster" aria-label="Active collaborators">
+              {activeCollaborators.map((collaborator) => (
+                <span key={collaborator.clientId} className="collaborator-chip">
+                  {formatCollaboratorLabel(collaborator.clientId, clientId)}
+                </span>
+              ))}
+            </div>
+          )}
+          <CanvasErrorBoundary>
+            <Suspense fallback={<CanvasLoadingFallback />}>
+              <MosaicScene
+                tiles={sequencedState.tiles}
+                activeShape={activeTile.shape}
+                ghost={{
+                  transform: ghost.current,
+                  confidence: ghost.confidence,
+                  color: activeTile.color,
+                  material: activeTile.material,
+                  visible: ghostVisible,
+                }}
+                onPointerMove={updatePointer}
+                onPointerDown={updatePointer}
+                onPointerUp={attemptPlace}
+                onRotateDrag={(deltaX) => dispatchActiveTileUi({ type: 'rotate-fine', delta: deltaX * (Math.PI / 200) })}
+                remoteCursors={remoteCursors}
+                remoteSelections={remoteSelections}
+                worldBounds={worldBounds}
+                cameraPan={cameraPan}
+                cameraPolicy={cameraPolicy}
+                onCameraPan={(deltaX, deltaY) => {
+                  setCameraPan((prev) => ({
+                    x: prev.x - deltaX * cameraPolicy.panSensitivity,
+                    y: prev.y + deltaY * cameraPolicy.panSensitivity,
+                  }))
+                }}
+                onViewportChanged={onViewportChanged}
+                onZoomTierChanged={(zoom) => {
+                  const previousTier = zoomTierRef.current
+                  const nextTier = resolveZoomTier(previousTier, zoom)
+                  if (nextTier === previousTier) {
+                    return
+                  }
 
-        <MosaicScene
-          tiles={sequencedState.tiles}
-          activeShape={shape}
-          ghost={{
-            transform: ghost.current,
-            confidence: ghost.confidence,
-            color,
-            material,
-            visible: ghostVisible,
-          }}
-          onPointerMove={updatePointer}
-          onPointerDown={updatePointer}
-          onPointerUp={attemptPlace}
-          onRotateDrag={(deltaX) =>
-            setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
-          }
-          remoteCursors={remoteCursors}
-          remoteSelections={remoteSelections}
-          worldBounds={worldBounds}
-          cameraPan={cameraPan}
-          cameraPolicy={cameraPolicy}
-          onCameraPan={(deltaX, deltaY) => {
-            setCameraPan((prev) => ({
-              x: prev.x - deltaX * cameraPolicy.panSensitivity,
-              y: prev.y + deltaY * cameraPolicy.panSensitivity,
-            }))
-          }}
-          onViewportChanged={onViewportChanged}
-          onZoomTierChanged={(zoom) => {
-            const previousTier = zoomTierRef.current
-            const nextTier = resolveZoomTier(previousTier, zoom)
-            if (nextTier === previousTier) {
-              return
-            }
-
-            zoomTierRef.current = nextTier
-            setZoomTier(nextTier)
-            clientTelemetryRef.current.tierTransitions += 1
-            console.info('chunk_zoom_tier_transition', {
-              from: previousTier,
-              to: nextTier,
-              zoom,
-              totalTransitions: clientTelemetryRef.current.tierTransitions,
-            })
-          }}
+                  zoomTierRef.current = nextTier
+                  setZoomTier(nextTier)
+                  clientTelemetryRef.current.tierTransitions += 1
+                  console.info('chunk_zoom_tier_transition', {
+                    from: previousTier,
+                    to: nextTier,
+                    zoom,
+                    totalTransitions: clientTelemetryRef.current.tierTransitions,
+                  })
+                }}
+              />
+            </Suspense>
+          </CanvasErrorBoundary>
+          {canvasDebug && ghostVisible && (
+            <div className="debug-overlay">
+              <div className="debug-row">
+                <span className="debug-label">state</span>
+                <span className={`debug-value debug-state-${ghost.confidence}`}>{ghost.confidence}</span>
+              </div>
+              <div className="debug-row">
+                <span className="debug-label">reason</span>
+                <span className="debug-value">{ghost.debugReason}</span>
+              </div>
+              <div className="debug-row">
+                <span className="debug-label">pos</span>
+                <span className="debug-value">
+                  {ghost.target.position.x.toFixed(2)}, {ghost.target.position.y.toFixed(2)}
+                </span>
+              </div>
+              <div className="debug-row">
+                <span className="debug-label">tiles</span>
+                <span className="debug-value">{sequencedState.tiles.length}</span>
+              </div>
+            </div>
+          )}
+        </section>
+        <TilePalette
+          activeTile={activeTile}
+          paletteName={paletteName}
+          onPaletteName={handlePaletteChange}
+          paletteOpen={paletteOpen}
+          onTogglePaletteOpen={() => dispatchActiveTileUi({ type: 'toggle-palette-open' })}
+          onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
+          onMaterial={(material) => dispatchActiveTileUi({ type: 'set-material', material })}
+          onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
+          paletteFallbackAnnouncement={paletteFallbackAnnouncement}
         />
-
-        {ghostVisible && (
-          <div className="debug-overlay">
-            <div className="debug-row">
-              <span className="debug-label">state</span>
-              <span className={`debug-value debug-state-${ghost.confidence}`}>{ghost.confidence}</span>
-            </div>
-            <div className="debug-row">
-              <span className="debug-label">reason</span>
-              <span className="debug-value">{ghost.debugReason}</span>
-            </div>
-            <div className="debug-row">
-              <span className="debug-label">pos</span>
-              <span className="debug-value">
-                {ghost.target.position.x.toFixed(2)}, {ghost.target.position.y.toFixed(2)}
-              </span>
-            </div>
-            <div className="debug-row">
-              <span className="debug-label">tiles</span>
-              <span className="debug-value">{sequencedState.tiles.length}</span>
-            </div>
-          </div>
-        )}
-      </section>
+      </div>
     </main>
+  )
+
+  return (
+    <TooltipProvider delayDuration={250} skipDelayDuration={300}>{content}</TooltipProvider>
   )
 }
 

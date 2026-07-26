@@ -1,0 +1,61 @@
+:root {
+  /* Semantic color tokens */
+  --color-text-primary: var(--color-brown-900);
+  --color-surface-primary: var(--color-cream-100);
+  --color-surface-panel: rgba(247, 240, 227, 0.78);
+  --color-border-subtle: rgba(75, 56, 42, 0.18);
+  --color-accent-primary: var(--color-amber-500);
+  --color-feedback-error: var(--color-red-600);
+  --color-feedback-success: var(--color-green-500);
+  --color-feedback-warning: var(--color-yellow-500);
+  --color-feedback-muted: var(--color-gray-500);
+
+  /* Semantic status tokens */
+  --color-status-connected: var(--color-green-500);
+  --color-status-connecting: var(--color-yellow-500);
+  --color-status-reconnecting: var(--color-yellow-500);
+  --color-status-error: var(--color-red-600);
+  --color-status-disconnected: var(--color-gray-500);
+  --color-status-unknown: var(--color-gray-500);
+  --color-status-connected-bg: rgba(76, 175, 80, 0.1);
+  --color-status-connected-border: rgba(76, 175, 80, 0.3);
+  --color-status-connecting-bg: rgba(255, 193, 7, 0.1);
+  --color-status-connecting-border: rgba(255, 193, 7, 0.3);
+  --color-status-reconnecting-bg: rgba(255, 193, 7, 0.16);
+  --color-status-reconnecting-border: rgba(255, 193, 7, 0.35);
+  --color-status-error-bg: rgba(244, 67, 54, 0.1);
+  --color-status-error-border: rgba(244, 67, 54, 0.3);
+  --color-status-disconnected-bg: rgba(158, 158, 158, 0.1);
+  --color-status-disconnected-border: rgba(158, 158, 158, 0.3);
+  --color-status-unknown-bg: rgba(100, 100, 100, 0.1);
+  --color-status-unknown-border: rgba(100, 100, 100, 0.3);
+  --color-status-valid-ring: rgba(89, 145, 106, 0.34);
+  --color-status-near-valid-ring: rgba(163, 130, 78, 0.38);
+  --color-status-invalid-ring: rgba(170, 83, 83, 0.38);
+
+  /* Semantic spacing/radius/elevation */
+  --space-control-gap: var(--space-2);
+  --radius-component: var(--radius-5);
+  --radius-control: var(--radius-3);
+  --radius-action: var(--radius-pill);
+  --shadow-panel: var(--elevation-3);
+
+  /* Semantic typography */
+  --font-body: var(--font-family-body);
+  --font-display: var(--font-family-display);
+  --font-size-body: var(--font-size-md);
+  --font-size-label: var(--font-size-sm);
+  --font-size-heading: var(--font-size-2xl);
+
+  /* Semantic focus + motion */
+  --focus-ring-color: var(--color-accent-primary);
+  --transition-standard: var(--duration-base) var(--easing-standard);
+
+  /* Compatibility aliases for existing styles */
+  --ink: var(--color-text-primary);
+  --warm: var(--color-surface-primary);
+  --panel: var(--color-surface-panel);
+  --panel-border: var(--color-border-subtle);
+  --accent: var(--color-accent-primary);
+  --radius: var(--radius-component);
+}

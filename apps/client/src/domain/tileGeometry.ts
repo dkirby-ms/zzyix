@@ -5,6 +5,8 @@ export type TileShape = 'square' | 'triangle' | 'rectangle' | 'l-shape'
 export type MaterialVariant = 'ceramic' | 'glass' | 'stone'
 export type ConfidenceState = 'valid' | 'near-valid' | 'invalid'
 
+export const TILE_SHAPES: TileShape[] = ['square', 'triangle', 'rectangle', 'l-shape']
+
 export type Transform2D = {
   position: Vec2
   rotation: number
