@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { TilePalette } from './TilePalette'
+import { TILE_SHAPES } from '../domain/tileGeometry'
 
 afterEach(() => {
   cleanup()
@@ -68,6 +69,58 @@ describe('TilePalette', () => {
     expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'Color #67aeb3' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'Color #67aeb3' })).toHaveAttribute('data-state', 'on')
+  })
+
+  it('keeps shape radios accessible with visual preview cards', () => {
+    render(
+      <TilePalette
+        shape="square"
+        onShape={vi.fn()}
+        material="ceramic"
+        onMaterial={vi.fn()}
+        paletteName="terracotta"
+        onPaletteName={vi.fn()}
+        color="#d4614f"
+        onColor={vi.fn()}
+      />,
+    )
+
+    const shapeGroup = screen.getByRole('radiogroup', { name: 'Shape' })
+
+    for (const shape of TILE_SHAPES) {
+      const radio = within(shapeGroup).getByRole('radio', { name: shape })
+      expect(radio).toBeInTheDocument()
+      const preview = radio.querySelector('svg')
+      expect(preview).not.toBeNull()
+      expect(preview).toHaveAttribute('aria-hidden', 'true')
+    }
+
+    expect(screen.getByText('Square')).toBeInTheDocument()
+    expect(screen.getByText('Triangle')).toBeInTheDocument()
+    expect(screen.getByText('Rectangle')).toBeInTheDocument()
+    expect(screen.getByText('L-shape')).toBeInTheDocument()
+  })
+
+  it('keeps shape option radios aligned with the canonical geometry list', () => {
+    render(
+      <TilePalette
+        shape="square"
+        onShape={vi.fn()}
+        material="ceramic"
+        onMaterial={vi.fn()}
+        paletteName="terracotta"
+        onPaletteName={vi.fn()}
+        color="#d4614f"
+        onColor={vi.fn()}
+      />,
+    )
+
+    const shapeGroup = screen.getByRole('radiogroup', { name: 'Shape' })
+    const renderedShapeOptions = within(shapeGroup)
+      .getAllByRole('radio')
+      .map((radio) => radio.getAttribute('aria-label'))
+
+    expect(renderedShapeOptions).toEqual(TILE_SHAPES)
   })
 
   it('emits selection callbacks from the single-select controls', () => {

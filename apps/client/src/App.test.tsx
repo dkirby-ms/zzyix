@@ -928,6 +928,10 @@ describe('App lobby-first behavior', () => {
       expect.objectContaining({ shape: 'triangle', material: 'glass', color: '#d9efe6' }),
       expect.any(Function),
     )
+    expect(screen.getByRole('radio', { name: 'triangle' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'glass' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Color #d9efe6' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByText('Shape: triangle')).toBeInTheDocument()
     expect(screen.getByText('Material: glass')).toBeInTheDocument()
     expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()

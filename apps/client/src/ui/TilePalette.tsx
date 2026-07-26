@@ -1,7 +1,8 @@
 import { palettes } from './palettes'
 import { ToggleGroup, ToggleGroupItem } from './primitives/ToggleGroup'
-import type { MaterialVariant, TileShape } from '../domain/tileGeometry'
+import { TILE_SHAPES, type MaterialVariant, type TileShape } from '../domain/tileGeometry'
 import type { PaletteName } from './palettes'
+import { TileShapePreview } from './TileShapePreview'
 
 type TilePaletteProps = {
   shape: TileShape
@@ -14,9 +15,15 @@ type TilePaletteProps = {
   onColor: (color: string) => void
 }
 
-const shapes: TileShape[] = ['square', 'triangle', 'rectangle', 'l-shape']
 const materials: MaterialVariant[] = ['ceramic', 'glass', 'stone']
 const paletteNames = Object.keys(palettes) as PaletteName[]
+
+const shapeLabels: Record<TileShape, string> = {
+  square: 'Square',
+  triangle: 'Triangle',
+  rectangle: 'Rectangle',
+  'l-shape': 'L-shape',
+}
 
 export const TilePalette = ({
   shape,
@@ -43,9 +50,12 @@ export const TilePalette = ({
           }}
           aria-label="Shape"
         >
-          {shapes.map((entry) => (
+          {TILE_SHAPES.map((entry) => (
             <ToggleGroupItem key={entry} value={entry} aria-label={entry}>
-              {entry}
+              <span className="tile-shape-card">
+                <TileShapePreview shape={entry} className="tile-shape-card-preview" />
+                <span className="tile-shape-card-label">{shapeLabels[entry]}</span>
+              </span>
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
