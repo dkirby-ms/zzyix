@@ -864,6 +864,56 @@ describe('App lobby-first behavior', () => {
     expect(screen.getByRole('status')).toHaveTextContent('')
   })
 
+  it('keeps active selection in sync with keyboard rotation and mirror shortcuts', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    const initialRotation = screen.getByText('Shape: square').closest('.palette-region')?.querySelector('.tile-palette-summary')
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'r' })
+
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
+    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d4614f')).toBeInTheDocument()
+    expect(initialRotation).toBeTruthy()
+
+    fireEvent.keyDown(window, { key: 'f' })
+
+    expect(screen.getByText('Shape: square')).toBeInTheDocument()
+    expect(screen.getByText('Material: ceramic')).toBeInTheDocument()
+  })
+
+  it('toggles palette open and collapsed state from the palette header', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('radiogroup', { name: 'Shape' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
+
+    expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('radiogroup', { name: 'Shape' })).not.toBeInTheDocument()
+  })
+
   it('keeps active selection after successful placement acknowledgement', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
 

@@ -1,4 +1,4 @@
-import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
 import {
   applyChunkSubscriptionBudgets,
   shouldRecomputeVisibleChunks,
@@ -137,6 +137,112 @@ class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErro
 
 type ZoomTier = 'fine' | 'aggregate'
 
+type ActiveTileUiState = {
+  activeTile: ActiveTile
+  paletteName: PaletteName
+  paletteOpen: boolean
+  paletteFallbackAnnouncement: string
+}
+
+type ActiveTileUiAction =
+  | { type: 'set-shape'; shape: TileShape }
+  | { type: 'set-material'; material: ActiveTile['material'] }
+  | { type: 'set-color'; color: string }
+  | { type: 'set-palette'; paletteName: PaletteName }
+  | { type: 'rotate-quarter'; direction: 1 | -1 }
+  | { type: 'rotate-fine'; delta: number }
+  | { type: 'toggle-mirror' }
+  | { type: 'toggle-palette-open' }
+
+const createInitialActiveTileUiState = (): ActiveTileUiState => ({
+  activeTile: {
+    shape: 'square',
+    color: palettes.terracotta[0],
+    material: 'ceramic',
+    rotation: 0,
+    mirrored: false,
+  },
+  paletteName: 'terracotta',
+  paletteOpen: true,
+  paletteFallbackAnnouncement: '',
+})
+
+const activeTileUiReducer = (state: ActiveTileUiState, action: ActiveTileUiAction): ActiveTileUiState => {
+  switch (action.type) {
+    case 'set-shape':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          shape: action.shape,
+        },
+      }
+    case 'set-material':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          material: action.material,
+        },
+      }
+    case 'set-color':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          color: action.color,
+        },
+        paletteFallbackAnnouncement: '',
+      }
+    case 'set-palette': {
+      const { color: nextColor, didFallback } = resolvePaletteColorSelection(action.paletteName, state.activeTile.color)
+
+      return {
+        ...state,
+        paletteName: action.paletteName,
+        activeTile: {
+          ...state.activeTile,
+          color: nextColor,
+        },
+        paletteFallbackAnnouncement: didFallback
+          ? `Palette changed to ${action.paletteName}. ${state.activeTile.color} unavailable; selected ${nextColor}.`
+          : '',
+      }
+    }
+    case 'rotate-quarter':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          rotation: quantizeRotation(state.activeTile.rotation + action.direction * (Math.PI / 2)),
+        },
+      }
+    case 'rotate-fine':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          rotation: normalizeAngle(state.activeTile.rotation + action.delta),
+        },
+      }
+    case 'toggle-mirror':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          mirrored: !state.activeTile.mirrored,
+        },
+      }
+    case 'toggle-palette-open':
+      return {
+        ...state,
+        paletteOpen: !state.paletteOpen,
+      }
+    default:
+      return state
+  }
+}
+
 const resolveZoomTier = (previous: ZoomTier | null, zoom: number): ZoomTier => {
   if (previous === 'aggregate') {
     return zoom > AGGREGATE_TIER_EXIT_ZOOM ? 'fine' : 'aggregate'
@@ -199,13 +305,7 @@ function App() {
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
   )
-  const [shape, setShape] = useState<TileShape>('square')
-  const [material, setMaterial] = useState<'ceramic' | 'glass' | 'stone'>('ceramic')
-  const [paletteName, setPaletteName] = useState<PaletteName>('terracotta')
-  const [color, setColor] = useState<string>(palettes.terracotta[0])
-  const [paletteFallbackAnnouncement, setPaletteFallbackAnnouncement] = useState<string>('')
-  const [rotation, setRotation] = useState(0)
-  const [mirrored, setMirrored] = useState(false)
+  const [activeTileUiState, dispatchActiveTileUi] = useReducer(activeTileUiReducer, undefined, createInitialActiveTileUiState)
   const [ghost, setGhost] = useState(createInitialGhost())
   const [ghostVisible, setGhostVisible] = useState(false)
   const [invalidPulse, setInvalidPulse] = useState(false)
@@ -258,32 +358,10 @@ function App() {
   const serverUrl = useMemo(() => resolveServerUrl(), [])
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
-  const activeTile: ActiveTile = useMemo(
-    () => ({
-      shape,
-      color,
-      material,
-      rotation,
-      mirrored,
-    }),
-    [shape, color, material, rotation, mirrored],
-  )
+  const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
 
   const handlePaletteChange = useCallback((name: PaletteName): void => {
-    setPaletteName(name)
-    setColor((previousColor) => {
-      const { color: nextColor, didFallback } = resolvePaletteColorSelection(name, previousColor)
-
-      if (didFallback) {
-        setPaletteFallbackAnnouncement(
-          `Palette changed to ${name}. ${previousColor} unavailable; selected ${nextColor}.`,
-        )
-      } else {
-        setPaletteFallbackAnnouncement('')
-      }
-
-      return nextColor
-    })
+    dispatchActiveTileUi({ type: 'set-palette', paletteName: name })
   }, [])
 
   const loadSessions = useCallback(async (): Promise<void> => {
@@ -827,20 +905,19 @@ function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key.toLowerCase() === 'r') {
-        const direction = event.shiftKey ? -1 : 1
-        setRotation((prev) => quantizeRotation(prev + direction * (Math.PI / 2)))
+        dispatchActiveTileUi({ type: 'rotate-quarter', direction: event.shiftKey ? -1 : 1 })
       }
 
       if (event.key === ']') {
-        setRotation((prev) => normalizeAngle(prev + Math.PI / 12))
+        dispatchActiveTileUi({ type: 'rotate-fine', delta: Math.PI / 12 })
       }
 
       if (event.key === '[') {
-        setRotation((prev) => normalizeAngle(prev - Math.PI / 12))
+        dispatchActiveTileUi({ type: 'rotate-fine', delta: -Math.PI / 12 })
       }
 
       if (event.key.toLowerCase() === 'f') {
-        setMirrored((prev) => !prev)
+        dispatchActiveTileUi({ type: 'toggle-mirror' })
       }
 
       if (event.key.toLowerCase() === 'z') {
@@ -885,11 +962,11 @@ function App() {
       ...prev,
       target: {
         ...prev.target,
-        rotation,
-        mirrored,
+        rotation: activeTile.rotation,
+        mirrored: activeTile.mirrored,
       },
     }))
-  }, [rotation, mirrored])
+  }, [activeTile.mirrored, activeTile.rotation])
 
   const updatePointer = (x: number, y: number): void => {
     emitPointerMove({ x, y })
@@ -1017,20 +1094,18 @@ function App() {
             <Suspense fallback={<CanvasLoadingFallback />}>
               <MosaicScene
                 tiles={sequencedState.tiles}
-                activeShape={shape}
+                activeShape={activeTile.shape}
                 ghost={{
                   transform: ghost.current,
                   confidence: ghost.confidence,
-                  color,
-                  material,
+                  color: activeTile.color,
+                  material: activeTile.material,
                   visible: ghostVisible,
                 }}
                 onPointerMove={updatePointer}
                 onPointerDown={updatePointer}
                 onPointerUp={attemptPlace}
-                onRotateDrag={(deltaX) =>
-                  setRotation((prev) => normalizeAngle(prev + deltaX * (Math.PI / 200)))
-                }
+                onRotateDrag={(deltaX) => dispatchActiveTileUi({ type: 'rotate-fine', delta: deltaX * (Math.PI / 200) })}
                 remoteCursors={remoteCursors}
                 remoteSelections={remoteSelections}
                 worldBounds={worldBounds}
@@ -1087,18 +1162,16 @@ function App() {
           )}
         </section>
         <TilePalette
-          shape={shape}
-          onShape={setShape}
-          material={material}
-          onMaterial={setMaterial}
+          activeTile={activeTile}
           paletteName={paletteName}
           onPaletteName={handlePaletteChange}
-          color={color}
-          onColor={setColor}
+          paletteOpen={paletteOpen}
+          onTogglePaletteOpen={() => dispatchActiveTileUi({ type: 'toggle-palette-open' })}
+          onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
+          onMaterial={(material) => dispatchActiveTileUi({ type: 'set-material', material })}
+          onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
+          paletteFallbackAnnouncement={paletteFallbackAnnouncement}
         />
-        <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
-          {paletteFallbackAnnouncement}
-        </div>
       </div>
     </main>
   )

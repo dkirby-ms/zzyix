@@ -18,14 +18,21 @@ describe('TilePalette', () => {
   it('renders a radio-style single-select surface across all rows', () => {
     render(
       <TilePalette
-        shape="square"
+        activeTile={{
+          shape: 'square',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={vi.fn()}
-        material="ceramic"
         onMaterial={vi.fn()}
         paletteName="terracotta"
         onPaletteName={vi.fn()}
-        color="#d4614f"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
       />,
     )
 
@@ -39,14 +46,21 @@ describe('TilePalette', () => {
   it('renders an always-visible active selection summary', () => {
     render(
       <TilePalette
-        shape="triangle"
+        activeTile={{
+          shape: 'triangle',
+          color: '#67aeb3',
+          material: 'glass',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={vi.fn()}
-        material="glass"
         onMaterial={vi.fn()}
         paletteName="lagoon"
         onPaletteName={vi.fn()}
-        color="#67aeb3"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
       />,
     )
 
@@ -60,14 +74,21 @@ describe('TilePalette', () => {
   it('exposes selected state semantics on radio controls and swatches', () => {
     render(
       <TilePalette
-        shape="triangle"
+        activeTile={{
+          shape: 'triangle',
+          color: '#67aeb3',
+          material: 'glass',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={vi.fn()}
-        material="glass"
         onMaterial={vi.fn()}
         paletteName="lagoon"
         onPaletteName={vi.fn()}
-        color="#67aeb3"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
       />,
     )
 
@@ -81,14 +102,21 @@ describe('TilePalette', () => {
   it('keeps shape radios accessible with visual preview cards', () => {
     render(
       <TilePalette
-        shape="square"
+        activeTile={{
+          shape: 'square',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={vi.fn()}
-        material="ceramic"
         onMaterial={vi.fn()}
         paletteName="terracotta"
         onPaletteName={vi.fn()}
-        color="#d4614f"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
       />,
     )
 
@@ -111,14 +139,21 @@ describe('TilePalette', () => {
   it('keeps shape option radios aligned with the canonical geometry list', () => {
     render(
       <TilePalette
-        shape="square"
+        activeTile={{
+          shape: 'square',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={vi.fn()}
-        material="ceramic"
         onMaterial={vi.fn()}
         paletteName="terracotta"
         onPaletteName={vi.fn()}
-        color="#d4614f"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
       />,
     )
 
@@ -135,14 +170,21 @@ describe('TilePalette', () => {
 
     render(
       <TilePalette
-        shape="square"
+        activeTile={{
+          shape: 'square',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={onShape}
-        material="ceramic"
         onMaterial={vi.fn()}
         paletteName="terracotta"
         onPaletteName={vi.fn()}
-        color="#d4614f"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
       />,
     )
 
@@ -159,14 +201,21 @@ describe('TilePalette', () => {
 
     render(
       <TilePalette
-        shape="square"
+        activeTile={{
+          shape: 'square',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={onShape}
-        material="ceramic"
         onMaterial={vi.fn()}
         paletteName="terracotta"
         onPaletteName={vi.fn()}
-        color="#d4614f"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
       />,
     )
 
@@ -191,16 +240,25 @@ describe('TilePalette', () => {
 
     render(
       <TilePalette
-        shape="square"
+        activeTile={{
+          shape: 'square',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
         onShape={onShape}
-        material="ceramic"
         onMaterial={onMaterial}
         paletteName="terracotta"
         onPaletteName={onPaletteName}
-        color="#d4614f"
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
         onColor={onColor}
+        paletteFallbackAnnouncement=""
       />,
     )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
 
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
     fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
@@ -211,5 +269,37 @@ describe('TilePalette', () => {
     expect(onMaterial).toHaveBeenCalledWith('glass')
     expect(onPaletteName).toHaveBeenCalledWith('lagoon')
     expect(onColor).toHaveBeenCalledWith('#eea655')
+  })
+
+  it('toggles palette body visibility from the header button', () => {
+    const onTogglePaletteOpen = vi.fn()
+
+    render(
+      <TilePalette
+        activeTile={{
+          shape: 'square',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
+        onShape={vi.fn()}
+        onMaterial={vi.fn()}
+        paletteName="terracotta"
+        onPaletteName={vi.fn()}
+        paletteOpen={false}
+        onTogglePaletteOpen={onTogglePaletteOpen}
+        onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Expand' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('radiogroup', { name: 'Shape' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }))
+
+    expect(onTogglePaletteOpen).toHaveBeenCalledTimes(1)
   })
 })

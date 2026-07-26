@@ -3,16 +3,18 @@ import { ToggleGroup, ToggleGroupItem } from './primitives/ToggleGroup'
 import { TILE_SHAPES, type MaterialVariant, type TileShape } from '../domain/tileGeometry'
 import type { PaletteName } from './palettes'
 import { TileShapePreview } from './TileShapePreview'
+import type { ActiveTile } from '../interaction/controller'
 
 type TilePaletteProps = {
-  shape: TileShape
+  activeTile: ActiveTile
   onShape: (shape: TileShape) => void
-  material: MaterialVariant
   onMaterial: (material: MaterialVariant) => void
   paletteName: PaletteName
   onPaletteName: (name: PaletteName) => void
-  color: string
+  paletteOpen: boolean
+  onTogglePaletteOpen: () => void
   onColor: (color: string) => void
+  paletteFallbackAnnouncement: string
 }
 
 const materials: MaterialVariant[] = ['ceramic', 'glass', 'stone']
@@ -32,23 +34,31 @@ const isMaterialVariant = (value: string): value is MaterialVariant => materials
 const isPaletteName = (value: string): value is PaletteName => paletteNames.includes(value as PaletteName)
 
 export const TilePalette = ({
-  shape,
+  activeTile,
   onShape,
-  material,
   onMaterial,
   paletteName,
   onPaletteName,
-  color,
+  paletteOpen,
+  onTogglePaletteOpen,
   onColor,
+  paletteFallbackAnnouncement,
 }: TilePaletteProps) => {
   return (
     <aside className="palette-region" aria-label="Tile palette controls">
+      <div className="palette-header-row">
+        <h2>Tile Palette</h2>
+        <button type="button" onClick={onTogglePaletteOpen} aria-expanded={paletteOpen} aria-controls="tile-palette-body">
+          {paletteOpen ? 'Collapse' : 'Expand'}
+        </button>
+      </div>
+      <div id="tile-palette-body" hidden={!paletteOpen}>
       <section>
         <h2>Shape</h2>
         <ToggleGroup
           type="single"
           className="shape-grid"
-          value={shape}
+          value={activeTile.shape}
           onValueChange={(value) => {
             if (value && isTileShape(value)) {
               onShape(value)
@@ -95,7 +105,7 @@ export const TilePalette = ({
         <ToggleGroup
           type="single"
           className="pill-row"
-          value={material}
+          value={activeTile.material}
           onValueChange={(value) => {
             if (value && isMaterialVariant(value)) {
               onMaterial(value)
@@ -134,7 +144,7 @@ export const TilePalette = ({
         <ToggleGroup
           type="single"
           className="color-row"
-          value={color}
+          value={activeTile.color}
           onValueChange={(value) => {
             if (value) {
               onColor(value)
@@ -159,11 +169,15 @@ export const TilePalette = ({
 
       <section className="tile-palette-summary" aria-label="Active selection summary">
         <h2>Active Selection</h2>
-        <p>Shape: {shape}</p>
-        <p>Material: {material}</p>
+        <p>Shape: {activeTile.shape}</p>
+        <p>Material: {activeTile.material}</p>
         <p>Palette: {paletteName}</p>
-        <p>Color: {color}</p>
+        <p>Color: {activeTile.color}</p>
       </section>
+      </div>
+      <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+        {paletteFallbackAnnouncement}
+      </div>
     </aside>
   )
 }
