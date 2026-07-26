@@ -18,16 +18,18 @@ export const AppHeader = ({
       <button type="button" className="return-btn" onClick={onReturnToLobby}>
         ← Back
       </button>
-      <span className="app-title">Mosaic Atelier</span>
-      <span className="collaborator-summary">
-        {collaboratorCount} active
-      </span>
-      <span className="connection-badge" data-state={connectionState}>
-        {connectionState}
-      </span>
-      <button type="button" disabled={!canUndo} onClick={onUndo}>
-        Undo
-      </button>
+      <span className="app-header-title">Mosaic Atelier</span>
+      <div className="app-header-meta">
+        <span className="collaborator-summary">
+          {collaboratorCount} active
+        </span>
+        <span className="connection-badge" data-state={connectionState}>
+          {connectionState}
+        </span>
+        <button type="button" disabled={!canUndo} onClick={onUndo}>
+          Undo
+        </button>
+      </div>
     </header>
   )
 }

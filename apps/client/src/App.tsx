@@ -299,6 +299,10 @@ function App() {
 
   const returnToLobby = useCallback((): void => {
     setMode('lobby')
+    setSessionId(null)
+    setRealtimeCapabilities(null)
+    setActiveChunkIds([])
+    setCollaborators({})
   }, [])
 
   const handleJoinSession = useCallback((nextSessionId: string): void => {

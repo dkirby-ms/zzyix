@@ -11,7 +11,15 @@ Gaps and differences identified between research findings and the implementation
 
 ### Plan Deviations from Research
 
-* None.
+* DD-01: Return-to-lobby lifecycle now explicitly clears session-scoped connection context.
+  * Plan specifies: Preserve lobby navigation behavior after shell refactor.
+  * Implementation differs: Added explicit reset of `sessionId`, chunk state, collaborators, and realtime capabilities on lobby return.
+  * Rationale: Review identified stale active session context persisting after back navigation.
+
+* DD-02: App-level shell tests now use real header/action/palette components instead of lightweight UI mocks.
+  * Plan specifies: Add/update App-level assertions for shell behavior and overflow safety.
+  * Implementation differs: Removed component mocks and validated real semantics (`banner`, `complementary`, action controls).
+  * Rationale: Review flagged mock-heavy overflow test fidelity gap.
 
 ## Implementation Paths Considered
 
@@ -43,3 +51,6 @@ Items identified during planning that fall outside current scope.
 * WI-02: Runtime debug toggling strategy — Define whether diagnostics can be enabled via runtime query/local override in non-production environments (low)
   * Source: Research open question and DD-01 rationale
   * Dependency: Initial debug-gating implementation and developer feedback
+* WI-03: Standardize phase-level validation evidence format in changes logs (medium)
+  * Source: Review finding on incomplete step-level command traceability
+  * Dependency: Next planning artifact update cycle

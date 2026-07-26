@@ -5,10 +5,11 @@ import { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from '.
 import type { SessionSummary } from './network/session'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
-const { createSessionMock, listSessionsMock, useSocketConnectionMock } = vi.hoisted(() => ({
+const { createSessionMock, listSessionsMock, useSocketConnectionMock, resolveCanvasDebugMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn<() => Promise<string>>(),
   listSessionsMock: vi.fn<() => Promise<SessionSummary[]>>(),
   useSocketConnectionMock: vi.fn(() => ({ current: null })),
+  resolveCanvasDebugMock: vi.fn(() => false),
 }))
 
 const sessionState = {
@@ -37,27 +38,7 @@ vi.mock('./network/useSocketConnection', () => ({
 }))
 
 vi.mock('./config/debugFlags', () => ({
-  resolveCanvasDebug: vi.fn(() => false),
-}))
-
-vi.mock('./ui/AppHeader', () => ({
-  AppHeader: ({ onReturnToLobby, collaboratorCount }: { onReturnToLobby: () => void; collaboratorCount: number }) => (
-    <div data-testid="app-header" data-collaborator-count={collaboratorCount}>
-      <button type="button" onClick={onReturnToLobby}>Return to Lobby</button>
-    </div>
-  ),
-}))
-
-vi.mock('./ui/CanvasActionBar', () => ({
-  CanvasActionBar: ({ onUndo, canUndo }: { onUndo: () => void; canUndo: boolean }) => (
-    <div data-testid="canvas-action-bar">
-      <button type="button" disabled={!canUndo} onClick={onUndo}>Undo</button>
-    </div>
-  ),
-}))
-
-vi.mock('./ui/ControlsPanel', () => ({
-  ControlsPanel: () => <div data-testid="controls-panel">controls</div>,
+  resolveCanvasDebug: resolveCanvasDebugMock,
 }))
 
 vi.mock('./render/MosaicScene', () => ({
@@ -137,6 +118,8 @@ describe('App lobby-first behavior', () => {
     listSessionsMock.mockReset()
     createSessionMock.mockReset()
     useSocketConnectionMock.mockClear()
+    resolveCanvasDebugMock.mockReset()
+    resolveCanvasDebugMock.mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -151,7 +134,7 @@ describe('App lobby-first behavior', () => {
 
     await screen.findByText('Choose a Canvas')
     expect(screen.getByText('Last used')).toBeInTheDocument()
-    expect(screen.queryByTestId('controls-panel')).not.toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Palette controls' })).not.toBeInTheDocument()
     expect(useSocketConnectionMock).toHaveBeenCalled()
     const firstSocketCall = useSocketConnectionMock.mock.calls[0] as unknown[] | undefined
     expect(firstSocketCall?.[1]).toBeNull()
@@ -166,10 +149,10 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
       expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
-      expect(screen.getByTestId('app-header')).toBeInTheDocument()
-      expect(screen.getByTestId('canvas-action-bar')).toBeInTheDocument()
+      expect(screen.getByRole('banner')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Mirror' })).toBeInTheDocument()
     })
 
     const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
@@ -187,7 +170,7 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create Canvas' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
     })
 
     expect(createSessionMock).toHaveBeenCalledTimes(1)
@@ -205,7 +188,7 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
     })
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
@@ -362,7 +345,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
 
     vi.useFakeTimers()
 
@@ -462,7 +445,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -504,7 +487,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -548,7 +531,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -673,7 +656,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
 
     const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     const onSnapshot = socketCall[3] as (payload: any) => void
@@ -754,7 +737,7 @@ describe('App lobby-first behavior', () => {
     await screen.findByRole('button', { name: 'Join' })
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
-    expect(await screen.findByTestId('controls-panel')).toBeInTheDocument()
+    expect(await screen.findByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
 
     const initialSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     expect(initialSocketCall[16]).toBe(false)
@@ -796,7 +779,7 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('controls-panel')).toBeInTheDocument()
+      expect(screen.getByRole('complementary', { name: 'Palette controls' })).toBeInTheDocument()
     })
 
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth)
@@ -813,15 +796,19 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Join' }))
 
     await waitFor(() => {
-      expect(screen.getByTestId('app-header')).toBeInTheDocument()
+      expect(screen.getByRole('banner')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Return to Lobby' }))
+    fireEvent.click(screen.getByRole('button', { name: /Back/i }))
 
     await waitFor(() => {
       expect(screen.getByText('Choose a Canvas')).toBeInTheDocument()
-      expect(screen.queryByTestId('app-header')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Back/i })).not.toBeInTheDocument()
+      expect(screen.queryByText('Mosaic Atelier')).not.toBeInTheDocument()
     })
+
+    const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
+    expect(lastSocketCall?.[1]).toBeNull()
   })
 
   it('debug diagnostics are hidden by default in canvas mode', async () => {
@@ -837,5 +824,25 @@ describe('App lobby-first behavior', () => {
     })
 
     expect(document.querySelector('.debug-overlay')).toBeNull()
+  })
+
+  it('shows debug diagnostics when debug mode is enabled and pointer is active', async () => {
+    resolveCanvasDebugMock.mockReturnValue(true)
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+
+    await waitFor(() => {
+      expect(document.querySelector('.debug-overlay')).not.toBeNull()
+    })
   })
 })

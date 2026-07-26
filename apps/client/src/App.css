@@ -184,6 +184,10 @@
   min-width: 0;
 }
 
+.return-btn {
+  flex: 0 0 auto;
+}
+
 .app-header-title {
   font-family: var(--font-display, 'Fraunces', serif);
   font-size: 1.1rem;
@@ -201,6 +205,14 @@
   gap: 0.5rem;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+.collaborator-summary,
+.connection-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvas-workspace {

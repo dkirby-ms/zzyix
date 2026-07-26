@@ -93,6 +93,21 @@ Refactor the client canvas-mode shell into a canvas-first responsive architectur
 * [x] Step 4.3: Report blocking issues
   * Document blockers and recommend additional planning where needed
 
+### [x] Implementation Phase 5: Post-review rework and evidence closure
+
+<!-- parallelizable: false -->
+
+* [x] Step 5.1: Clear session-scoped connection context when returning to lobby
+  * Ensure `sessionId` and related realtime state are reset when leaving canvas mode
+* [x] Step 5.2: Align AppHeader class naming and style hooks
+  * Match component classes to stylesheet selectors and add missing utility classes
+* [x] Step 5.3: Replace mocked-shell App tests with real shell component coverage
+  * Remove AppHeader/CanvasActionBar/ControlsPanel test doubles and assert real DOM contracts
+* [x] Step 5.4: Add debug-enabled diagnostics positive-path assertion
+  * Validate `.debug-overlay` appears when debug mode is enabled and pointer activity occurs
+* [x] Step 5.5: Re-run full validation and capture outcome
+  * Execute lint, test, and build after rework
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-25/canvas-first-responsive-app-shell-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.

@@ -29,6 +29,10 @@ Refactor the client canvas-mode shell into a canvas-first responsive architectur
 ### Modified (cont.)
 
 * apps/client/src/App.tsx - Imported `resolveCanvasDebug`; added `canvasDebug` memo; gated `debug-overlay` behind `canvasDebug && ghostVisible`
+* apps/client/src/App.tsx - Updated lobby return handler to clear `sessionId`, realtime capability state, active chunk subscriptions, and collaborator map
+* apps/client/src/ui/AppHeader.tsx - Aligned title class to `.app-header-title` and grouped metadata/actions within `.app-header-meta`
+* apps/client/src/App.css - Added `.return-btn`, `.collaborator-summary`, and `.connection-badge` style hooks for overflow-safe header metadata rendering
+* apps/client/src/App.test.tsx - Removed AppHeader/CanvasActionBar/ControlsPanel mocks; switched assertions to real shell semantics; added debug-enabled overlay positive-path test; asserted socket/session reset after lobby return
 
 ### Removed
 
@@ -55,3 +59,14 @@ All four implementation phases completed successfully. 58/58 tests pass across 1
 **No dependency or infrastructure changes.**
 
 **Chunk size warning (MosaicScene 1 MB)** is pre-existing; not introduced by this change set.
+
+## Additional Validation (2026-07-26 Rework)
+
+* `npm run test --workspace apps/client -- App.test.tsx --run` - Pass (17/17)
+* `npm run lint` - Pass
+* `npm run test` - Pass
+	* `apps/client`: 59/59 tests passing
+	* `apps/server`: 66/66 tests passing
+* `npm run build` - Pass
+	* `apps/client` build pass (existing large chunk warning remains)
+	* `apps/server` build pass
