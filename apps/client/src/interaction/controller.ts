@@ -3,7 +3,9 @@ import {
   defaultBounds,
   solveGuidedPlacement,
 } from '../domain/placementSolver'
+import { resolveGridPlacement } from '../domain/gridPlacement'
 import type { Vec2 } from '../domain/math2d'
+import type { GridPattern } from '../domain/gridPatterns'
 import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 
@@ -52,7 +54,12 @@ export type GhostState = {
   magnetStrength: number
   rejection: Vec2
   debugReason: string
+  guideSlotId?: string
 }
+
+export type PlacementGuide =
+  | { enabled: false }
+  | { enabled: true; pattern: GridPattern }
 
 export const createInitialGhost = (): GhostState => ({
   current: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -62,6 +69,7 @@ export const createInitialGhost = (): GhostState => ({
   magnetStrength: 0,
   rejection: { x: 0, y: 0 },
   debugReason: 'no pointer yet',
+  guideSlotId: undefined,
 })
 
 export const createInitialSequencedTilesState = (): SequencedTilesState => ({
@@ -178,7 +186,27 @@ export const updateGhostTarget = (
   activeTile: ActiveTile,
   settled: TileInstance[],
   bounds: MosaicBounds = defaultBounds,
+  guide: PlacementGuide = { enabled: false },
 ): GhostState => {
+  if (guide.enabled) {
+    const solved = resolveGridPlacement(pointer, activeTile.shape, guide.pattern, settled, bounds)
+
+    return {
+      current: {
+        position: pointer,
+        rotation: activeTile.rotation,
+        mirrored: activeTile.mirrored,
+      },
+      target: solved.transform,
+      confidence: solved.state,
+      valid: solved.valid,
+      magnetStrength: 1,
+      rejection: solved.correction,
+      debugReason: solved.reason,
+      guideSlotId: solved.slot.id,
+    }
+  }
+
   const solved = solveGuidedPlacement(
     pointer,
     activeTile.shape,
@@ -200,6 +228,7 @@ export const updateGhostTarget = (
     magnetStrength: solved.magnetStrength,
     rejection: solved.correction,
     debugReason: solved.reason,
+    guideSlotId: undefined,
   }
 }
 

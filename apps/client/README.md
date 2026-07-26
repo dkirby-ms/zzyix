@@ -14,11 +14,7 @@ This client prototype is the starting point for the full collaborative system ar
 3. Backend authoritative service for validation and conflict handling
 4. Postgres for persistent canvas, tiles, and operation history
 
-The experience is intentionally organic:
-- no visible grid
-- no rigid snap jumps
-- ghost tile guidance with soft magnetization
-- tactile settle animation on valid release
+Placement uses the raw pointer by default. An optional local grid overlay can instead provide strict, exact pattern-slot guidance without changing settled tiles or shared canvas state.
 
 ## Features
 
@@ -28,7 +24,8 @@ The experience is intentionally organic:
 - Dedicated Tile Palette with radio-style single-select rows for shape, material, palette, and color
 - Always-visible active selection summary to confirm current shape/material/palette/color
 - 90-degree rotation controls (+ keyboard), mirror toggle
-- Hidden guidance model (jittered anchor field) for magnetic fit without exposing lattice cells
+- Optional square lattice, running bond, and triangle tessellation overlays
+- Strict pattern-slot placement with compatible-shape guidance
 - Polygon-based validation with SAT overlap checks and bounds enforcement
 - Confidence states: valid, near-valid, invalid
 - Invalid placement feedback via resistance/repulsion + visual state strip
@@ -89,22 +86,29 @@ npm run test
 - Undo: UI button or `Z`
 - Clear: UI button
 - Camera pan/zoom: mouse/touch gestures (rotation disabled)
+- Grid overlay: toggle the canvas-local control, then choose a constructible pattern
 
 Accessibility notes:
 
 - Tile Palette rows use radio-group semantics so selected state is announced consistently.
+- Grid pattern choices use the same keyboard-operable single-select semantics and name every compatible shape in text.
 - Color swatches keep a 44px minimum touch target via design tokens.
 - Palette switches preserve the selected color when available; when unavailable, the fallback is deterministic and announced via a polite status region.
+- Grid visibility and pattern choice are local editing preferences. Hiding the overlay retains the selected pattern and never changes placed tiles.
 
 ## Project Structure
 
 - `src/domain/math2d.ts`: vector/math/easing utilities
 - `src/domain/tileGeometry.ts`: shape definitions, convex decomposition, transforms
-- `src/domain/placementSolver.ts`: hidden guidance anchors, SAT collision, validity/confidence solving
+- `src/domain/placementSolver.ts`: SAT collision, bounds, adjacency, and raw-pointer validation
+- `src/domain/gridPatterns.ts`: constructible world-origin pattern catalog and viewport-local slot generation
+- `src/domain/gridPlacement.ts`: strict exact-slot candidate selection through the existing validator
 - `src/interaction/controller.ts`: pointer-target updates, ghost interpolation, release placement logic
 - `src/render/materials.ts`: material presets and shader enrichment (fresnel + grain noise)
-- `src/render/MosaicScene.tsx`: WebGL scene, lighting, ghost + settled tile rendering, interaction plane
+- `src/render/GridOverlay.tsx`: batched, viewport-cullable canonical-outline overlay rendering
+- `src/render/MosaicScene.tsx`: WebGL scene, overlay, lighting, ghost + settled tile rendering, interaction plane
 - `src/ui/TilePalette.tsx`: tile palette controls and active selection summary
+- `src/ui/GridOverlayControls.tsx`: accessible grid toggle, pattern chooser, and compatibility feedback
 
 ## Quality Notes
 

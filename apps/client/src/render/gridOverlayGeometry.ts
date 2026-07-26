@@ -1,0 +1,90 @@
+import { generateGridPatternSlots, getViewportCellRange } from '../domain/gridPatterns'
+import { validatePlacement } from '../domain/placementSolver'
+import { getTileDefinition, transformPolygon } from '../domain/tileGeometry'
+import type { GridPattern, GridPatternSlot, WorldViewport } from '../domain/gridPatterns'
+import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
+import type { TileShape } from '../domain/tileGeometry'
+
+export type GridOverlayVisualState = 'structural' | 'placeable' | 'blocked' | 'active'
+
+export type GridOverlaySegmentGroups = Record<GridOverlayVisualState, number[]>
+
+export type BuildGridOverlaySegmentsInput = {
+  pattern: GridPattern
+  viewport: WorldViewport
+  activeShape: TileShape
+  tiles: TileInstance[]
+  bounds: MosaicBounds
+  activeSlotId?: string
+}
+
+const createEmptyGroups = (): GridOverlaySegmentGroups => ({
+  structural: [],
+  placeable: [],
+  blocked: [],
+  active: [],
+})
+
+export const classifyGridPatternSlot = (
+  slot: GridPatternSlot,
+  activeShape: TileShape,
+  tiles: TileInstance[],
+  bounds: MosaicBounds,
+  activeSlotId?: string,
+): GridOverlayVisualState => {
+  if (slot.id === activeSlotId) {
+    return 'active'
+  }
+
+  if (slot.shape !== activeShape) {
+    return 'structural'
+  }
+
+  return validatePlacement(slot.shape, slot.transform, tiles, bounds).valid
+    ? 'placeable'
+    : 'blocked'
+}
+
+const appendOutlineSegments = (positions: number[], outline: Array<{ x: number; y: number }>): void => {
+  for (let index = 0; index < outline.length; index += 1) {
+    const start = outline[index]
+    const end = outline[(index + 1) % outline.length]
+    positions.push(start.x, start.y, 0, end.x, end.y, 0)
+  }
+}
+
+const appendActiveMarker = (positions: number[], slot: GridPatternSlot): void => {
+  const { x, y } = slot.transform.position
+  const markerRadius = 0.12
+  positions.push(
+    x - markerRadius, y, 0,
+    x + markerRadius, y, 0,
+    x, y - markerRadius, 0,
+    x, y + markerRadius, 0,
+  )
+}
+
+export const buildGridOverlaySegments = ({
+  pattern,
+  viewport,
+  activeShape,
+  tiles,
+  bounds,
+  activeSlotId,
+}: BuildGridOverlaySegmentsInput): GridOverlaySegmentGroups => {
+  const groups = createEmptyGroups()
+  const range = getViewportCellRange(pattern, viewport)
+  const slots = generateGridPatternSlots(pattern, range)
+
+  for (const slot of slots) {
+    const state = classifyGridPatternSlot(slot, activeShape, tiles, bounds, activeSlotId)
+    const outline = transformPolygon(getTileDefinition(slot.shape).outline, slot.transform)
+    appendOutlineSegments(groups[state], outline)
+
+    if (state === 'active') {
+      appendActiveMarker(groups.active, slot)
+    }
+  }
+
+  return groups
+}

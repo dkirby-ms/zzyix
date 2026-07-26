@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { vec2 } from '../domain/math2d'
+import { GRID_PATTERNS } from '../domain/gridPatterns'
 import {
   applySequencedSnapshot,
   createServerTileId,
@@ -79,6 +80,52 @@ describe('interaction controller', () => {
 
     const ghostInsideWideBounds = updateGhostTarget(vec2(4, 0), active, [], wideBounds)
     expect(ghostInsideWideBounds.valid).toBe(true)
+  })
+
+  it('preserves raw pointer behavior when the placement guide is omitted or disabled', () => {
+    const active = {
+      shape: 'square' as const,
+      color: '#fff',
+      material: 'ceramic' as const,
+      rotation: Math.PI / 2,
+      mirrored: true,
+    }
+    const pointer = vec2(0.17, -0.23)
+
+    const omitted = updateGhostTarget(pointer, active, [])
+    const disabled = updateGhostTarget(pointer, active, [], undefined, { enabled: false })
+
+    expect(omitted.target).toEqual({
+      position: pointer,
+      rotation: active.rotation,
+      mirrored: active.mirrored,
+    })
+    expect(disabled.target).toEqual(omitted.target)
+    expect(disabled.guideSlotId).toBeUndefined()
+  })
+
+  it('routes enabled placement guides through exact pattern slots', () => {
+    const active = {
+      shape: 'triangle' as const,
+      color: '#fff',
+      material: 'ceramic' as const,
+      rotation: Math.PI / 2,
+      mirrored: true,
+    }
+    const pattern = GRID_PATTERNS.find((entry) => entry.id === 'triangle-tessellation')!
+    const guided = updateGhostTarget(
+      vec2(0.66, 0.04),
+      active,
+      [],
+      undefined,
+      { enabled: true, pattern },
+    )
+
+    expect(guided.guideSlotId).toContain('triangle-tessellation')
+    expect(guided.target.position).not.toEqual({ x: 0.66, y: 0.04 })
+    expect(guided.target.rotation).toBe(Math.PI)
+    expect(guided.target.mirrored).toBe(false)
+    expect(guided.valid).toBe(true)
   })
 
   it('rejects invalid release and accepts valid release', () => {

@@ -46,6 +46,9 @@ vi.mock('./render/MosaicScene', () => ({
   MosaicScene: ({
     remoteCursors,
     remoteSelections,
+    tiles,
+    ghost,
+    gridOverlay,
     worldBounds,
     onPointerMove,
     onPointerUp,
@@ -57,6 +60,9 @@ vi.mock('./render/MosaicScene', () => ({
   }: {
     remoteCursors?: Array<{ clientId: string }>
     remoteSelections?: Array<{ clientId: string; tileId: string }>
+    tiles?: Array<{ id: string; transform: { position: { x: number; y: number }; rotation: number; mirrored?: boolean } }>
+    ghost?: { transform: { position: { x: number; y: number }; rotation: number; mirrored?: boolean } }
+    gridOverlay?: { pattern: { id: string }; activeSlotId?: string }
     worldBounds?: { minX: number; maxX: number; minY: number; maxY: number }
     onPointerMove?: (x: number, y: number) => void
     onPointerUp?: () => void
@@ -74,6 +80,13 @@ vi.mock('./render/MosaicScene', () => ({
       data-testid="mosaic-scene"
       data-remote-cursors={remoteCursors?.length ?? 0}
       data-remote-selections={remoteSelections?.length ?? 0}
+      data-tile-count={tiles?.length ?? 0}
+      data-tile-transforms={JSON.stringify(tiles?.map((tile) => tile.transform) ?? [])}
+      data-grid-pattern={gridOverlay?.pattern.id ?? 'off'}
+      data-grid-slot={gridOverlay?.activeSlotId ?? 'none'}
+      data-ghost-transform={ghost
+        ? `${ghost.transform.position.x},${ghost.transform.position.y},${ghost.transform.rotation},${ghost.transform.mirrored ?? false}`
+        : 'unset'}
       data-min-zoom={cameraPolicy?.minZoom ?? -1}
       data-max-zoom={cameraPolicy?.maxZoom ?? -1}
       data-pan-sensitivity={cameraPolicy?.panSensitivity ?? -1}
@@ -86,6 +99,9 @@ vi.mock('./render/MosaicScene', () => ({
       </button>
       <button type="button" onClick={() => onPointerMove?.(5, 5)}>
         Move Pointer Far
+      </button>
+      <button type="button" onClick={() => onPointerMove?.(0.66, 0.04)}>
+        Move Pointer Offset
       </button>
       <button type="button" onClick={() => onPointerUp?.()}>
         Place Tile
@@ -1068,6 +1084,126 @@ describe('App lobby-first behavior', () => {
     expect(screen.queryByRole('radiogroup', { name: 'Shape' })).not.toBeInTheDocument()
   })
 
+  it('retains the selected grid pattern while hidden and preserves settled tiles', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+    })
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onSnapshot = socketCall[3] as (payload: any) => void
+
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [
+            {
+              id: '11111111-1111-4111-8111-111111111111',
+              shape: 'square',
+              color: '#d4614f',
+              material: 'ceramic',
+              transform: {
+                position: { x: 0, y: 0 },
+                rotation: Math.PI / 2,
+                mirrored: true,
+              },
+              createdAt: 1,
+            },
+          ],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        clients: [],
+        lastOpSeq: 1,
+        revision: 1,
+      })
+    })
+
+    const scene = screen.getByTestId('mosaic-scene')
+    const settledTransforms = scene.getAttribute('data-tile-transforms')
+    const toggle = screen.getByRole('button', { name: 'Grid overlay' })
+
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('radio', { name: 'Running bond' }))
+
+    expect(scene).toHaveAttribute('data-grid-pattern', 'running-bond')
+    expect(scene).toHaveAttribute('data-tile-transforms', settledTransforms)
+
+    fireEvent.click(toggle)
+    expect(scene).toHaveAttribute('data-grid-pattern', 'off')
+    expect(scene).toHaveAttribute('data-tile-transforms', settledTransforms)
+    expect(screen.getByText('Running bond')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+    expect(screen.getByRole('radio', { name: 'Running bond' })).toHaveAttribute('aria-checked', 'true')
+    expect(scene).toHaveAttribute('data-grid-pattern', 'running-bond')
+  })
+
+  it('sends raw-pointer transforms by default and exact slot transforms when guided', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        callback({ rejected: true, placed: null })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Offset' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    const rawPlacement = emitMock.mock.calls.find((call) => call[0] === 'place_tile')?.[1] as any
+    expect(rawPlacement.transform).toEqual({
+      position: { x: 0.66, y: 0.04 },
+      rotation: 0,
+      mirrored: false,
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle tessellation' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Offset' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    const guidedPlacement = emitMock.mock.calls.filter((call) => call[0] === 'place_tile')[1]?.[1] as any
+    expect(guidedPlacement.transform.position.x).toBeCloseTo(0.6404)
+    expect(guidedPlacement.transform.position.y).toBe(0)
+    expect(guidedPlacement.transform.rotation).toBe(Math.PI)
+    expect(guidedPlacement.transform.mirrored).toBe(false)
+  })
+
   it('keeps active selection after successful placement acknowledgement', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
 
@@ -1120,6 +1256,8 @@ describe('App lobby-first behavior', () => {
     })
 
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle tessellation' }))
     fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
     fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
@@ -1139,6 +1277,8 @@ describe('App lobby-first behavior', () => {
     expect(screen.getByText('Material: glass')).toBeInTheDocument()
     expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
     expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Grid overlay' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('radio', { name: 'Triangle tessellation' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('removes optimistic placement while preserving active selection when placement ack is rejected', async () => {
@@ -1182,6 +1322,8 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
     fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle tessellation' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
     fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
 
@@ -1197,6 +1339,8 @@ describe('App lobby-first behavior', () => {
     expect(screen.getByText('Material: glass')).toBeInTheDocument()
     expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
     expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Grid overlay' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('radio', { name: 'Triangle tessellation' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('persists optimistic placement until delayed placement ack settles', async () => {

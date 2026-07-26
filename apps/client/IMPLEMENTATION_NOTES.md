@@ -19,20 +19,19 @@ When the user changes palettes, the client applies deterministic color resolutio
 
 Live announcements are intentionally limited to automatic fallback events. The summary itself is visual-only, while fallback messaging is emitted through a polite status region so assistive technology receives only meaningful state changes.
 
-## Hidden Non-Grid Guidance Model
+## Optional Grid Pattern Guidance
 
-The app does not expose a grid, but still uses a hidden guidance field to keep placement stable and satisfying.
+Raw-pointer placement remains the default. When the local grid overlay is enabled, the controller routes ghost resolution through a strict pattern guide:
 
-Approach:
-- Generate a jittered, hex-like anchor cloud inside and around bounds (`getHiddenGuidanceAnchors` in `placementSolver.ts`).
-- For each pointer update, evaluate nearby anchors plus the raw pointer transform.
-- Score candidates by guide distance + validity penalties.
-- Prefer valid candidates when available; otherwise return near-valid/invalid with correction vectors.
+- `gridPatterns.ts` defines repeating world-origin templates for square lattice, running bond, and triangle tessellation.
+- Compatible shapes are derived from template slots, and patterns are offered only when the current canonical tile library can construct them.
+- `gridPlacement.ts` evaluates nearby exact slots with the existing `validatePlacement` function. A valid slot wins over blocked candidates; enabled guidance never falls back to the raw pointer.
+- Pattern slots own guided position, rotation, and mirroring. Active color and material remain unchanged, and disabling the guide restores active-tile orientation behavior.
+- App state retains visibility and pattern choice only for the current client session. Toggling or switching patterns never rewrites settled tiles.
 
-Why this avoids hard snap feel:
-- Guidance is continuous and local, not a visible discrete matrix.
-- Ghost transform interpolates toward target, so users feel magnetic pull, not abrupt jumps.
-- Near-valid states provide soft directional correction instead of hard rejection.
+`GridOverlay.tsx` generates slots only for the current orthographic viewport plus one-cell overscan. Canonical tile outlines are transformed and batched into structural, placeable, blocked, and active line geometry. The overlay has no pointer handlers and is composed behind settled tiles and the ghost.
+
+The server remains authoritative and unchanged: the client sends the ordinary final `Transform2D`, and server overlap, bounds, adjacency, revision, and concurrency validation still determine whether placement is accepted.
 
 ## Ghost-to-Settle Animation System
 
@@ -78,7 +77,8 @@ Rendering architecture is WebGL-first with R3F:
 
 - Geometry cache keyed by shape to avoid regeneration.
 - Tile settle animation stops after completion (`animationDone` guard).
-- Candidate solving narrows hidden anchors to nearest local subset.
+- Pattern candidate solving is limited to the nearest lattice cell and its immediate neighbors.
+- Overlay geometry is viewport-cullable and batched by visual state instead of per-slot React objects.
 - SAT checks run on convex pieces only, reducing expensive general polygon operations.
 - Canvas DPR capped for mobile-friendly rendering costs.
 
@@ -92,5 +92,7 @@ Executed and passing:
 Test coverage includes:
 - transform and rotation quantization
 - overlap and bounds validation behavior
-- guided placement confidence
+- raw-pointer and exact pattern-slot placement
+- pattern constructibility, viewport culling, and deterministic slot selection
+- accessible grid controls and hidden-pattern retention
 - ghost interpolation and release accept/reject flow
