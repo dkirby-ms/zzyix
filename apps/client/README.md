@@ -25,6 +25,8 @@ The experience is intentionally organic:
 - Tile shapes: square, triangle, rectangle, L-shape
 - Material variants: ceramic, glass, stone-inspired
 - Color palettes with quick swatch selection
+- Dedicated Tile Palette with radio-style single-select rows for shape, material, palette, and color
+- Always-visible active selection summary to confirm current shape/material/palette/color
 - 90-degree rotation controls (+ keyboard), mirror toggle
 - Hidden guidance model (jittered anchor field) for magnetic fit without exposing lattice cells
 - Polygon-based validation with SAT overlap checks and bounds enforcement
@@ -88,6 +90,12 @@ npm run test
 - Clear: UI button
 - Camera pan/zoom: mouse/touch gestures (rotation disabled)
 
+Accessibility notes:
+
+- Tile Palette rows use radio-group semantics so selected state is announced consistently.
+- Color swatches keep a 44px minimum touch target via design tokens.
+- Palette switches preserve the selected color when available; when unavailable, the fallback is deterministic and announced via a polite status region.
+
 ## Project Structure
 
 - `src/domain/math2d.ts`: vector/math/easing utilities
@@ -96,7 +104,7 @@ npm run test
 - `src/interaction/controller.ts`: pointer-target updates, ghost interpolation, release placement logic
 - `src/render/materials.ts`: material presets and shader enrichment (fresnel + grain noise)
 - `src/render/MosaicScene.tsx`: WebGL scene, lighting, ghost + settled tile rendering, interaction plane
-- `src/ui/ControlsPanel.tsx`: palette/material/shape/transform/edit controls
+- `src/ui/TilePalette.tsx`: tile palette controls and active selection summary
 
 ## Quality Notes
 

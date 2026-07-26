@@ -59,11 +59,12 @@ import type {
   RealtimeCapabilities,
 } from '../../server/src/contracts'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
-import { ControlsPanel } from './ui/ControlsPanel'
+import { TilePalette } from './ui/TilePalette'
 import { LobbyScreen } from './ui/LobbyScreen'
 import { AppHeader } from './ui/AppHeader'
 import { CanvasActionBar } from './ui/CanvasActionBar'
 import { palettes } from './ui/palettes'
+import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import { TooltipProvider } from './ui/primitives/Tooltip'
 import {
@@ -203,6 +204,7 @@ function App() {
   const [material, setMaterial] = useState<'ceramic' | 'glass' | 'stone'>('ceramic')
   const [paletteName, setPaletteName] = useState<PaletteName>('terracotta')
   const [color, setColor] = useState<string>(palettes.terracotta[0])
+  const [paletteFallbackAnnouncement, setPaletteFallbackAnnouncement] = useState<string>('')
   const [rotation, setRotation] = useState(0)
   const [mirrored, setMirrored] = useState(false)
   const [ghost, setGhost] = useState(createInitialGhost())
@@ -267,6 +269,23 @@ function App() {
     }),
     [shape, color, material, rotation, mirrored],
   )
+
+  const handlePaletteChange = useCallback((name: PaletteName): void => {
+    setPaletteName(name)
+    setColor((previousColor) => {
+      const { color: nextColor, didFallback } = resolvePaletteColorSelection(name, previousColor)
+
+      if (didFallback) {
+        setPaletteFallbackAnnouncement(
+          `Palette changed to ${name}. ${previousColor} unavailable; selected ${nextColor}.`,
+        )
+      } else {
+        setPaletteFallbackAnnouncement('')
+      }
+
+      return nextColor
+    })
+  }, [])
 
   const loadSessions = useCallback(async (): Promise<void> => {
     setLobbyLoading(true)
@@ -1078,19 +1097,19 @@ function App() {
             </div>
           )}
         </section>
-        <ControlsPanel
+        <TilePalette
           shape={shape}
           onShape={setShape}
           material={material}
           onMaterial={setMaterial}
           paletteName={paletteName}
-          onPaletteName={(name) => {
-            setPaletteName(name)
-            setColor(palettes[name][0])
-          }}
+          onPaletteName={handlePaletteChange}
           color={color}
           onColor={setColor}
         />
+        <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+          {paletteFallbackAnnouncement}
+        </div>
       </div>
     </main>
   )

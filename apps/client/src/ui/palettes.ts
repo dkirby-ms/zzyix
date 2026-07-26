@@ -7,6 +7,16 @@ export const palettes = {
 
 export type PaletteName = keyof typeof palettes
 
+export const resolvePaletteColorSelection = (name: PaletteName, currentColor: string) => {
+  const nextPalette = palettes[name]
+  const didPreserveColor = nextPalette.some((swatch) => swatch === currentColor)
+  const color = didPreserveColor ? currentColor : nextPalette[0]
+  return {
+    color,
+    didFallback: !didPreserveColor,
+  }
+}
+
 export const getCollaboratorColor = (clientId: string): string => {
   const swatches = [...palettes.terracotta, ...palettes.lagoon, ...palettes.dusk, ...palettes.quarry]
   let hash = 0

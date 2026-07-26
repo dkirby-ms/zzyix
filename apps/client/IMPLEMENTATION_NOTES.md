@@ -1,5 +1,24 @@
 # Implementation Notes
 
+## Tile Palette Semantics and Accessibility
+
+Tile selection controls are implemented in `TilePalette` with one interaction contract across all rows:
+
+* Shape, material, palette, and color rows are single-select radio groups.
+* Selected state remains visually and semantically explicit (`aria-checked` + selected styling).
+* Color swatches preserve the shared 44px minimum target size through `--touch-target-min`.
+
+The active selection summary stays visible in the palette panel and mirrors App-owned state. This keeps the current shape, material, palette, and color discoverable at all times without requiring hover or focus.
+
+## Palette Switch Preserve-or-Fallback Policy
+
+When the user changes palettes, the client applies deterministic color resolution:
+
+* Preserve the current color when the target palette contains it.
+* Otherwise select the first swatch from the target palette as fallback.
+
+Live announcements are intentionally limited to automatic fallback events. The summary itself is visual-only, while fallback messaging is emitted through a polite status region so assistive technology receives only meaningful state changes.
+
 ## Hidden Non-Grid Guidance Model
 
 The app does not expose a grid, but still uses a hidden guidance field to keep placement stable and satisfying.
