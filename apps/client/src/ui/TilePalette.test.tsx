@@ -3,6 +3,13 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { TilePalette } from './TilePalette'
 import { TILE_SHAPES } from '../domain/tileGeometry'
 
+const shapeLabelByToken = {
+  square: 'Square',
+  triangle: 'Triangle',
+  rectangle: 'Rectangle',
+  'l-shape': 'L-shape',
+} as const
+
 afterEach(() => {
   cleanup()
 })
@@ -64,7 +71,7 @@ describe('TilePalette', () => {
       />,
     )
 
-    expect(screen.getByRole('radio', { name: 'triangle' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'glass' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'Color #67aeb3' })).toHaveAttribute('aria-checked', 'true')
@@ -88,7 +95,7 @@ describe('TilePalette', () => {
     const shapeGroup = screen.getByRole('radiogroup', { name: 'Shape' })
 
     for (const shape of TILE_SHAPES) {
-      const radio = within(shapeGroup).getByRole('radio', { name: shape })
+      const radio = within(shapeGroup).getByRole('radio', { name: shapeLabelByToken[shape] })
       expect(radio).toBeInTheDocument()
       const preview = radio.querySelector('svg')
       expect(preview).not.toBeNull()
@@ -120,7 +127,60 @@ describe('TilePalette', () => {
       .getAllByRole('radio')
       .map((radio) => radio.getAttribute('aria-label'))
 
-    expect(renderedShapeOptions).toEqual(TILE_SHAPES)
+    expect(renderedShapeOptions).toEqual(TILE_SHAPES.map((shape) => shapeLabelByToken[shape]))
+  })
+
+  it('supports keyboard arrow navigation between shape radios', async () => {
+    const onShape = vi.fn()
+
+    render(
+      <TilePalette
+        shape="square"
+        onShape={onShape}
+        material="ceramic"
+        onMaterial={vi.fn()}
+        paletteName="terracotta"
+        onPaletteName={vi.fn()}
+        color="#d4614f"
+        onColor={vi.fn()}
+      />,
+    )
+
+    const square = screen.getByRole('radio', { name: 'Square' })
+
+    square.focus()
+    fireEvent.keyDown(square, { key: 'ArrowRight' })
+
+    expect(onShape).toHaveBeenCalledWith('triangle')
+  })
+
+  it('supports keyboard Space/Enter activation on shape radios', () => {
+    const onShape = vi.fn()
+
+    render(
+      <TilePalette
+        shape="square"
+        onShape={onShape}
+        material="ceramic"
+        onMaterial={vi.fn()}
+        paletteName="terracotta"
+        onPaletteName={vi.fn()}
+        color="#d4614f"
+        onColor={vi.fn()}
+      />,
+    )
+
+    const triangle = screen.getByRole('radio', { name: 'Triangle' })
+    const square = screen.getByRole('radio', { name: 'Square' })
+
+    triangle.focus()
+    fireEvent.keyDown(triangle, { key: 'Enter' })
+
+    square.focus()
+    fireEvent.keyDown(square, { key: ' ' })
+
+    expect(onShape).toHaveBeenCalledWith('triangle')
+    expect(onShape).toHaveBeenCalledWith('square')
   })
 
   it('emits selection callbacks from the single-select controls', () => {
@@ -142,7 +202,7 @@ describe('TilePalette', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('radio', { name: 'triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
     fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
     fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Color #eea655' }))

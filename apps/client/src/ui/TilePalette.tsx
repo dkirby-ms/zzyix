@@ -25,6 +25,12 @@ const shapeLabels: Record<TileShape, string> = {
   'l-shape': 'L-shape',
 }
 
+const isTileShape = (value: string): value is TileShape => TILE_SHAPES.includes(value as TileShape)
+
+const isMaterialVariant = (value: string): value is MaterialVariant => materials.includes(value as MaterialVariant)
+
+const isPaletteName = (value: string): value is PaletteName => paletteNames.includes(value as PaletteName)
+
 export const TilePalette = ({
   shape,
   onShape,
@@ -44,14 +50,37 @@ export const TilePalette = ({
           className="shape-grid"
           value={shape}
           onValueChange={(value) => {
-            if (value) {
-              onShape(value as TileShape)
+            if (value && isTileShape(value)) {
+              onShape(value)
             }
           }}
           aria-label="Shape"
         >
           {TILE_SHAPES.map((entry) => (
-            <ToggleGroupItem key={entry} value={entry} aria-label={entry}>
+            <ToggleGroupItem
+              key={entry}
+              value={entry}
+              aria-label={shapeLabels[entry]}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onShape(entry)
+                  return
+                }
+
+                const isForwardArrow = event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                const isBackwardArrow = event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                if (!isForwardArrow && !isBackwardArrow) {
+                  return
+                }
+
+                event.preventDefault()
+                const currentIndex = TILE_SHAPES.indexOf(entry)
+                const direction = isForwardArrow ? 1 : -1
+                const nextIndex = (currentIndex + direction + TILE_SHAPES.length) % TILE_SHAPES.length
+                onShape(TILE_SHAPES[nextIndex])
+              }}
+            >
               <span className="tile-shape-card">
                 <TileShapePreview shape={entry} className="tile-shape-card-preview" />
                 <span className="tile-shape-card-label">{shapeLabels[entry]}</span>
@@ -68,8 +97,8 @@ export const TilePalette = ({
           className="pill-row"
           value={material}
           onValueChange={(value) => {
-            if (value) {
-              onMaterial(value as MaterialVariant)
+            if (value && isMaterialVariant(value)) {
+              onMaterial(value)
             }
           }}
           aria-label="Material"
@@ -89,8 +118,8 @@ export const TilePalette = ({
           className="pill-row"
           value={paletteName}
           onValueChange={(value) => {
-            if (value) {
-              onPaletteName(value as PaletteName)
+            if (value && isPaletteName(value)) {
+              onPaletteName(value)
             }
           }}
           aria-label="Palette"

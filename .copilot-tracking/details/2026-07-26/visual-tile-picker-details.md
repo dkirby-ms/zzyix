@@ -285,6 +285,54 @@ Address straightforward lint, build, and test regressions discovered in Step 5.1
 
 If failures require broad refactors or additional architecture decisions, document them and return for follow-on planning rather than forcing a large inline change.
 
+## Implementation Phase 6: Post-Review Remediation
+
+<!-- parallelizable: false -->
+
+### Step 6.1: Add explicit keyboard-path tests for shape radios
+
+Add deterministic tests that validate keyboard interaction paths for shape selection controls.
+
+Files:
+* apps/client/src/ui/TilePalette.test.tsx - Add arrow-key navigation and Space/Enter activation assertions
+
+Success criteria:
+* Test coverage explicitly validates arrow-key movement between shape radios
+* Test coverage explicitly validates Space and Enter activation behavior
+
+### Step 6.2: Add rejected and delayed placement acknowledgement variants
+
+Extend app-level placement persistence coverage to include negative and timing scenarios.
+
+Files:
+* apps/client/src/App.test.tsx - Add rejected-ack and delayed-ack placement tests
+
+Success criteria:
+* Rejected ack path removes optimistic placement while preserving active selection state
+* Delayed ack path preserves optimistic placement and settles correctly after acknowledgement
+
+### Step 6.3: Apply low-risk hardening from review findings
+
+Implement straightforward non-breaking hardening improvements observed during review.
+
+Files:
+* apps/client/src/ui/TilePalette.tsx - Replace token-based shape aria labels with user-facing labels and add runtime value guards
+* apps/client/src/ui/TileShapePreview.tsx - Memoize preview path generation
+
+Success criteria:
+* Shape radio accessible names are user-facing labels
+* Callback narrowing avoids unchecked value assertions in TilePalette
+* Preview path generation is memoized without behavior changes
+
+### Step 6.4: Re-run full client validation and capture reproducible evidence
+
+Validation commands:
+* `npm run --prefix apps/client test -- TilePalette`
+* `npm run --prefix apps/client test -- App`
+* `npm run --prefix apps/client lint`
+* `npm run --prefix apps/client build`
+* `npm run --prefix apps/client test -- --run`
+
 ## Dependencies
 
 * Existing React + TypeScript client architecture

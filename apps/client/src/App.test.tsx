@@ -916,7 +916,7 @@ describe('App lobby-first behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('radio', { name: 'triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
     fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
     fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
@@ -928,7 +928,7 @@ describe('App lobby-first behavior', () => {
       expect.objectContaining({ shape: 'triangle', material: 'glass', color: '#d9efe6' }),
       expect.any(Function),
     )
-    expect(screen.getByRole('radio', { name: 'triangle' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'glass' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('radio', { name: 'Color #d9efe6' })).toHaveAttribute('aria-checked', 'true')
@@ -936,6 +936,143 @@ describe('App lobby-first behavior', () => {
     expect(screen.getByText('Material: glass')).toBeInTheDocument()
     expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
     expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+  })
+
+  it('removes optimistic placement while preserving active selection when placement ack is rejected', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        callback({
+          rejected: true,
+          placed: null,
+        })
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('0 placed')).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'glass' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Color #d9efe6' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Shape: triangle')).toBeInTheDocument()
+    expect(screen.getByText('Material: glass')).toBeInTheDocument()
+    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+  })
+
+  it('persists optimistic placement until delayed placement ack settles', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    let placeAckCallback: ((ack: any) => void) | undefined
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'place_tile' && callback) {
+        placeAckCallback = callback
+      }
+    })
+
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = {
+        current: {
+          emit: emitMock,
+          on: vi.fn(),
+          off: vi.fn(),
+          connected: false,
+        },
+      }
+      if (actionRef) {
+        actionRef.current = socketRef.current
+      }
+      return socketRef as any
+    })
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('1 placed')).toBeInTheDocument()
+    })
+
+    expect(placeAckCallback).toBeDefined()
+    expect(screen.getByText('Shape: triangle')).toBeInTheDocument()
+    expect(screen.getByText('Material: glass')).toBeInTheDocument()
+    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
+    expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+
+    act(() => {
+      placeAckCallback?.({
+        rejected: false,
+        placed: {
+          id: '44444444-4444-4444-8444-444444444444',
+          shape: 'triangle',
+          color: '#d9efe6',
+          material: 'glass',
+          transform: {
+            position: { x: 0, y: 0 },
+            rotation: 0,
+            mirrored: false,
+          },
+          placedBy: 'client-1',
+          createdAt: Date.now(),
+        },
+        opSeq: 11,
+        newRevision: 3,
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('1 placed')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('debug diagnostics are hidden by default in canvas mode', async () => {

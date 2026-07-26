@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { TileShape } from '../domain/tileGeometry'
 import {
   DEFAULT_PREVIEW_PADDING,
@@ -18,7 +19,7 @@ export const TileShapePreview = ({
   padding = DEFAULT_PREVIEW_PADDING,
   className,
 }: TileShapePreviewProps) => {
-  const d = createTilePreviewPath(shape, { size, padding })
+  const d = useMemo(() => createTilePreviewPath(shape, { size, padding }), [padding, shape, size])
 
   return (
     <svg

@@ -11,7 +11,10 @@ Gaps and differences identified between research findings and the implementation
 
 ### Plan Deviations from Research
 
-* No active DD items after remediation re-validation.
+* DD-01: Shape keyboard-path behavior now has explicit component-level handling and tests.
+  * Plan specifies: preserve ToggleGroup semantics and validate keyboard paths through tests.
+  * Implementation differs: added explicit Arrow and Space/Enter key handling on shape items in `TilePalette` to make paths deterministic and directly testable.
+  * Rationale: resolves review-identified evidence gap for explicit keyboard modality coverage.
 
 ## Implementation Paths Considered
 
@@ -41,6 +44,9 @@ Gaps and differences identified between research findings and the implementation
 * WI-03: Run design pass on card labeling density — Evaluate icon/label balance with usability and screen-reader naming feedback. (low)
   * Source: .copilot-tracking/research/2026-07-26/visual-tile-picker-research.md (Lines 43-45)
   * Dependency: Initial visual picker merged
+* WI-04: Evaluate replacing explicit shape key handlers with primitive-driven keyboard behavior if Radix coverage can provide equivalent deterministic tests. (low)
+  * Source: Implementation Phase 6 post-review remediation
+  * Dependency: Current remediation merged and stable
 
 ## User Decisions
 

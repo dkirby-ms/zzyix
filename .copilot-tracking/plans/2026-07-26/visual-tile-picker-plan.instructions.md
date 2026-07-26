@@ -108,6 +108,21 @@ Replace text-only tile shape controls with accessible visual preview cards that 
   * Document issues requiring additional research
   * Provide user next steps if blockers exceed minor corrections
 
+### [x] Implementation Phase 6: Post-Review Remediation
+
+<!-- parallelizable: false -->
+
+* [x] Step 6.1: Add explicit keyboard-path tests for shape radios
+  * Cover arrow navigation and Space/Enter activation paths in TilePalette tests
+* [x] Step 6.2: Add rejected and delayed placement acknowledgement regression tests
+  * Ensure placement persistence behavior is validated for rejected and delayed ack variants
+* [x] Step 6.3: Apply low-risk hardening from review findings
+  * Use user-facing shape radio accessible names
+  * Add runtime value narrowing guards for palette callbacks
+  * Memoize preview path generation
+* [x] Step 6.4: Re-run full client validation and capture reproducible command evidence
+  * Execute targeted and full test suites plus lint and build
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-07-26/visual-tile-picker-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.
