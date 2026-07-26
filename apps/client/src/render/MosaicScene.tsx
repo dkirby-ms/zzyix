@@ -13,8 +13,10 @@ import {
 } from 'three'
 import { easeOutCubic, shortestAngleDelta } from '../domain/math2d'
 import { getTileDefinition } from '../domain/tileGeometry'
+import { GridOverlay } from './GridOverlay'
 import { useCraftMaterial, useRemoteSelectionMaterial } from './materials'
 import type { ThreeEvent } from '@react-three/fiber'
+import type { GridPattern } from '../domain/gridPatterns'
 import type { TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 import { getCollaboratorColor } from '../ui/palettes'
@@ -45,6 +47,10 @@ type MosaicSceneProps = {
   ghost: Ghost
   remoteCursors: RemoteCursor[]
   remoteSelections: RemoteSelection[]
+  gridOverlay?: {
+    pattern: GridPattern
+    activeSlotId?: string
+  }
   worldBounds?: {
     minX: number
     maxX: number
@@ -300,7 +306,7 @@ const InteractionPlane = ({
       receiveShadow={false}
     >
       <planeGeometry args={[width, height]} />
-      <meshBasicMaterial transparent opacity={0} />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} />
     </mesh>
   )
 }
@@ -373,6 +379,7 @@ const SceneContents = ({
   ghost,
   remoteCursors,
   remoteSelections,
+  gridOverlay,
   worldBounds,
   onPointerMove,
   onPointerDown,
@@ -409,6 +416,15 @@ const SceneContents = ({
 
       <group position={[0, 0, 0]}>
         <CanvasBounds worldBounds={worldBounds} />
+        {gridOverlay && (
+          <GridOverlay
+            pattern={gridOverlay.pattern}
+            activeShape={activeShape}
+            tiles={tiles}
+            bounds={worldBounds ?? DEFAULT_WORLD_BOUNDS}
+            activeSlotId={gridOverlay.activeSlotId}
+          />
+        )}
         {tiles.map((tile) => (
           <TileMesh key={tile.id} tile={tile} />
         ))}
@@ -482,6 +498,7 @@ export const MosaicScene = ({
   ghost,
   remoteCursors,
   remoteSelections,
+  gridOverlay,
   worldBounds,
   onPointerMove,
   onPointerDown,
@@ -573,6 +590,7 @@ export const MosaicScene = ({
             ghost={ghost}
             remoteCursors={remoteCursors}
             remoteSelections={remoteSelections}
+            gridOverlay={gridOverlay}
             onPointerMove={onPointerMove}
             onPointerDown={onPointerDown}
             onPointerUp={onPointerUp}

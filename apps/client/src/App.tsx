@@ -7,8 +7,10 @@ import {
   type ChunkId,
   type ViewportBounds,
 } from './domain/math2d'
-import { getTileDefinition, normalizeAngle, quantizeRotation, transformPolygon } from './domain/tileGeometry'
+import { getTileDefinition, normalizeAngle, quantizeRotation, TILE_SHAPES, transformPolygon } from './domain/tileGeometry'
 import type { TileShape } from './domain/tileGeometry'
+import { GRID_PATTERNS, getConstructibleGridPatterns } from './domain/gridPatterns'
+import type { GridPatternId } from './domain/gridPatterns'
 import {
   applySequencedSnapshot,
   createInitialGhost,
@@ -22,7 +24,7 @@ import {
   tryPlaceTile,
   updateGhostTarget,
 } from './interaction/controller'
-import type { ActiveTile, SequencedTilesState } from './interaction/controller'
+import type { ActiveTile, PlacementGuide, SequencedTilesState } from './interaction/controller'
 import { ensureClientId } from './network/session'
 import {
   createSession,
@@ -60,6 +62,7 @@ import type {
 } from '../../server/src/contracts'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
+import { GridOverlayControls } from './ui/GridOverlayControls'
 import { LobbyScreen } from './ui/LobbyScreen'
 import { AppHeader } from './ui/AppHeader'
 import { palettes } from './ui/palettes'
@@ -306,6 +309,15 @@ function App() {
     createInitialSequencedTilesState(),
   )
   const [activeTileUiState, dispatchActiveTileUi] = useReducer(activeTileUiReducer, undefined, createInitialActiveTileUiState)
+  const constructibleGridPatterns = useMemo(
+    () => getConstructibleGridPatterns(new Set(TILE_SHAPES), GRID_PATTERNS),
+    [],
+  )
+  const [gridOverlayEnabled, setGridOverlayEnabled] = useState(false)
+  const [selectedGridPatternId, setSelectedGridPatternId] = useState<GridPatternId | undefined>(
+    constructibleGridPatterns[0]?.id,
+  )
+  const [gridOverlayAnnouncement, setGridOverlayAnnouncement] = useState('')
   const [ghost, setGhost] = useState(createInitialGhost())
   const [ghostVisible, setGhostVisible] = useState(false)
   const [invalidPulse, setInvalidPulse] = useState(false)
@@ -329,6 +341,7 @@ function App() {
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
+  const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
   const pointerEmitThrottleRef = useRef<{
     lastSentAt: number
@@ -359,10 +372,44 @@ function App() {
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
+  const selectedGridPattern = useMemo(
+    () => constructibleGridPatterns.find((pattern) => pattern.id === selectedGridPatternId),
+    [constructibleGridPatterns, selectedGridPatternId],
+  )
+  const placementGuide = useMemo<PlacementGuide>(
+    () => gridOverlayEnabled && selectedGridPattern
+      ? { enabled: true, pattern: selectedGridPattern }
+      : { enabled: false },
+    [gridOverlayEnabled, selectedGridPattern],
+  )
 
   const handlePaletteChange = useCallback((name: PaletteName): void => {
     dispatchActiveTileUi({ type: 'set-palette', paletteName: name })
   }, [])
+
+  useEffect(() => {
+    if (constructibleGridPatterns.length === 0) {
+      if (gridOverlayEnabled) {
+        setGridOverlayEnabled(false)
+      }
+      if (selectedGridPatternId !== undefined) {
+        setSelectedGridPatternId(undefined)
+      }
+      setGridOverlayAnnouncement('No grid patterns are available for the current tile library.')
+      return
+    }
+
+    if (!selectedGridPattern) {
+      const fallback = constructibleGridPatterns[0]
+      setSelectedGridPatternId(fallback.id)
+      setGridOverlayAnnouncement(`Grid pattern changed to ${fallback.label} because the previous pattern is unavailable.`)
+    }
+  }, [
+    constructibleGridPatterns,
+    gridOverlayEnabled,
+    selectedGridPattern,
+    selectedGridPatternId,
+  ])
 
   const loadSessions = useCallback(async (): Promise<void> => {
     setLobbyLoading(true)
@@ -957,7 +1004,36 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [clientId, requestSnapshot, socketRef])
 
+  const resolveGhostFromPointer = useCallback(
+    (pointer: { x: number; y: number }) =>
+      updateGhostTarget(pointer, activeTile, sequencedState.tiles, worldBounds, placementGuide),
+    [activeTile, placementGuide, sequencedState.tiles, worldBounds],
+  )
+
   useEffect(() => {
+    const pointer = lastPointerWorldRef.current
+    if (!pointer) {
+      return
+    }
+
+    const updated = resolveGhostFromPointer(pointer)
+    setGhost((prev) => ({
+      ...prev,
+      target: updated.target,
+      confidence: updated.confidence,
+      valid: updated.valid,
+      magnetStrength: updated.magnetStrength,
+      rejection: updated.rejection,
+      debugReason: updated.debugReason,
+      guideSlotId: updated.guideSlotId,
+    }))
+  }, [resolveGhostFromPointer])
+
+  useEffect(() => {
+    if (placementGuide.enabled) {
+      return
+    }
+
     setGhost((prev) => ({
       ...prev,
       target: {
@@ -965,12 +1041,15 @@ function App() {
         rotation: activeTile.rotation,
         mirrored: activeTile.mirrored,
       },
+      guideSlotId: undefined,
     }))
-  }, [activeTile.mirrored, activeTile.rotation])
+  }, [activeTile.mirrored, activeTile.rotation, placementGuide.enabled])
 
   const updatePointer = (x: number, y: number): void => {
-    emitPointerMove({ x, y })
-    const updated = updateGhostTarget(vec2(x, y), activeTile, sequencedState.tiles, worldBounds)
+    const pointer = vec2(x, y)
+    lastPointerWorldRef.current = pointer
+    emitPointerMove(pointer)
+    const updated = resolveGhostFromPointer(pointer)
     emitSelectionUpdate(findHoveredTileId(x, y, sequencedState.tiles))
     setGhostVisible(true)
     setGhost((prev) => ({
@@ -981,6 +1060,7 @@ function App() {
       magnetStrength: updated.magnetStrength,
       rejection: updated.rejection,
       debugReason: updated.debugReason,
+      guideSlotId: updated.guideSlotId,
       current: ghostVisible ? prev.current : updated.target,
     }))
   }
@@ -1090,6 +1170,26 @@ function App() {
               ))}
             </div>
           )}
+          <GridOverlayControls
+            enabled={gridOverlayEnabled}
+            patterns={constructibleGridPatterns}
+            selectedPatternId={selectedGridPatternId}
+            activeShape={activeTile.shape}
+            announcement={gridOverlayAnnouncement}
+            onEnabledChange={(enabled) => {
+              setGridOverlayEnabled(enabled)
+              setGridOverlayAnnouncement(
+                enabled && selectedGridPattern
+                  ? `${selectedGridPattern.label} grid enabled.`
+                  : '',
+              )
+            }}
+            onPatternChange={(patternId) => {
+              const pattern = constructibleGridPatterns.find((entry) => entry.id === patternId)
+              setSelectedGridPatternId(patternId)
+              setGridOverlayAnnouncement(pattern ? `Grid pattern changed to ${pattern.label}.` : '')
+            }}
+          />
           <CanvasErrorBoundary>
             <Suspense fallback={<CanvasLoadingFallback />}>
               <MosaicScene
@@ -1108,6 +1208,12 @@ function App() {
                 onRotateDrag={(deltaX) => dispatchActiveTileUi({ type: 'rotate-fine', delta: deltaX * (Math.PI / 200) })}
                 remoteCursors={remoteCursors}
                 remoteSelections={remoteSelections}
+                gridOverlay={gridOverlayEnabled && selectedGridPattern
+                  ? {
+                      pattern: selectedGridPattern,
+                      activeSlotId: ghost.guideSlotId,
+                    }
+                  : undefined}
                 worldBounds={worldBounds}
                 cameraPan={cameraPan}
                 cameraPolicy={cameraPolicy}
