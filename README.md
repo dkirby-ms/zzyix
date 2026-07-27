@@ -64,6 +64,36 @@ Default local URLs:
 npm test
 ```
 
+## Run End-To-End Tests
+
+Start local infrastructure first so the server can connect to PostgreSQL:
+
+```bash
+docker compose up -d postgres
+```
+
+Run the Playwright harness:
+
+```bash
+npm run test:e2e
+```
+
+The harness launches an isolated stack for tests:
+
+* Server: <http://127.0.0.1:3101>
+* Client: <http://127.0.0.1:4173>
+
+The server runs in strict test mode and refuses non-local database targets for end-to-end runs.
+Shared canvas state is reset between tests through a test-only control endpoint.
+
+Useful variants:
+
+```bash
+npm run test:e2e:headed
+npm run test:e2e:ui
+npm run test:e2e:ci
+```
+
 ## Collaboration Notes
 
 This is a learning-first repository, not a production system.

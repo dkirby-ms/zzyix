@@ -26,6 +26,11 @@
     "test": "npm run test --workspaces --if-present",
     "test:client": "npm run test --workspace=apps/client",
     "test:server": "npm run test --workspace=apps/server",
+    "test:e2e": "npm run test:e2e:install && playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:ci": "playwright test --reporter=line",
+    "test:e2e:install": "playwright install chromium",
     "test:watch:client": "npm run test:watch --workspace=apps/client",
     "test:watch:server": "npm run test:watch --workspace=apps/server",
     "release": "npm run release:client && npm run release:server",
@@ -33,6 +38,7 @@
     "release:server": "semantic-release --extends ./.releaserc.server.cjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^21.2.0",
     "@semantic-release/commit-analyzer": "^13.0.1",
