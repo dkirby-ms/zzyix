@@ -278,7 +278,7 @@ export const tryPlaceTile = (
         x: ghost.current.position.x,
         y: ghost.current.position.y,
       },
-      rotation: ghost.current.rotation + (Math.random() - 0.5) * 0.08,
+      rotation: ghost.current.rotation, // + (Math.random() - 0.5) * 0.08,
       mirrored: ghost.current.mirrored,
     },
     createdAt: Date.now(),

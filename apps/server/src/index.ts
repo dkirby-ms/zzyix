@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { lookup } from 'node:dns/promises'
 import express from 'express'
+import { sql } from 'drizzle-orm'
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
@@ -494,6 +495,8 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
 
 const DB_CONNECT_MAX_ATTEMPTS = Number(process.env.DB_CONNECT_MAX_ATTEMPTS ?? 10)
 const DB_CONNECT_RETRY_BASE_MS = Number(process.env.DB_CONNECT_RETRY_BASE_MS ?? 3_000)
+const TEST_CONTROL_HEADER = 'x-zzyix-test-token'
+const TEST_CONTROL_DEFAULT_TOKEN = 'zzyix-e2e-token'
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -635,6 +638,28 @@ const verifyDatabaseConnectivity = async (): Promise<void> => {
   }
 
   throw lastError
+}
+
+const isLoopbackHostname = (hostname: string): boolean => {
+  const normalized = hostname.trim().toLowerCase()
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1'
+}
+
+const assertTestDatabaseSafety = (databaseUrl: string): void => {
+  let parsed: URL
+
+  try {
+    parsed = new URL(databaseUrl)
+  } catch {
+    throw new Error('Unable to parse DATABASE_URL for test safety checks')
+  }
+
+  if (!isLoopbackHostname(parsed.hostname)) {
+    throw new Error(
+      `Refusing to start in test mode with non-local database host (${parsed.hostname}). ` +
+      'Use a localhost/loopback DATABASE_URL for Playwright and end-to-end runs.'
+    )
+  }
 }
 
 export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tileId)
@@ -1151,6 +1176,8 @@ const HOST = process.env.HOST ?? '0.0.0.0'
 
 const app = express()
 const httpServer = createServer(app)
+const isTestControlEnabled = process.env.NODE_ENV === 'test' && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
+const testControlToken = (process.env.E2E_RESET_TOKEN ?? TEST_CONTROL_DEFAULT_TOKEN).trim()
 
 app.use(express.json())
 
@@ -1253,6 +1280,101 @@ app.post('/sessions', sessionCreateRateLimit, async (req, res) => {
     res.status(500).json({ error: 'Failed to create session' })
   }
 })
+
+type TestResetRequest = {
+  createSession?: boolean
+  canvasPreset?: CanvasSizePreset
+}
+
+const isTestResetRequest = (value: unknown): value is TestResetRequest => {
+  if (!isObjectRecord(value)) {
+    return false
+  }
+
+  if (value.createSession !== undefined && typeof value.createSession !== 'boolean') {
+    return false
+  }
+
+  if (value.canvasPreset !== undefined && !isCanvasSizePreset(value.canvasPreset)) {
+    return false
+  }
+
+  return true
+}
+
+const resetAuthoritativeState = async (): Promise<void> => {
+  sessions.clear()
+  sessionClientSockets.clear()
+  socketAuthRateLimitBuckets.clear()
+
+  for (const socket of await io.fetchSockets()) {
+    socket.disconnect(true)
+  }
+
+  await getDatabaseBundle().db.execute(sql`
+    TRUNCATE TABLE
+      operation_log,
+      idempotency_keys,
+      snapshots,
+      participants,
+      tiles,
+      canvases,
+      users
+    RESTART IDENTITY CASCADE
+  `)
+}
+
+if (isTestControlEnabled) {
+  const testResetRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many test reset requests, please try again later.' },
+  })
+
+  app.post('/test/reset', testResetRateLimiter, async (req, res) => {
+    const providedToken = req.header(TEST_CONTROL_HEADER)
+    if (!providedToken || providedToken !== testControlToken) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+
+    if (!isTestResetRequest(req.body ?? {})) {
+      res.status(400).json({ error: 'Invalid test reset payload' })
+      return
+    }
+
+    const createSessionForRun = req.body?.createSession ?? false
+    const canvasPreset = req.body?.canvasPreset
+
+    try {
+      await resetAuthoritativeState()
+
+      if (!createSessionForRun) {
+        res.status(200).json({ reset: true })
+        return
+      }
+
+      const sessionId = crypto.randomUUID()
+      const canvasConfig = resolveCanvasConfigFromPreset(canvasPreset)
+      const sessionState = createAuthoritativeSessionState(sessionId, Date.now(), canvasConfig)
+      sessions.set(sessionId, sessionState)
+      await loadSessionRecord(sessionId, canvasConfig)
+
+      res.status(200).json({
+        reset: true,
+        session: {
+          id: sessionId,
+          canvasConfig,
+        },
+      })
+    } catch (error) {
+      writeLog('error', 'test_reset_failed', { error })
+      res.status(500).json({ error: 'Failed to reset test state' })
+    }
+  })
+}
 
 // ─── Initialize Socket.IO ────────────────────────────────────────────────────
 
@@ -1958,6 +2080,41 @@ if (process.env.NODE_ENV !== 'test') {
     featureChunkCanarySessionCount: canarySessionIds.size,
     featureMultiReplicaReady: isMultiReplicaReady,
     replicaId: REPLICA_ID,
+  })
+
+  void verifyDatabaseConnectivity()
+    .then(() => {
+      return applyDatabaseMigrationsIfNeeded()
+    })
+    .then((migrationsApplied) => {
+      configureRealtimeAdapter()
+
+      writeLog('info', 'database_migration_check_complete', {
+        migrationsApplied,
+      })
+
+      httpServer.listen(PORT, HOST, () => {
+        writeLog('info', 'server_listening', {
+          host: HOST,
+          port: PORT,
+          corsOrigin: resolveCorsOrigin(process.env.CORS_ORIGIN),
+          logLevel: ACTIVE_LOG_LEVEL,
+        })
+      })
+    })
+    .catch((error) => {
+      writeLog('error', 'server_startup_failed', { error })
+      process.exit(1)
+    })
+}
+
+if (isTestControlEnabled) {
+  const databaseUrl = resolveDatabaseUrl()
+  assertTestDatabaseSafety(databaseUrl)
+
+  writeLog('info', 'test_mode_database_safety_check_passed', {
+    databaseTarget: describeDatabaseTarget(databaseUrl),
+    testControlEnabled: isTestControlEnabled,
   })
 
   void verifyDatabaseConnectivity()
