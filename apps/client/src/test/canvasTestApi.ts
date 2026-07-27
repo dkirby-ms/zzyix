@@ -69,7 +69,7 @@ export const toCanvasTestTileSnapshot = (tile: TileInstance): CanvasTestTileSnap
     y: tile.transform.position.y,
   },
   rotation: tile.transform.rotation,
-  mirrored: tile.transform.mirrored,
+  mirrored: tile.transform.mirrored ?? false,
   placedBy: tile.placedBy,
 })
 
