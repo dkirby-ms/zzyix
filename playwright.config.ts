@@ -41,6 +41,7 @@ export default defineConfig({
     {
       command: [
         `VITE_SERVER_URL=${SERVER_URL}`,
+        'VITE_E2E_TEST_MODE=true',
         'npm run dev --workspace=apps/client -- --host 127.0.0.1 --port 4173 --strictPort',
       ].join(' '),
       url: CLIENT_URL,

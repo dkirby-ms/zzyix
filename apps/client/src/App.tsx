@@ -78,6 +78,7 @@ import {
   updateCollaborator,
   type RemoteCollaboratorMap,
 } from './domain/collaboratorUtils'
+import { registerCanvasTestApi, toCanvasTestTileSnapshot } from './test/canvasTestApi'
 import './App.css'
 
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
@@ -151,6 +152,7 @@ type ActiveTileUiAction =
   | { type: 'set-shape'; shape: TileShape }
   | { type: 'set-material'; material: ActiveTile['material'] }
   | { type: 'set-color'; color: string }
+  | { type: 'patch-active-tile'; patch: Partial<ActiveTile> }
   | { type: 'set-palette'; paletteName: PaletteName }
   | { type: 'rotate-quarter'; direction: 1 | -1 }
   | { type: 'rotate-fine'; delta: number }
@@ -196,6 +198,18 @@ const activeTileUiReducer = (state: ActiveTileUiState, action: ActiveTileUiActio
           color: action.color,
         },
         paletteFallbackAnnouncement: '',
+      }
+    case 'patch-active-tile':
+      return {
+        ...state,
+        activeTile: {
+          ...state.activeTile,
+          ...action.patch,
+          rotation: action.patch.rotation === undefined
+            ? state.activeTile.rotation
+            : normalizeAngle(action.patch.rotation),
+          mirrored: action.patch.mirrored ?? state.activeTile.mirrored,
+        },
       }
     case 'set-palette': {
       const { color: nextColor, didFallback } = resolvePaletteColorSelection(action.paletteName, state.activeTile.color)
@@ -342,6 +356,10 @@ function App() {
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
   const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
+  const activeTileRef = useRef(activeTileUiState.activeTile)
+  const sequencedStateRef = useRef(sequencedState)
+  const ghostRef = useRef(ghost)
+  const ghostVisibleRef = useRef(ghostVisible)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
   const pointerEmitThrottleRef = useRef<{
     lastSentAt: number
@@ -372,6 +390,23 @@ function App() {
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
+
+  useEffect(() => {
+    activeTileRef.current = activeTile
+  }, [activeTile])
+
+  useEffect(() => {
+    sequencedStateRef.current = sequencedState
+  }, [sequencedState])
+
+  useEffect(() => {
+    ghostRef.current = ghost
+  }, [ghost])
+
+  useEffect(() => {
+    ghostVisibleRef.current = ghostVisible
+  }, [ghostVisible])
+
   const selectedGridPattern = useMemo(
     () => constructibleGridPatterns.find((pattern) => pattern.id === selectedGridPatternId),
     [constructibleGridPatterns, selectedGridPatternId],
@@ -1045,28 +1080,8 @@ function App() {
     }))
   }, [activeTile.mirrored, activeTile.rotation, placementGuide.enabled])
 
-  const updatePointer = (x: number, y: number): void => {
-    const pointer = vec2(x, y)
-    lastPointerWorldRef.current = pointer
-    emitPointerMove(pointer)
-    const updated = resolveGhostFromPointer(pointer)
-    emitSelectionUpdate(findHoveredTileId(x, y, sequencedState.tiles))
-    setGhostVisible(true)
-    setGhost((prev) => ({
-      ...prev,
-      target: updated.target,
-      confidence: updated.confidence,
-      valid: updated.valid,
-      magnetStrength: updated.magnetStrength,
-      rejection: updated.rejection,
-      debugReason: updated.debugReason,
-      guideSlotId: updated.guideSlotId,
-      current: ghostVisible ? prev.current : updated.target,
-    }))
-  }
-
-  const attemptPlace = (): void => {
-    const result = tryPlaceTile(activeTile, ghost, sequencedState.tiles)
+  const placeFromState = useCallback((tileState: ActiveTile, ghostState: typeof ghost, tileSequenceState: SequencedTilesState): void => {
+    const result = tryPlaceTile(tileState, ghostState, tileSequenceState.tiles)
     if (!result.placed) {
       triggerInvalidPulse()
       return
@@ -1088,7 +1103,7 @@ function App() {
       color: tempTile.color,
       material: tempTile.material,
       transform: tempTile.transform,
-      expectedRevision: sequencedState.revision,
+      expectedRevision: tileSequenceState.revision,
     }
 
     socket.emit('place_tile', payload, (ack: PlaceTileAck) => {
@@ -1101,7 +1116,97 @@ function App() {
       emitSelectionUpdate(ack.placed.id)
       setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
     })
-  }
+  }, [clientId, emitSelectionUpdate, socketRef, triggerInvalidPulse])
+
+  const updatePointer = useCallback((x: number, y: number): void => {
+    const pointer = vec2(x, y)
+    lastPointerWorldRef.current = pointer
+    emitPointerMove(pointer)
+    const updated = resolveGhostFromPointer(pointer)
+    emitSelectionUpdate(findHoveredTileId(x, y, sequencedState.tiles))
+    setGhostVisible(true)
+    setGhost((prev) => {
+      const nextGhost = {
+        ...prev,
+        target: updated.target,
+        confidence: updated.confidence,
+        valid: updated.valid,
+        magnetStrength: updated.magnetStrength,
+        rejection: updated.rejection,
+        debugReason: updated.debugReason,
+        guideSlotId: updated.guideSlotId,
+        current: ghostVisible ? prev.current : updated.target,
+      }
+      ghostRef.current = nextGhost
+      return nextGhost
+    })
+  }, [emitPointerMove, emitSelectionUpdate, ghostVisible, resolveGhostFromPointer, sequencedState.tiles])
+
+  const attemptPlace = useCallback((): void => {
+    placeFromState(activeTile, ghost, sequencedState)
+  }, [activeTile, ghost, placeFromState, sequencedState])
+
+  useEffect(() => registerCanvasTestApi({
+    getState: () => ({
+      clientId,
+      sessionId,
+      mode,
+      connectionStatus: connectionState.status,
+      collaboratorIds: activeCollaborators.map((collaborator) => collaborator.clientId),
+      activeTile,
+      tiles: sequencedState.tiles.map(toCanvasTestTileSnapshot),
+    }),
+    joinSession: (nextSessionId) => {
+      handleJoinSession(nextSessionId)
+    },
+    setActiveTile: (patch) => {
+      dispatchActiveTileUi({ type: 'patch-active-tile', patch })
+    },
+    movePointer: (position) => {
+      updatePointer(position.x, position.y)
+    },
+    placeTileAt: (position) => {
+      const pointer = vec2(position.x, position.y)
+      const tileSequenceState = sequencedStateRef.current
+      const updated = resolveGhostFromPointer(pointer)
+      const currentGhost = ghostRef.current
+      const nextGhost = {
+        ...currentGhost,
+        target: updated.target,
+        confidence: updated.confidence,
+        valid: updated.valid,
+        magnetStrength: updated.magnetStrength,
+        rejection: updated.rejection,
+        debugReason: updated.debugReason,
+        guideSlotId: updated.guideSlotId,
+        current: ghostVisibleRef.current ? currentGhost.current : updated.target,
+      }
+
+      lastPointerWorldRef.current = pointer
+      emitPointerMove(pointer)
+      emitSelectionUpdate(findHoveredTileId(position.x, position.y, tileSequenceState.tiles))
+      ghostVisibleRef.current = true
+      ghostRef.current = nextGhost
+      setGhostVisible(true)
+      setGhost(nextGhost)
+      placeFromState(activeTileRef.current, nextGhost, tileSequenceState)
+    },
+  }), [
+    activeCollaborators,
+    activeTile,
+    attemptPlace,
+    clientId,
+    connectionState.status,
+    emitPointerMove,
+    emitSelectionUpdate,
+    handleJoinSession,
+    mode,
+    placeFromState,
+    resolveGhostFromPointer,
+    sequencedState.tiles,
+    sessionId,
+    updatePointer,
+  ])
 
   const handleUndo = (): void => {
     const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)

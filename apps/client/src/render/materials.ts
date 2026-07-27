@@ -14,24 +14,24 @@ const withCraftShader = (material: MeshPhysicalMaterial): void => {
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `#include <common>\nvarying vec3 vWorldPosition;\nvarying vec3 vWorldNormal;`,
+        `#include <common>\nvarying vec3 vCraftWorldPosition;\nvarying vec3 vCraftWorldNormal;`,
       )
       .replace(
         '#include <worldpos_vertex>',
-        `#include <worldpos_vertex>\nvWorldPosition = worldPosition.xyz;\nvWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`,
+        `#include <worldpos_vertex>\nvCraftWorldPosition = worldPosition.xyz;\nvCraftWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`,
       )
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\nvarying vec3 vWorldPosition;\nvarying vec3 vWorldNormal;\nfloat grain(vec3 p){return fract(sin(dot(p, vec3(12.9898,78.233,21.731))) * 43758.5453);}`,
+        `#include <common>\nvarying vec3 vCraftWorldPosition;\nvarying vec3 vCraftWorldNormal;\nfloat craftGrain(vec3 p){return fract(sin(dot(p, vec3(12.9898,78.233,21.731))) * 43758.5453);}`,
       )
       .replace(
         '#include <dithering_fragment>',
         `
-          float rim = pow(1.0 - max(dot(normalize(vWorldNormal), normalize(cameraPosition - vWorldPosition)), 0.0), 2.0);
-          float n = grain(vWorldPosition * 9.7) * 0.05;
-          gl_FragColor.rgb += vec3(rim * 0.18 + n);
+          float craftRim = pow(1.0 - max(dot(normalize(vCraftWorldNormal), normalize(cameraPosition - vCraftWorldPosition)), 0.0), 2.0);
+          float craftNoise = craftGrain(vCraftWorldPosition * 9.7) * 0.05;
+          gl_FragColor.rgb += vec3(craftRim * 0.18 + craftNoise);
           #include <dithering_fragment>
         `,
       )
@@ -57,7 +57,7 @@ export const useCraftMaterial = (
       thickness: variant === 'glass' ? 0.24 : 0,
       transparent: ghost || variant === 'glass',
       opacity: ghost ? 0.65 : 1,
-      emissive: ghost ? baseColor.clone().multiplyScalar(0.13) : undefined,
+      ...(ghost ? { emissive: baseColor.clone().multiplyScalar(0.13) } : {}),
       emissiveIntensity: ghost ? 0.55 : 0,
     })
 
