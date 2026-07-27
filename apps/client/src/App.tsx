@@ -568,6 +568,7 @@ function App() {
   }, [requestSnapshot])
 
   const onResyncRequired = useCallback((payload: ResyncRequiredPayload): void => {
+    clientTelemetryRef.current.resyncEvents += 1
     console.warn('resync_required received:', { reason: payload.reason, currentOpSeq: payload.currentOpSeq })
     requestSnapshot()
   }, [requestSnapshot])
@@ -1152,6 +1153,8 @@ function App() {
       sessionId,
       mode,
       connectionStatus: connectionState.status,
+      revision: sequencedState.revision,
+      resyncEvents: clientTelemetryRef.current.resyncEvents,
       collaboratorIds: activeCollaborators.map((collaborator) => collaborator.clientId),
       activeTile,
       tiles: sequencedState.tiles.map(toCanvasTestTileSnapshot),
@@ -1190,6 +1193,81 @@ function App() {
       setGhostVisible(true)
       setGhost(nextGhost)
       placeFromState(activeTileRef.current, nextGhost, tileSequenceState)
+    },
+    placeTileAtWithAck: async (input) => {
+      const pointer = vec2(input.position.x, input.position.y)
+      const tileSequenceState = sequencedStateRef.current
+      const updated = resolveGhostFromPointer(pointer)
+      const currentGhost = ghostRef.current
+      const nextGhost = {
+        ...currentGhost,
+        target: updated.target,
+        confidence: updated.confidence,
+        valid: updated.valid,
+        magnetStrength: updated.magnetStrength,
+        rejection: updated.rejection,
+        debugReason: updated.debugReason,
+        guideSlotId: updated.guideSlotId,
+        current: ghostVisibleRef.current ? currentGhost.current : updated.target,
+      }
+
+      lastPointerWorldRef.current = pointer
+      emitPointerMove(pointer)
+      emitSelectionUpdate(findHoveredTileId(input.position.x, input.position.y, tileSequenceState.tiles))
+      ghostVisibleRef.current = true
+      ghostRef.current = nextGhost
+      setGhostVisible(true)
+      setGhost(nextGhost)
+
+      const result = tryPlaceTile(activeTileRef.current, nextGhost, tileSequenceState.tiles)
+      if (!result.placed) {
+        triggerInvalidPulse()
+        return {
+          placed: null,
+          rejected: true,
+          reason: 'PLACEMENT_REJECTED' as const,
+        }
+      }
+
+      const tempTile = { ...result.placed, placedBy: clientId }
+      setSequencedState((prev) => ({
+        ...prev,
+        tiles: [...prev.tiles, tempTile],
+      }))
+
+      const socket = socketRef.current
+      if (!socket) {
+        return {
+          placed: null,
+          rejected: true,
+          reason: 'PLACEMENT_REJECTED' as const,
+        }
+      }
+
+      const payload: PlaceTilePayload = {
+        tileId: createServerTileId(),
+        shape: tempTile.shape,
+        color: tempTile.color,
+        material: tempTile.material,
+        transform: tempTile.transform,
+        ...(input.includeExpectedRevision ?? true
+          ? { expectedRevision: input.expectedRevisionOverride ?? tileSequenceState.revision }
+          : {}),
+      }
+
+      const ack = await new Promise<PlaceTileAck>((resolve) => {
+        socket.emit('place_tile', payload, (nextAck: PlaceTileAck) => resolve(nextAck))
+      })
+
+      if (ack.rejected) {
+        setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
+        triggerInvalidPulse()
+        return ack
+      }
+
+      emitSelectionUpdate(ack.placed.id)
+      setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
+      return ack
     },
   }), [
     activeCollaborators,

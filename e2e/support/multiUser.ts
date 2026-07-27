@@ -1,5 +1,6 @@
 import { expect, test as base, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { createIsolatedSharedCanvas, resetSharedCanvasState, type ResetSharedCanvasOptions } from './testState'
+import type { PlaceTileAck } from '../../apps/server/src/contracts'
 
 const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
 const DEFAULT_CLIENT_URL = 'http://127.0.0.1:4173/'
@@ -28,6 +29,8 @@ export type CanvasStateSnapshot = {
   sessionId: string | null
   mode: CanvasMode
   connectionStatus: CanvasConnectionStatus
+  revision: number
+  resyncEvents: number
   collaboratorIds: string[]
   activeTile: {
     shape: CanvasTileSnapshot['shape']
@@ -45,6 +48,11 @@ type CanvasTestApi = {
   setActiveTile: (patch: Partial<CanvasStateSnapshot['activeTile']>) => void
   movePointer: (position: { x: number; y: number }) => void
   placeTileAt: (position: { x: number; y: number }) => void
+  placeTileAtWithAck: (input: {
+    position: { x: number; y: number }
+    includeExpectedRevision?: boolean
+    expectedRevisionOverride?: number
+  }) => Promise<PlaceTileAck>
 }
 
 export type TileExpectation = {
@@ -71,6 +79,10 @@ export type CanvasUser = {
   waitForConnection: (status?: CanvasConnectionStatus) => Promise<CanvasStateSnapshot>
   setActiveTile: (patch: Partial<CanvasStateSnapshot['activeTile']>) => Promise<void>
   placeTile: (position: { x: number; y: number }) => Promise<CanvasTileSnapshot>
+  placeTileWithAck: (
+    position: { x: number; y: number },
+    options?: { includeExpectedRevision?: boolean; expectedRevisionOverride?: number },
+  ) => Promise<PlaceTileAck>
   waitForTile: (expectation: TileExpectation) => Promise<CanvasTileSnapshot>
   expectTile: (expectation: TileExpectation) => Promise<CanvasTileSnapshot>
 }
@@ -97,8 +109,12 @@ const readCanvasState = async (page: Page): Promise<CanvasStateSnapshot> => page
   return api.getState()
 }, CANVAS_TEST_API_KEY)
 
-const callCanvasApi = async <TArg>(page: Page, method: keyof Omit<CanvasTestApi, 'getState'>, argument: TArg): Promise<void> => {
-  await page.evaluate(({ apiKey, methodName, payload }) => {
+const callCanvasApi = async <TArg, TResult = void>(
+  page: Page,
+  method: keyof Omit<CanvasTestApi, 'getState'>,
+  argument: TArg,
+): Promise<TResult> => {
+  return page.evaluate(async ({ apiKey, methodName, payload }) => {
     const api = (window as unknown as Record<string, CanvasTestApi | undefined>)[apiKey]
     if (!api) {
       throw new Error('Canvas test API is unavailable. Check the e2e client flag and App bridge registration.')
@@ -109,7 +125,7 @@ const callCanvasApi = async <TArg>(page: Page, method: keyof Omit<CanvasTestApi,
       throw new Error(`Canvas test API method ${methodName} is unavailable.`)
     }
 
-    action(payload as never)
+    return Promise.resolve(action(payload as never) as TResult)
   }, {
     apiKey: CANVAS_TEST_API_KEY,
     methodName: method,
@@ -270,6 +286,18 @@ const createCanvasUser = (
 
     return placedTile as CanvasTileSnapshot
   },
+  placeTileWithAck: async (position, options) => callCanvasApi<
+    {
+      position: { x: number; y: number }
+      includeExpectedRevision?: boolean
+      expectedRevisionOverride?: number
+    },
+    PlaceTileAck
+  >(page, 'placeTileAtWithAck', {
+    position,
+    includeExpectedRevision: options?.includeExpectedRevision ?? true,
+    expectedRevisionOverride: options?.expectedRevisionOverride,
+  }),
   waitForTile: async (expectation) => {
     const state = await waitForState(
       page,

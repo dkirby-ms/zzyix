@@ -1,6 +1,7 @@
 import type { TileInstance } from '../domain/placementSolver'
 import type { ActiveTile } from '../interaction/controller'
 import type { ConnectionStatus } from '../network/useConnectionStatus'
+import type { PlaceTileAck } from '../../../server/src/contracts'
 
 export const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
 
@@ -25,6 +26,8 @@ export type CanvasTestStateSnapshot = {
   sessionId: string | null
   mode: CanvasTestMode
   connectionStatus: ConnectionStatus
+  revision: number
+  resyncEvents: number
   collaboratorIds: string[]
   activeTile: ActiveTile
   tiles: CanvasTestTileSnapshot[]
@@ -36,6 +39,11 @@ export type CanvasTestApi = {
   setActiveTile: (patch: Partial<ActiveTile>) => void
   movePointer: (position: { x: number; y: number }) => void
   placeTileAt: (position: { x: number; y: number }) => void
+  placeTileAtWithAck: (input: {
+    position: { x: number; y: number }
+    includeExpectedRevision?: boolean
+    expectedRevisionOverride?: number
+  }) => Promise<PlaceTileAck>
 }
 
 declare global {
