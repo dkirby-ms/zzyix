@@ -1325,7 +1325,15 @@ const resetAuthoritativeState = async (): Promise<void> => {
 }
 
 if (isTestControlEnabled) {
-  app.post('/test/reset', async (req, res) => {
+  const testResetRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many test reset requests, please try again later.' },
+  })
+
+  app.post('/test/reset', testResetRateLimiter, async (req, res) => {
     const providedToken = req.header(TEST_CONTROL_HEADER)
     if (!providedToken || providedToken !== testControlToken) {
       res.status(403).json({ error: 'Forbidden' })
