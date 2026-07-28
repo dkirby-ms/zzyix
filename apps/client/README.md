@@ -78,7 +78,8 @@ environment:
 * `AUTH_CLIENT_ID`: SPA application (client) ID
 * `AUTH_API_SCOPE`: Delegated API scope in
 	`api://<api-application-id>/<scope-name>` form
-* `AUTH_API_ORIGIN`: Public API origin used by authenticated requests
+* `AUTH_API_ORIGIN`: Exact deployed client origin used for same-origin API
+	requests
 * `AUTH_REDIRECT_URI`: Exact SPA redirect URI registered with External ID
 * `AUTH_POST_LOGOUT_REDIRECT_URI`: Exact post-logout URI registered with
 	External ID
@@ -88,11 +89,19 @@ starts. The response uses `Cache-Control: no-store`, so the same image can move
 between environments without rebuilding. Container startup fails when any
 value is absent. These values are public OAuth metadata, not secrets.
 
-For local development, use the client origin `http://localhost:5173` for both
-redirect settings and an API origin such as `http://localhost:3001`. Production
+Browser API traffic remains on the client origin. Set `AUTH_API_ORIGIN` to the
+origin of `AUTH_REDIRECT_URI`, without a path, query, or fragment. Nginx proxies
+`/health`, `/me`, `/sessions`, `/quilts`, `/claims`,
+`/ownership-transfers`, `/account`, and `/socket.io` to the internal server
+ingress. Other paths remain SPA or static asset routes. Add a new protected API
+root to both the nginx and Vite allowlists before client code uses it.
+
+For local development, use `http://localhost:5173` for the API origin and both
+redirect settings. Vite proxies the same API route allowlist to
+`VITE_SERVER_URL`, which defaults to `http://localhost:3001`. Production
 authority, API, redirect, and logout values must use HTTPS. Register every
-deployed origin exactly. Wildcard redirect and logout URIs are not supported by
-this contract.
+redirect and logout URI exactly, including its trailing slash. Wildcard
+redirect and logout URIs are not supported by this contract.
 
 ## Build
 

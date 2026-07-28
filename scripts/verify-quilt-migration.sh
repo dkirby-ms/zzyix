@@ -69,12 +69,13 @@ run_server_command() {
   DATABASE_URL="${database_url}" npm run "${command}" --workspace=apps/server
 }
 
-apply_migration_prefix() {
+apply_migration_prefix() (
   local database_url="$1"
   local last_migration="$2"
   local last_index="${last_migration%%_*}"
   local migrations_folder
   migrations_folder="$(mktemp -d)"
+  trap 'rm -rf "${migrations_folder}"' EXIT
   mkdir -p "${migrations_folder}/meta"
 
   find apps/server/migrations -maxdepth 1 -type f -name '*.sql' -print0 |
@@ -96,8 +97,7 @@ apply_migration_prefix() {
        import { closeDatabaseBundle } from './apps/server/dist/db/client.js';
        await applyDatabaseMigrations(process.env.MIGRATIONS_FOLDER);
        await closeDatabaseBundle();"
-  rm -rf "${migrations_folder}"
-}
+)
 
 apply_migrations() {
   run_server_command "$1" 'db:apply'
@@ -282,6 +282,14 @@ rehearse() {
 
 main() {
   local operation="${1:-rehearse}"
+
+  case "${operation}" in
+    help|-h|--help)
+      usage
+      return
+      ;;
+  esac
+
   require_command node
   require_command npm
   require_command psql
@@ -300,7 +308,6 @@ main() {
     parity) parity "${DATABASE_URL}" ;;
     rollback) rollback "${DATABASE_URL}" ;;
     recover) backfill "${DATABASE_URL}"; parity "${DATABASE_URL}" ;;
-    help|-h|--help) usage ;;
     *) usage; err "Unknown operation: ${operation}" ;;
   esac
 }

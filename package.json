@@ -26,6 +26,7 @@
     "lint:server": "npm run lint --workspace=apps/server",
     "lint:commits": "commitlint --from HEAD~20 --to HEAD --verbose",
     "test": "npm run test --workspaces --if-present",
+    "test:release-contract": "node --test scripts/release-contract.test.mjs",
     "test:client": "npm run test --workspace=apps/client",
     "test:server": "npm run test --workspace=apps/server",
     "test:e2e": "npm run test:e2e:install && npm run test:e2e:preflight && playwright test",

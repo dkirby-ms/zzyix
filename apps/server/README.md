@@ -58,6 +58,14 @@ The corresponding client values are `AUTH_AUTHORITY`, `AUTH_CLIENT_ID`,
 settings before changing either Container App. `SERVER_DATABASE_URL` remains a
 GitHub environment secret; none of the identity settings above are secrets.
 
+The server Container App has internal ingress. Browsers use the deployed client
+origin as `AUTH_API_ORIGIN`; they never address the server ingress directly.
+The client nginx proxy forwards `/health`, `/me`, `/sessions`, `/quilts`,
+`/claims`, `/ownership-transfers`, `/account`, and `/socket.io`. These are the
+current and planned top-level API route roots. All other browser paths remain
+client SPA or static asset routes. Keep the nginx and Vite allowlists aligned
+when introducing another protected top-level route.
+
 The trusted issuer must match tokens exactly. Do not derive it from email,
 display name, tenant branding, or the requested authority. The API audience and
 delegated scope must match the exposed API registration. Test issuer keys and
@@ -154,11 +162,15 @@ temporary databases.
 CD owns production migration execution through one manually triggered
 Container Apps job. The job runs the release server image's `db:apply` command
 with parallelism one, retries a failed replica twice, and must report success
-before the server Container App receives the new image. A failed or timed-out
-migration stops the deployment. Production server startup remains
-verification-only and never applies DDL. Rollback keeps the previous server
-revision active; any data rollback requires a separately reviewed reverse
-migration because additive migrations are not automatically reversed.
+before the server Container App receives the new image. CD releases queue
+without cancellation, and deployment fails closed before changing the job when
+Azure reports an active execution. Every release reapplies and verifies the
+manual trigger, parallelism, completion count, timeout, and retry settings
+before starting the job. A failed or timed-out migration stops the deployment.
+Production server startup remains verification-only and never applies DDL.
+Rollback keeps the previous server revision active; any data rollback requires
+a separately reviewed reverse migration because additive migrations are not
+automatically reversed.
 
 Individual loopback operations use `DATABASE_URL`:
 

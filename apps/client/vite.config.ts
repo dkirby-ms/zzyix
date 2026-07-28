@@ -21,7 +21,27 @@ export default defineConfig(({ mode }) => {
           target: serverTarget,
           changeOrigin: true,
         },
+        '/me': {
+          target: serverTarget,
+          changeOrigin: true,
+        },
         '/sessions': {
+          target: serverTarget,
+          changeOrigin: true,
+        },
+        '/quilts': {
+          target: serverTarget,
+          changeOrigin: true,
+        },
+        '/claims': {
+          target: serverTarget,
+          changeOrigin: true,
+        },
+        '/ownership-transfers': {
+          target: serverTarget,
+          changeOrigin: true,
+        },
+        '/account': {
           target: serverTarget,
           changeOrigin: true,
         },

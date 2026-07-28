@@ -92,6 +92,36 @@ Validation commands:
 * `./scripts/verify-quilt-migration.sh rehearse` - Fresh, upgrade, parity, and rollback rehearsal
 * `npm run build:client` - Runtime configuration loading and image-input validation
 
+### Step 1.5: Resolve Phase 1 release-contract review findings
+
+Prevent overlapping migration executions when CD runs are superseded, and reassert and verify manual trigger, parallelism one, completion count one, timeout, and retry settings for existing migration jobs. Generate and parse runtime authentication configuration with a JSON-aware mechanism, preserve exact redirect and logout URI strings, and define the browser-reachable API as same-origin nginx proxying to the internal server ingress. Add focused automated release-contract checks for migration workflow semantics, runtime JSON generation, URI preservation, and nginx routing. Ensure migration rehearsal temporary directories are removed on failure, handle help before database prerequisites, and reconcile the bootstrap helper files in the changes log.
+
+Files:
+* `.github/workflows/cd.yml` - Prevent migration overlap and reconcile job safety settings
+* `apps/client/Dockerfile` - Generate and validate runtime JSON safely
+* `apps/client/nginx.conf` - Define same-origin API proxy coverage
+* `apps/client/src/config/runtimeConfig.ts` - Preserve exact registered redirect and logout URIs
+* `apps/client/src/config/runtimeConfig.test.ts` - Cover runtime parsing and URI preservation
+* `scripts/verify-quilt-migration.sh` - Clean temporary prefixes and make help dependency-free
+* Release-contract test files - Cover workflow, container, and nginx invariants
+* Phase 1 documentation and tracking artifacts - Record routing and helper-file changes
+
+Success criteria:
+* A superseded CD run cannot overlap its migration execution with a replacement release
+* Existing and new migration jobs use and verify the same single-owner safety settings
+* Runtime configuration remains valid JSON for representative special characters and fails before nginx starts when invalid
+* Redirect and logout URIs retain their exact validated strings, including trailing slashes
+* Browser API traffic uses documented same-origin nginx routes to internal server ingress
+* Focused release-contract tests exercise the corrected behavior
+* Migration rehearsal cleans temporary resources on success and failure, and `--help` requires no database tooling
+
+Context references:
+* `.copilot-tracking/reviews/quality/2026-07-28/infinite-canvas-authentication-authorization-plan-quality.md` - Findings Q-001 through Q-007
+* `.copilot-tracking/reviews/2026-07-28/infinite-canvas-authentication-authorization-plan-review.md` - Phase 1 rework requirement
+
+Dependencies:
+* Completed repository-controlled portions of Steps 1.1 through 1.4
+
 ## Implementation Phase 2: Identity Persistence and Verification
 
 <!-- parallelizable: false -->

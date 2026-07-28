@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: cd-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-and-push:
@@ -194,6 +194,17 @@ jobs:
             exit 1
           fi
 
+          node --input-type=module --eval '
+            const apiOrigin = new URL(process.env.AUTH_API_ORIGIN);
+            const redirectUri = new URL(process.env.AUTH_REDIRECT_URI);
+            if (apiOrigin.toString() !== apiOrigin.origin + "/") {
+              throw new Error("AUTH_API_ORIGIN must contain only the client origin");
+            }
+            if (apiOrigin.origin !== redirectUri.origin) {
+              throw new Error("AUTH_API_ORIGIN must match the client redirect origin");
+            }
+          '
+
       - name: Apply Database Migrations
         uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
         with:
@@ -208,6 +219,32 @@ jobs:
             if az containerapp job show \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${MIGRATION_JOB_NAME}" >/dev/null 2>&1; then
+              terminal_statuses='Succeeded|Failed|Stopped|Degraded'
+              active_execution="$(az containerapp job execution list \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --query "[?!contains('${terminal_statuses}', properties.status)].name | [0]" \
+                --output tsv)"
+
+              if [[ -n "${active_execution}" ]]; then
+                echo "Migration job ${MIGRATION_JOB_NAME} already has active execution ${active_execution}; refusing to mutate or start it." >&2
+                exit 1
+              fi
+
+              migration_job_id="$(az containerapp job show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --query id \
+                --output tsv)"
+              az resource update \
+                --ids "${migration_job_id}" \
+                --set \
+                  properties.configuration.triggerType=Manual \
+                  properties.configuration.replicaTimeout=1800 \
+                  properties.configuration.replicaRetryLimit=2 \
+                  properties.configuration.manualTriggerConfig.parallelism=1 \
+                  properties.configuration.manualTriggerConfig.replicaCompletionCount=1
+
               az containerapp job secret set \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${MIGRATION_JOB_NAME}" \
@@ -225,6 +262,10 @@ jobs:
               az containerapp job update \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${MIGRATION_JOB_NAME}" \
+                --replica-timeout 1800 \
+                --replica-retry-limit 2 \
+                --parallelism 1 \
+                --replica-completion-count 1 \
                 --image "${SERVER_IMAGE}" \
                 --set-env-vars "NODE_ENV=production" "DATABASE_URL=secretref:database-url" \
                 --command node \
@@ -254,6 +295,18 @@ jobs:
                 --command node \
                 --args dist/db/migrate.js \
                 ${CREATE_REGISTRY_ARGS[@]}
+            fi
+
+            job_settings="$(az containerapp job show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${MIGRATION_JOB_NAME}" \
+              --query "[properties.configuration.triggerType, properties.configuration.manualTriggerConfig.parallelism, properties.configuration.manualTriggerConfig.replicaCompletionCount, properties.configuration.replicaTimeout, properties.configuration.replicaRetryLimit]" \
+              --output tsv)"
+            expected_settings=$'Manual\t1\t1\t1800\t2'
+
+            if [[ "${job_settings}" != "${expected_settings}" ]]; then
+              echo "Migration job settings are unsafe: ${job_settings}" >&2
+              exit 1
             fi
 
             execution_name="$(az containerapp job start \

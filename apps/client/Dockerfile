@@ -22,13 +22,12 @@ RUN npm run build --workspace=apps/client
 
 FROM nginx:1.27-alpine AS runtime
 
-# Install envsubst (gettext) for environment variable substitution in nginx config
-RUN apk add --no-cache gettext
+# Install envsubst for nginx and jq for JSON-safe runtime configuration.
+RUN apk add --no-cache gettext jq
 
 # Copy nginx config template
 COPY apps/client/nginx.conf /etc/nginx/nginx.conf.template
 COPY --from=build /app/apps/client/dist /usr/share/nginx/html
-COPY apps/client/public/auth-config.template.json /etc/nginx/auth-config.template.json
 
 # Create entrypoint script to substitute environment variables and start nginx
 RUN echo '#!/bin/sh' > /entrypoint.sh && \
@@ -44,8 +43,18 @@ RUN echo '#!/bin/sh' > /entrypoint.sh && \
     echo 'done' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] BACKEND_SERVICE_HOSTNAME=$BACKEND_SERVICE_HOSTNAME"' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] Generating runtime configuration..."' >> /entrypoint.sh && \
-    echo 'envsubst "\${AUTH_AUTHORITY} \${AUTH_CLIENT_ID} \${AUTH_API_SCOPE} \${AUTH_API_ORIGIN} \${AUTH_REDIRECT_URI} \${AUTH_POST_LOGOUT_REDIRECT_URI}" < /etc/nginx/auth-config.template.json > /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
+    echo 'jq -n \' >> /entrypoint.sh && \
+    echo '  --arg authority "$AUTH_AUTHORITY" \' >> /entrypoint.sh && \
+    echo '  --arg clientId "$AUTH_CLIENT_ID" \' >> /entrypoint.sh && \
+    echo '  --arg apiScope "$AUTH_API_SCOPE" \' >> /entrypoint.sh && \
+    echo '  --arg apiOrigin "$AUTH_API_ORIGIN" \' >> /entrypoint.sh && \
+    echo '  --arg redirectUri "$AUTH_REDIRECT_URI" \' >> /entrypoint.sh && \
+    echo '  --arg postLogoutRedirectUri "$AUTH_POST_LOGOUT_REDIRECT_URI" \' >> /entrypoint.sh && \
+    echo '  '\''{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri}'\'' \' >> /entrypoint.sh && \
+    echo '  > /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
+    echo 'jq empty /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
     echo 'envsubst "\${BACKEND_SERVICE_HOSTNAME}" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \
+    echo 'nginx -t' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] Starting nginx..."' >> /entrypoint.sh && \
     echo 'exec nginx -g "daemon off;"' >> /entrypoint.sh && \
     chmod +x /entrypoint.sh

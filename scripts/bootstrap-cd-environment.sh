@@ -31,6 +31,18 @@ Required environment variables:
   AZURE_LOCATION
   SERVER_CONTAINER_APP_NAME
   CLIENT_CONTAINER_APP_NAME
+  MIGRATION_JOB_NAME
+  AUTH_AUTHORITY
+  AUTH_CLIENT_ID
+  AUTH_API_SCOPE
+  AUTH_API_ORIGIN
+  AUTH_REDIRECT_URI
+  AUTH_POST_LOGOUT_REDIRECT_URI
+  AUTH_TRUSTED_ISSUER
+  AUTH_API_AUDIENCE
+  AUTH_REQUIRED_SCOPE
+  AUTH_JWKS_URI
+  AUTH_ACCEPTED_ALGORITHM
   SERVER_DATABASE_URL
 
 Optional environment variables:
@@ -48,6 +60,18 @@ Examples:
   AZURE_LOCATION=eastus
   SERVER_CONTAINER_APP_NAME=zzyix-staging-server
   CLIENT_CONTAINER_APP_NAME=zzyix-staging-client
+  MIGRATION_JOB_NAME=zzyix-staging-migrations
+  AUTH_AUTHORITY=https://example.ciamlogin.com/example.onmicrosoft.com
+  AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000001
+  AUTH_API_SCOPE=api://00000000-0000-0000-0000-000000000002/access_as_user
+  AUTH_API_ORIGIN=https://app.example.com
+  AUTH_REDIRECT_URI=https://app.example.com
+  AUTH_POST_LOGOUT_REDIRECT_URI=https://app.example.com
+  AUTH_TRUSTED_ISSUER=https://example.ciamlogin.com/00000000-0000-0000-0000-000000000003/v2.0
+  AUTH_API_AUDIENCE=00000000-0000-0000-0000-000000000002
+  AUTH_REQUIRED_SCOPE=access_as_user
+  AUTH_JWKS_URI=https://example.ciamlogin.com/example.onmicrosoft.com/discovery/v2.0/keys
+  AUTH_ACCEPTED_ALGORITHM=RS256
   SERVER_DATABASE_URL=postgres://...
   # Optional: override auto-resolved CORS origin
   # SERVER_CORS_ORIGIN=https://client.example.com
@@ -237,6 +261,18 @@ main() {
   require_value "AZURE_LOCATION"
   require_value "SERVER_CONTAINER_APP_NAME"
   require_value "CLIENT_CONTAINER_APP_NAME"
+  require_value "MIGRATION_JOB_NAME"
+  require_value "AUTH_AUTHORITY"
+  require_value "AUTH_CLIENT_ID"
+  require_value "AUTH_API_SCOPE"
+  require_value "AUTH_API_ORIGIN"
+  require_value "AUTH_REDIRECT_URI"
+  require_value "AUTH_POST_LOGOUT_REDIRECT_URI"
+  require_value "AUTH_TRUSTED_ISSUER"
+  require_value "AUTH_API_AUDIENCE"
+  require_value "AUTH_REQUIRED_SCOPE"
+  require_value "AUTH_JWKS_URI"
+  require_value "AUTH_ACCEPTED_ALGORITHM"
   require_value "SERVER_DATABASE_URL"
   warn_if_non_explicit_sslmode "${SERVER_DATABASE_URL}"
 
@@ -258,6 +294,30 @@ main() {
     "SERVER_CONTAINER_APP_NAME" "${SERVER_CONTAINER_APP_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
     "CLIENT_CONTAINER_APP_NAME" "${CLIENT_CONTAINER_APP_NAME}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "MIGRATION_JOB_NAME" "${MIGRATION_JOB_NAME}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_AUTHORITY" "${AUTH_AUTHORITY}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_CLIENT_ID" "${AUTH_CLIENT_ID}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_API_SCOPE" "${AUTH_API_SCOPE}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_API_ORIGIN" "${AUTH_API_ORIGIN}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_REDIRECT_URI" "${AUTH_REDIRECT_URI}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_POST_LOGOUT_REDIRECT_URI" "${AUTH_POST_LOGOUT_REDIRECT_URI}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_TRUSTED_ISSUER" "${AUTH_TRUSTED_ISSUER}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_API_AUDIENCE" "${AUTH_API_AUDIENCE}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_REQUIRED_SCOPE" "${AUTH_REQUIRED_SCOPE}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_JWKS_URI" "${AUTH_JWKS_URI}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_ACCEPTED_ALGORITHM" "${AUTH_ACCEPTED_ALGORITHM}"
   if [[ -n "${SERVER_CORS_ORIGIN:-}" ]]; then
     set_environment_variable "${repo}" "${environment_name}" \
       "SERVER_CORS_ORIGIN" "${SERVER_CORS_ORIGIN}"

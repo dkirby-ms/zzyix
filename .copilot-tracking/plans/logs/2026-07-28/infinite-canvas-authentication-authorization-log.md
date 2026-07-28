@@ -55,6 +55,18 @@ Gaps and differences identified between research findings and the implementation
   * Plan specifies: Generate public authentication configuration at client container startup
   * Implementation differs: Also copies the existing shared client import into the Docker build context
   * Rationale: The production image build omitted a module already required by the client workspace
+* DD-05: Queue CD releases and fail closed on active migration executions
+  * Plan specifies: Exactly one release step applies migrations before incompatible replicas start
+  * Implementation differs: Disables workflow cancellation and refuses to mutate or start the migration job while an Azure execution is active
+  * Rationale: Cancelling runner-side polling does not cancel the external Azure execution, so queued releases and explicit execution checks preserve one migration owner
+* DD-06: Reconcile migration job settings through the generic Azure resource surface
+  * Plan specifies: Reassert and verify manual trigger, parallelism, completion count, timeout, and retries on every deployment
+  * Implementation differs: Uses supported Container Apps update flags plus `az resource update` for trigger and persisted configuration fields
+  * Rationale: `az containerapp job update` does not expose a trigger-type option; post-update verification fails closed on drift
+* DD-07: Use same-origin browser API routing
+  * Plan specifies: Supply a browser-reachable API origin while the server retains internal ingress
+  * Implementation differs: Requires the configured API origin to equal the registered client origin and proxies explicit API roots through nginx and Vite
+  * Rationale: This keeps the server private, avoids a second public origin, and gives future protected routes one documented browser boundary
 
 ## Implementation Paths Considered
 
@@ -113,3 +125,6 @@ Items identified during planning that fall outside current implementation scope.
 * WI-07: Complete External ID tenant and application registration — Have an authorized administrator approve the external tenant, branding, domain, sign-in methods, SPA/API registrations, delegated scope, and environment values (blocking priority, small effort)
   * Source: Phase 1, Step 1.1
   * Dependency: External ID administrative access and product approval
+* WI-08: Validate migration-job reconciliation in staging — Run CD against the target subscription and verify active-execution refusal, resource-setting reconciliation, migration completion, and subsequent rollout ordering (blocking priority, small effort)
+  * Source: Phase 1, Step 1.5 review rework
+  * Dependency: WI-07 approved environment values and staging deployment access

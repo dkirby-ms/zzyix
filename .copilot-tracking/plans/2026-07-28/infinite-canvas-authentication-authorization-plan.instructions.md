@@ -122,6 +122,8 @@ playwright*.config.ts
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 66-87)
 * [x] Step 1.4: Validate prerequisite phase
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 88-94)
+* [x] Step 1.5: Resolve Phase 1 release-contract review findings
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 1, Step 1.5)
 
 ### [ ] Implementation Phase 2: Identity Persistence and Verification
 
