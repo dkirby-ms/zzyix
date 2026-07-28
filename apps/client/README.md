@@ -64,6 +64,36 @@ npm install
 npm run dev
 ```
 
+## External ID Runtime Configuration
+
+Register the browser application in the Microsoft Entra External ID external
+tenant as a single-page application. Use authorization code with PKCE. Do not
+create or deploy a client secret for the browser application.
+
+Configure these public GitHub environment variables for each deployment
+environment:
+
+* `AUTH_AUTHORITY`: External tenant authority, such as
+	`https://<tenant-subdomain>.ciamlogin.com/<tenant-id>`
+* `AUTH_CLIENT_ID`: SPA application (client) ID
+* `AUTH_API_SCOPE`: Delegated API scope in
+	`api://<api-application-id>/<scope-name>` form
+* `AUTH_API_ORIGIN`: Public API origin used by authenticated requests
+* `AUTH_REDIRECT_URI`: Exact SPA redirect URI registered with External ID
+* `AUTH_POST_LOGOUT_REDIRECT_URI`: Exact post-logout URI registered with
+	External ID
+
+The client container generates `/auth-config.json` from these values when it
+starts. The response uses `Cache-Control: no-store`, so the same image can move
+between environments without rebuilding. Container startup fails when any
+value is absent. These values are public OAuth metadata, not secrets.
+
+For local development, use the client origin `http://localhost:5173` for both
+redirect settings and an API origin such as `http://localhost:3001`. Production
+authority, API, redirect, and logout values must use HTTPS. Register every
+deployed origin exactly. Wildcard redirect and logout URIs are not supported by
+this contract.
+
 ## Build
 
 ```bash

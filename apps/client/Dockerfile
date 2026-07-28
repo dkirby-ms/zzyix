@@ -17,6 +17,7 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
 
 COPY apps/client ./apps/client
 COPY apps/server/src/contracts.ts ./apps/server/src/contracts.ts
+COPY apps/server/src/domain/quiltTopology.ts ./apps/server/src/domain/quiltTopology.ts
 RUN npm run build --workspace=apps/client
 
 FROM nginx:1.27-alpine AS runtime
@@ -27,17 +28,24 @@ RUN apk add --no-cache gettext
 # Copy nginx config template
 COPY apps/client/nginx.conf /etc/nginx/nginx.conf.template
 COPY --from=build /app/apps/client/dist /usr/share/nginx/html
+COPY apps/client/public/auth-config.template.json /etc/nginx/auth-config.template.json
 
 # Create entrypoint script to substitute environment variables and start nginx
 RUN echo '#!/bin/sh' > /entrypoint.sh && \
     echo 'set -e' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] Starting nginx entrypoint..."' >> /entrypoint.sh && \
-    echo 'BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME:-localhost}' >> /entrypoint.sh && \
+    echo 'required_variables="BACKEND_SERVICE_HOSTNAME AUTH_AUTHORITY AUTH_CLIENT_ID AUTH_API_SCOPE AUTH_API_ORIGIN AUTH_REDIRECT_URI AUTH_POST_LOGOUT_REDIRECT_URI"' >> /entrypoint.sh && \
+    echo 'for variable_name in $required_variables; do' >> /entrypoint.sh && \
+    echo '  eval "variable_value=\${$variable_name:-}"' >> /entrypoint.sh && \
+    echo '  if [ -z "$variable_value" ]; then' >> /entrypoint.sh && \
+    echo '    echo "ERROR: Required runtime setting $variable_name is missing." >&2' >> /entrypoint.sh && \
+    echo '    exit 1' >> /entrypoint.sh && \
+    echo '  fi' >> /entrypoint.sh && \
+    echo 'done' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] BACKEND_SERVICE_HOSTNAME=$BACKEND_SERVICE_HOSTNAME"' >> /entrypoint.sh && \
-    echo 'echo "[entrypoint] Substituting nginx config template..."' >> /entrypoint.sh && \
+    echo 'echo "[entrypoint] Generating runtime configuration..."' >> /entrypoint.sh && \
+    echo 'envsubst "\${AUTH_AUTHORITY} \${AUTH_CLIENT_ID} \${AUTH_API_SCOPE} \${AUTH_API_ORIGIN} \${AUTH_REDIRECT_URI} \${AUTH_POST_LOGOUT_REDIRECT_URI}" < /etc/nginx/auth-config.template.json > /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
     echo 'envsubst "\${BACKEND_SERVICE_HOSTNAME}" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \
-    echo 'echo "[entrypoint] Generated nginx config:"' >> /entrypoint.sh && \
-    echo 'cat /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] Starting nginx..."' >> /entrypoint.sh && \
     echo 'exec nginx -g "daemon off;"' >> /entrypoint.sh && \
     chmod +x /entrypoint.sh

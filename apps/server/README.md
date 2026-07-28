@@ -34,6 +34,40 @@ Set environment variables:
 - `HOST` — Server host (default: 0.0.0.0)
 - `CORS_ORIGIN` — Allowed CORS origin for Socket.IO (default: http://localhost:5173)
 
+### External ID API Registration
+
+Register a separate zzyix API application in the same Microsoft Entra External
+ID external tenant as the SPA. Expose one delegated access scope for the
+initial release and grant the SPA permission to request it. Record the exact
+tenant values in protected deployment administration, not in source control.
+
+Configure these GitHub environment variables for each deployment environment:
+
+* `AUTH_TRUSTED_ISSUER`: Exact `iss` value accepted from API access tokens
+* `AUTH_API_AUDIENCE`: Exact API application ID URI or audience claim
+* `AUTH_REQUIRED_SCOPE`: Delegated scope name required by the API
+* `AUTH_JWKS_URI`: HTTPS JWKS endpoint for the trusted external tenant
+* `AUTH_ACCEPTED_ALGORITHM`: Accepted asymmetric signing algorithm, initially
+	`RS256` unless the tenant registration requires another reviewed algorithm
+* `SERVER_CORS_ORIGIN`: Exact deployed client origin
+* `MIGRATION_JOB_NAME`: Environment-specific Container Apps migration job name
+
+The corresponding client values are `AUTH_AUTHORITY`, `AUTH_CLIENT_ID`,
+`AUTH_API_SCOPE`, `AUTH_API_ORIGIN`, `AUTH_REDIRECT_URI`, and
+`AUTH_POST_LOGOUT_REDIRECT_URI`. CD validates all client and server identity
+settings before changing either Container App. `SERVER_DATABASE_URL` remains a
+GitHub environment secret; none of the identity settings above are secrets.
+
+The trusted issuer must match tokens exactly. Do not derive it from email,
+display name, tenant branding, or the requested authority. The API audience and
+delegated scope must match the exposed API registration. Test issuer keys and
+settings must never be configured in production.
+
+Target-subscription administrators must confirm that the subscription can host
+an External ID external tenant and approve tenant branding, domain, and enabled
+sign-in methods before deployment. Repository configuration cannot validate
+those provider administration decisions.
+
 Chunk rollout flags:
 - `FEATURE_CHUNK_STREAMING_ENABLED` — Enable chunk subscribe/unsubscribe handlers globally (`true` by default)
 - `FEATURE_CHUNK_AGGREGATE_ENABLED` — Allow aggregate chunk snapshot payload mode (`true` by default)
@@ -109,9 +143,22 @@ for every authoritative tile row visible through the migrated links. It also
 checks bounded canvas dimensions and origins, tile linkage, spatial-reference
 coverage, and the absence of inferred patch owners.
 
-The rehearsal runs backfill twice in separate Node processes, rolls additive
-quilt data back, compares complete legacy canvas and tile fingerprints, then
-backfills and verifies again. The cleanup trap drops the temporary database.
+The rehearsal creates both a fresh database and an upgrade database. It applies
+migrations through 0004 to the upgrade database, seeds representative legacy
+data, applies 0005, and compares its server-side schema fingerprint with the
+fresh database. It then runs backfill twice in separate Node processes, rolls
+additive quilt data back, compares complete legacy canvas and tile
+fingerprints, then backfills and verifies again. The cleanup trap drops both
+temporary databases.
+
+CD owns production migration execution through one manually triggered
+Container Apps job. The job runs the release server image's `db:apply` command
+with parallelism one, retries a failed replica twice, and must report success
+before the server Container App receives the new image. A failed or timed-out
+migration stops the deployment. Production server startup remains
+verification-only and never applies DDL. Rollback keeps the previous server
+revision active; any data rollback requires a separately reviewed reverse
+migration because additive migrations are not automatically reversed.
 
 Individual loopback operations use `DATABASE_URL`:
 
