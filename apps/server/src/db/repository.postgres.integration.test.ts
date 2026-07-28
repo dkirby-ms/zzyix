@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { canvases, patches, principals, quilts } from './schema.js'
+import { and, eq } from 'drizzle-orm'
+import { canvases, patchMemberships, patches, principals, quilts } from './schema.js'
 import { persistQuiltTilePlacement } from './repository.js'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
 
 const CANVAS_ID = '10000000-0000-4000-8000-000000000001'
 const QUILT_ID = '20000000-0000-4000-8000-000000000001'
 const PRINCIPAL_ID = '30000000-0000-4000-8000-000000000001'
+const MEMBER_PRINCIPAL_ID = '30000000-0000-4000-8000-000000000002'
 const PATCH_IDS = [
   'f0000000-0000-4000-8000-000000000001',
   'a0000000-0000-4000-8000-000000000001',
@@ -55,7 +57,10 @@ describe('patch-scoped PostgreSQL placement', () => {
   beforeAll(async () => {
     database = await createPostgresTestDatabase('zzyix_repository')
     await database.db.insert(canvases).values({ id: CANVAS_ID })
-    await database.db.insert(principals).values({ id: PRINCIPAL_ID, kind: 'human' })
+    await database.db.insert(principals).values([
+      { id: PRINCIPAL_ID, kind: 'human' },
+      { id: MEMBER_PRINCIPAL_ID, kind: 'human' },
+    ])
     await database.db.insert(quilts).values({
       id: QUILT_ID,
       legacyCanvasId: CANVAS_ID,
@@ -80,7 +85,8 @@ describe('patch-scoped PostgreSQL placement', () => {
 
   beforeEach(async () => {
     await queryWithConnection(database, 'TRUNCATE patch_operations, patch_snapshots, tile_spatial_refs, tiles CASCADE')
-    await queryWithConnection(database, 'UPDATE patches SET revision = 0')
+    await queryWithConnection(database, 'TRUNCATE patch_memberships')
+    await queryWithConnection(database, 'UPDATE patches SET revision = 0, owner_principal_id = $1', [PRINCIPAL_ID])
   })
 
   it('allows exactly one conflicting placement across the toroidal seam', async () => {
@@ -158,12 +164,10 @@ describe('patch-scoped PostgreSQL placement', () => {
   })
 
   it('persists no partial state for unauthorized or stale writes', async () => {
-    const outsiderId = '30000000-0000-4000-8000-000000000002'
-    await database.db.insert(principals).values({ id: outsiderId, kind: 'human' }).onConflictDoNothing()
     const unauthorized = await persistQuiltTilePlacement({
       quiltId: QUILT_ID,
       operationId: randomUUID(),
-      principalId: outsiderId,
+      principalId: MEMBER_PRINCIPAL_ID,
       expectedPatchRevisions: { [PATCH_IDS[1]]: 0 },
       payload: {
         tileId: '40000000-0000-4000-8000-000000000007',
@@ -188,5 +192,51 @@ describe('patch-scoped PostgreSQL placement', () => {
     expect(unauthorized).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
     expect(stale).toEqual({ committed: false, reason: 'STALE_REVISION' })
     expect(counts[0]).toEqual({ tiles: 0, refs: 0, operations: 0 })
+  })
+
+  it('denies member role mutation and permits the persisted owner capability', async () => {
+    await database.db.update(patches).set({ ownerPrincipalId: null }).where(eq(patches.id, PATCH_IDS[1]))
+    await database.db.insert(patchMemberships).values({
+      patchId: PATCH_IDS[1],
+      principalId: MEMBER_PRINCIPAL_ID,
+      role: 'member',
+    })
+
+    const memberResult = await persistQuiltTilePlacement({
+      quiltId: QUILT_ID,
+      operationId: randomUUID(),
+      principalId: MEMBER_PRINCIPAL_ID,
+      expectedPatchRevisions: { [PATCH_IDS[1]]: 0 },
+      payload: {
+        tileId: '40000000-0000-4000-8000-000000000009',
+        shape: 'square',
+        color: '#123',
+        material: 'stone',
+        transform: { position: { x: 15, y: 5 }, rotation: 0 },
+      },
+    })
+    await database.db
+      .update(patchMemberships)
+      .set({ role: 'owner' })
+      .where(and(
+        eq(patchMemberships.patchId, PATCH_IDS[1]),
+        eq(patchMemberships.principalId, MEMBER_PRINCIPAL_ID),
+      ))
+    const ownerResult = await persistQuiltTilePlacement({
+      quiltId: QUILT_ID,
+      operationId: randomUUID(),
+      principalId: MEMBER_PRINCIPAL_ID,
+      expectedPatchRevisions: { [PATCH_IDS[1]]: 0 },
+      payload: {
+        tileId: '40000000-0000-4000-8000-000000000010',
+        shape: 'square',
+        color: '#456',
+        material: 'glass',
+        transform: { position: { x: 15, y: 5 }, rotation: 0 },
+      },
+    })
+
+    expect(memberResult).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
+    expect(ownerResult).toMatchObject({ committed: true, idempotent: false })
   })
 })

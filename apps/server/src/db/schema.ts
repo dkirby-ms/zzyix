@@ -29,6 +29,8 @@ import {
 const asSqlLiteralList = (values: readonly string[]) =>
   sql.raw(values.map((value) => `'${value}'`).join(', '))
 
+export const patchesParentBoundsConstraintName = 'patches_parent_bounds_check'
+
 export const users = pgTable(
   'users',
   {

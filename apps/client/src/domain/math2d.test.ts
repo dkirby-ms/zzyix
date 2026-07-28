@@ -5,6 +5,7 @@ import {
   viewportToChunkIds,
   worldToChunkCoords,
 } from './math2d'
+import type { ViewportBounds } from './math2d'
 
 describe('math2d chunk topology', () => {
   it('preserves unbounded chunk enumeration by default', () => {
@@ -33,7 +34,13 @@ describe('math2d chunk topology', () => {
   })
 
   it('canonicalizes negative and multi-lap toroidal viewports deterministically', () => {
-    const mode = { mode: 'toroidal' as const, chunkColumns: 4, chunkRows: 3 }
+    const mode = {
+      mode: 'toroidal' as const,
+      chunkColumns: 4,
+      chunkRows: 3,
+      quiltWidth: 32,
+      quiltHeight: 24,
+    }
 
     expect(viewportToChunkIds({ minX: -9, maxX: -1, minY: 47, maxY: 55 }, 8, 0, mode)).toEqual([
       '2:2',
@@ -54,11 +61,57 @@ describe('math2d chunk topology', () => {
       { minX: -1, maxX: 1, minY: -1, maxY: 1 },
       8,
       4,
-      { mode: 'toroidal', chunkColumns: 2, chunkRows: 2 },
+      { mode: 'toroidal', chunkColumns: 2, chunkRows: 2, quiltWidth: 16, quiltHeight: 16 },
     )
 
     expect(chunkIds).toEqual(['1:1', '1:0', '0:1', '0:0'])
     expect(new Set(chunkIds).size).toBe(chunkIds.length)
+  })
+
+  it('preserves production chunk subscriptions across positive and negative exact laps', () => {
+    const mode = {
+      mode: 'toroidal' as const,
+      chunkColumns: 8,
+      chunkRows: 6,
+      quiltWidth: 62.4,
+      quiltHeight: 40.8,
+    }
+    const viewport = { minX: 12, maxX: 28, minY: 8, maxY: 24 }
+    const translate = (x: number, y: number): ViewportBounds => ({
+      minX: viewport.minX + x,
+      maxX: viewport.maxX + x,
+      minY: viewport.minY + y,
+      maxY: viewport.maxY + y,
+    })
+    const canonical = viewportToChunkIds(viewport, 8, 1, mode)
+
+    expect(viewportToChunkIds(translate(62.4, 40.8), 8, 1, mode)).toEqual(canonical)
+    expect(viewportToChunkIds(translate(-62.4, -40.8), 8, 1, mode)).toEqual(canonical)
+  })
+
+  it('preserves a production corner subscription across exact laps without duplicates', () => {
+    const mode = {
+      mode: 'toroidal' as const,
+      chunkColumns: 8,
+      chunkRows: 6,
+      quiltWidth: 62.4,
+      quiltHeight: 40.8,
+    }
+    const canonical = viewportToChunkIds(
+      { minX: -1, maxX: 1, minY: 39.8, maxY: 41.8 },
+      8,
+      0,
+      mode,
+    )
+    const exactLap = viewportToChunkIds(
+      { minX: 61.4, maxX: 63.4, minY: -1, maxY: 1 },
+      8,
+      0,
+      mode,
+    )
+
+    expect(exactLap).toEqual(canonical)
+    expect(new Set(canonical).size).toBe(canonical.length)
   })
 
   it('keeps existing coordinate, hysteresis, and budget helpers stable', () => {

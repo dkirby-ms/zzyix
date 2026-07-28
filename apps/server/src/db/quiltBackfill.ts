@@ -28,6 +28,9 @@ export type QuiltBackfillParity = {
   linkedTiles: number
   spatiallyReferencedTiles: number
   inferredOwners: number
+  geometryMismatches: number
+  legacyTileFingerprint: string
+  linkedTileFingerprint: string
   matches: boolean
 }
 
@@ -204,13 +207,43 @@ const backfillCanvas = async (client: PoolClient, canvas: LegacyCanvasBackfillSo
 export const verifyQuiltBackfillParity = async (pool: Pool): Promise<QuiltBackfillParity> => {
   const result = await pool.query<QuiltBackfillParity>(
     `
+      WITH tile_fingerprints AS (
+        SELECT
+          md5(coalesce(string_agg(
+            concat_ws('|', id, canvas_id, shape, color, material, pos_x, pos_y,
+              chunk_x, chunk_y, rotation, mirrored, coalesce(placed_by, ''),
+              extract(epoch FROM created_at)),
+            ',' ORDER BY id
+          ), '')) AS legacy_fingerprint,
+          md5(coalesce(string_agg(
+            concat_ws('|', id, canvas_id, shape, color, material, pos_x, pos_y,
+              chunk_x, chunk_y, rotation, mirrored, coalesce(placed_by, ''),
+              extract(epoch FROM created_at)),
+            ',' ORDER BY id
+          ) FILTER (WHERE quilt_id IS NOT NULL AND anchor_patch_id IS NOT NULL), '')) AS linked_fingerprint
+        FROM tiles
+      )
       SELECT
         (SELECT count(*)::int FROM canvases) AS "legacyCanvases",
         (SELECT count(*)::int FROM quilts WHERE legacy_canvas_id IS NOT NULL AND topology = 'bounded') AS "compatibilityQuilts",
         (SELECT count(*)::int FROM tiles) AS "legacyTiles",
         (SELECT count(*)::int FROM tiles WHERE quilt_id IS NOT NULL AND anchor_patch_id IS NOT NULL) AS "linkedTiles",
         (SELECT count(DISTINCT tile_id)::int FROM tile_spatial_refs) AS "spatiallyReferencedTiles",
-        (SELECT count(*)::int FROM patches WHERE owner_principal_id IS NOT NULL) AS "inferredOwners"
+        (SELECT count(*)::int FROM patches WHERE owner_principal_id IS NOT NULL) AS "inferredOwners",
+        (SELECT count(*)::int
+          FROM canvases c
+          JOIN quilts q ON q.legacy_canvas_id = c.id
+          WHERE q.patch_rows <> 1
+            OR q.patch_columns <> 1
+            OR q.topology <> 'bounded'
+            OR q.patch_width <> (c.canvas_config->'canvasSize'->>'width')::double precision
+            OR q.patch_height <> (c.canvas_config->'canvasSize'->>'height')::double precision
+            OR q.origin_x <> (c.canvas_config->'boundsPolicy'->'bounds'->>'minX')::double precision
+            OR q.origin_y <> (c.canvas_config->'boundsPolicy'->'bounds'->>'minY')::double precision
+        ) AS "geometryMismatches",
+        legacy_fingerprint AS "legacyTileFingerprint",
+        linked_fingerprint AS "linkedTileFingerprint"
+      FROM tile_fingerprints
     `,
   )
   const counts = result.rows[0]
@@ -224,7 +257,9 @@ export const verifyQuiltBackfillParity = async (pool: Pool): Promise<QuiltBackfi
       counts.legacyCanvases === counts.compatibilityQuilts &&
       counts.legacyTiles === counts.linkedTiles &&
       counts.legacyTiles === counts.spatiallyReferencedTiles &&
-      counts.inferredOwners === 0,
+      counts.inferredOwners === 0 &&
+      counts.geometryMismatches === 0 &&
+      counts.legacyTileFingerprint === counts.linkedTileFingerprint,
   }
 }
 

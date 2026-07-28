@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 
 export type QuiltCanaryConfig = {
   enabled: boolean
+  dualReadEnabled: boolean
+  protocolV2Enabled: boolean
   quiltIds: Set<string>
   principalIds: Set<string>
   cohortPercent: number
@@ -10,6 +12,12 @@ export type QuiltCanaryConfig = {
 export type QuiltCanarySubject = {
   quiltId: string
   principalId?: string
+}
+
+export type QuiltRolloutDecision = {
+  canary: boolean
+  dualReadEnabled: boolean
+  protocolV2Enabled: boolean
 }
 
 export type LegacyRetirementGates = {
@@ -44,6 +52,8 @@ const parseBoolean = (value: string | undefined): boolean => value?.trim().toLow
 
 export const loadQuiltCanaryConfig = (environment: NodeJS.ProcessEnv = process.env): QuiltCanaryConfig => ({
   enabled: parseBoolean(environment.FEATURE_QUILT_DUAL_READ_CANARY_ENABLED),
+  dualReadEnabled: parseBoolean(environment.FEATURE_QUILT_DUAL_READ_ENABLED),
+  protocolV2Enabled: parseBoolean(environment.FEATURE_QUILT_PROTOCOL_V2_ENABLED),
   quiltIds: parseSet(environment.FEATURE_QUILT_DUAL_READ_CANARY_QUILT_IDS),
   principalIds: parseSet(environment.FEATURE_QUILT_DUAL_READ_CANARY_PRINCIPAL_IDS),
   cohortPercent: parsePercent(environment.FEATURE_QUILT_DUAL_READ_CANARY_PERCENT),
@@ -62,6 +72,18 @@ export const isQuiltCanarySubject = (
     .digest()
   const bucket = digest.readUInt32BE(0) % 10_000
   return bucket < config.cohortPercent * 100
+}
+
+export const resolveQuiltRollout = (
+  subject: QuiltCanarySubject,
+  config: QuiltCanaryConfig,
+): QuiltRolloutDecision => {
+  const canary = isQuiltCanarySubject(subject, config)
+  return {
+    canary,
+    dualReadEnabled: config.dualReadEnabled || canary,
+    protocolV2Enabled: config.protocolV2Enabled || canary,
+  }
 }
 
 export const loadLegacyRetirementGates = (

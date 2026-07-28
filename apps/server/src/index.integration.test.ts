@@ -1,19 +1,26 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyPlaceTile,
+  buildChunkAggregate,
   buildPatchRoomAccess,
   buildListSessionsResponse,
   createAuthoritativeSessionState,
   finalizeParticipantPresence,
   getSessionState,
   initializeParticipantPresence,
+  isQuiltClientRuntimeMetrics,
   isQuiltRoomRequest,
   isPlaceTilePayload,
   isSelectionUpdatePayload,
   registerClientSocket,
+  recordQuiltClientRuntimeMetrics,
+  haveEqualChunkScope,
+  selectScopedReplayOperations,
   unregisterClientSocket,
 } from './index.js'
+import type { PatchDeliveryOperation } from './db/repository.js'
 import { vec2 } from './domain/math2d.js'
+import { configureQuiltTelemetry } from './migration/quiltTelemetry.js'
 
 let sessionCounter = 0
 
@@ -914,5 +921,113 @@ describe('protocol-v2 authorization boundary', () => {
     expect(isQuiltRoomRequest({ requestId: 'fine:0:0', kind: 'fine', row: 0, column: 0 })).toBe(true)
     expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'owner', row: 0, column: 0 })).toBe(false)
     expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'fine', row: '0', column: 0 })).toBe(false)
+  })
+
+  it('accepts finite normal-operation client runtime measurements', () => {
+    const payload = {
+      quiltId: 'quilt-1',
+      retainedPatchCount: 2,
+      retainedTileCount: 12,
+      sceneObjectCount: 24,
+      drawCalls: 5,
+      frameTimeMs: 16.7,
+    }
+    expect(isQuiltClientRuntimeMetrics(payload)).toBe(true)
+    expect(isQuiltClientRuntimeMetrics({
+      ...payload,
+      retainedPatchCount: -1,
+    })).toBe(false)
+
+    const observer = vi.fn()
+    configureQuiltTelemetry(observer)
+    try {
+      expect(recordQuiltClientRuntimeMetrics(payload, {
+        canaryTelemetryEnabled: true,
+        quiltId: 'quilt-1',
+        principalId: 'principal-1',
+      })).toBe(true)
+      expect(observer).toHaveBeenCalledWith({
+        name: 'client_runtime',
+        quiltId: 'quilt-1',
+        principalId: 'principal-1',
+        canary: true,
+        measurements: {
+          retainedPatchCount: 2,
+          retainedTileCount: 12,
+          sceneObjectCount: 24,
+          drawCalls: 5,
+          frameTimeMs: 16.7,
+        },
+      })
+    } finally {
+      configureQuiltTelemetry()
+    }
+  })
+})
+
+describe('protocol-v2 scoped recovery delivery', () => {
+  const operation = (overrides: Partial<PatchDeliveryOperation> = {}): PatchDeliveryOperation => ({
+    eventId: crypto.randomUUID(),
+    opSeq: 1,
+    opType: 'tile_placed',
+    payload: {
+      tileId: crypto.randomUUID(),
+      shape: 'square',
+      color: '#abc',
+      material: 'ceramic',
+      transform: { position: vec2(0, 0), rotation: 0 },
+    },
+    createdAt: 1,
+    chunkIds: ['0:0'],
+    ...overrides,
+  })
+
+  it('replays all applicable operations for a deliberately stale scoped cursor in order', () => {
+    const staleCursorScope = ['0:0'] as const
+    const retained = [
+      operation({ opSeq: 3, chunkIds: ['0:0'] }),
+      operation({ opSeq: 4, chunkIds: ['1:0'] }),
+      operation({ opSeq: 5, chunkIds: ['0:0', '1:0'] }),
+    ]
+
+    expect(haveEqualChunkScope(staleCursorScope, ['0:0'])).toBe(true)
+    expect(selectScopedReplayOperations(retained, ['0:0'])?.map((entry) => entry.opSeq)).toEqual([3, 5])
+  })
+
+  it('requires scoped snapshot fallback when a retained operation has no provable chunk scope', () => {
+    const retained = [
+      operation({ opSeq: 3 }),
+      operation({ opSeq: 4, opType: 'tile_removed', payload: { tileId: crypto.randomUUID() }, chunkIds: [] }),
+    ]
+
+    expect(selectScopedReplayOperations(retained, ['0:0'])).toBeNull()
+    expect(haveEqualChunkScope(undefined, ['0:0'])).toBe(false)
+  })
+
+  it('builds useful aggregate content from only the scoped tiles', () => {
+    const aggregate = buildChunkAggregate([
+      {
+        id: crypto.randomUUID(),
+        shape: 'square',
+        color: '#abc',
+        material: 'ceramic',
+        transform: { position: vec2(0, 0), rotation: 0 },
+        createdAt: 1,
+      },
+      {
+        id: crypto.randomUUID(),
+        shape: 'triangle',
+        color: '#def',
+        material: 'glass',
+        transform: { position: vec2(1, 0), rotation: 0 },
+        createdAt: 2,
+      },
+    ])
+
+    expect(aggregate).toEqual({
+      tileCount: 2,
+      byShape: { square: 1, triangle: 1 },
+      byMaterial: { ceramic: 1, glass: 1 },
+    })
   })
 })

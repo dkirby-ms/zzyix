@@ -545,6 +545,54 @@ Document failures that require architecture changes, new production measurements
 * Disposable database for migration and backfill validation
 * Two-server test harness for adapter and recovery validation
 
+## Review Remediation Phase 9: Review-Critical Canonical Invariants
+
+### Step 9.1: Make exact-lap chunk subscriptions periodic
+
+Correct toroidal chunk enumeration for quilt periods that are not divisible by the configured chunk size. Equivalent viewports separated by any exact quilt period must resolve to the same canonical chunk IDs without adding a seam-only chunk.
+
+Files:
+* `apps/client/src/domain/math2d.ts`
+* `apps/client/src/domain/math2d.test.ts`
+* `apps/client/src/App.tsx` only if the topology call site requires correction
+
+Success criteria:
+* Production quilt dimensions of 62.4 by 40.8 world units are covered
+* Equivalent viewports at zero, positive laps, and negative laps produce identical chunk sets
+* Corner and seam deduplication behavior remains correct
+
+### Step 9.2: Enforce canonical patch addresses in PostgreSQL
+
+Add database-enforced checks or equivalent trigger enforcement ensuring every patch row and column is non-negative and strictly within its parent quilt dimensions. Extend migration and schema definitions consistently, including a regression that proves invalid addresses are rejected by PostgreSQL.
+
+Files:
+* `apps/server/src/db/schema.ts`
+* `apps/server/migrations/0005_finite_toroidal_quilt.sql`
+* Focused PostgreSQL integration test near the existing persistence suites
+
+Success criteria:
+* Negative, row-equals-patch-rows, and column-equals-patch-columns inserts fail
+* Valid boundary addresses persist
+* Existing migration rehearsal still applies from an empty database
+
+### Step 9.3: Validate canonical invariant remediation
+
+Validation commands:
+* `npm run test:client -- src/domain/math2d.test.ts`
+* Focused server PostgreSQL test selected during implementation
+* `npm run lint:client`
+* `npm run lint:server`
+* `npm run build:client`
+* `npm run build:server`
+
+Review source: `.copilot-tracking/reviews/2026-07-27/infinite-quilt-canvas-plan-review.md` critical findings 1 and 2.
+
+## Review Remediation Phases 10 Through 14
+
+Phase 10 corrects capability-based patch authorization and transactionally consistent reconstruction. Phase 11 completes chunk-scoped AOI identity, stale-cursor convergence, aggregate delivery, and pre-join budgets. Phase 12 wires cache scope and pins, uses actual camera bounds, and strengthens deterministic traversal coverage. Phase 13 makes canary cohorts operational, expands full-field migration proof across classic, expanded, and vast fixtures, advances the contract version, and aligns runbook claims. Phase 14 reruns every focused and repository-wide gate and reconciles the tracking artifacts.
+
+Detailed acceptance evidence comes from `.copilot-tracking/reviews/2026-07-27/infinite-quilt-canvas-plan-review.md`. These phases depend on the preceding remediation phase unless a phase implementor proves its edits and validation are independent.
+
 ## Success Criteria
 
 * Opposite edges wrap continuously on both axes while canonical state remains finite

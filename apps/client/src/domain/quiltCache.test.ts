@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   createQuiltCache,
+  clearQuiltOptimisticTile,
+  clearQuiltUndoMetadata,
   evictQuiltCache,
   mergeQuiltPatchSnapshot,
   pinQuiltTile,
@@ -65,6 +67,26 @@ describe('quiltCache', () => {
     expect(selectQuiltTiles(evicted)).toHaveLength(4)
   })
 
+  it('persists accepted chunk scope and retains the active viewport patch', () => {
+    let state = mergeQuiltPatchSnapshot(createQuiltCache(), {
+      patchId: 'active', roomId: 'room-active', chunkIds: ['2:3', '2:3'], tiles: [tile('active-tile')], cursor: cursor('active', 1), accessedAt: 1,
+    })
+    state = mergeQuiltPatchSnapshot(state, {
+      patchId: 'inactive', roomId: 'room-inactive', chunkIds: ['9:9'], tiles: [tile('inactive-tile')], cursor: cursor('inactive', 2), accessedAt: 2,
+    })
+
+    const activePatchIds = new Set(
+      Object.values(state.patches)
+        .filter((patch) => patch.chunkIds.includes('2:3'))
+        .map((patch) => patch.patchId),
+    )
+    const evicted = evictQuiltCache(state, activePatchIds, 0)
+
+    expect(state.patches.active.chunkIds).toEqual(['2:3'])
+    expect(Object.keys(evicted.patches)).toEqual(['active'])
+    expect(selectQuiltTiles(evicted).map(({ id }) => id)).toEqual(['active-tile'])
+  })
+
   it('retains optimistic and undoable entities outside the active area', () => {
     let state = mergeQuiltPatchSnapshot(createQuiltCache(), {
       patchId: 'pending-patch', roomId: 'pending-room', tiles: [], cursor: cursor('pending-patch', 1), accessedAt: 1,
@@ -78,5 +100,12 @@ describe('quiltCache', () => {
     expect(evicted.patches['pending-patch']).toBeDefined()
     expect(evicted.tiles.pending).toBeDefined()
     expect(evicted.pins.pending).toEqual(['optimistic', 'undo'])
+
+    const acknowledged = clearQuiltOptimisticTile(evicted, 'pending')
+    expect(acknowledged.pins.pending).toEqual(['undo'])
+
+    const removed = clearQuiltUndoMetadata(acknowledged, 'pending')
+    expect(removed.pins.pending).toBeUndefined()
+    expect(removed.tiles.pending).toBeUndefined()
   })
 })

@@ -4,6 +4,7 @@ import {
   isQuiltCanarySubject,
   loadLegacyRetirementGates,
   loadQuiltCanaryConfig,
+  resolveQuiltRollout,
 } from './quiltRollout.js'
 
 describe('quilt migration rollout controls', () => {
@@ -29,6 +30,49 @@ describe('quilt migration rollout controls', () => {
 
     expect(isQuiltCanarySubject(subject, enabled)).toBe(true)
     expect(isQuiltCanarySubject(subject, disabled)).toBe(false)
+  })
+
+  it('enables dual-read and protocol v2 only for the selected cohort', () => {
+    const config = loadQuiltCanaryConfig({
+      FEATURE_QUILT_DUAL_READ_CANARY_ENABLED: 'true',
+      FEATURE_QUILT_DUAL_READ_CANARY_QUILT_IDS: 'quilt-a',
+      FEATURE_QUILT_DUAL_READ_CANARY_PRINCIPAL_IDS: 'principal-a',
+    })
+
+    expect(resolveQuiltRollout({ quiltId: 'quilt-a', principalId: 'principal-a' }, config)).toEqual({
+      canary: true,
+      dualReadEnabled: true,
+      protocolV2Enabled: true,
+    })
+    expect(resolveQuiltRollout({ quiltId: 'quilt-a', principalId: 'principal-b' }, config)).toEqual({
+      canary: false,
+      dualReadEnabled: false,
+      protocolV2Enabled: false,
+    })
+  })
+
+  it('preserves global execution flags and rolls canary execution back when disabled', () => {
+    const globallyEnabled = loadQuiltCanaryConfig({
+      FEATURE_QUILT_DUAL_READ_ENABLED: 'true',
+      FEATURE_QUILT_PROTOCOL_V2_ENABLED: 'true',
+    })
+    const rolledBack = loadQuiltCanaryConfig({
+      FEATURE_QUILT_DUAL_READ_CANARY_ENABLED: 'false',
+      FEATURE_QUILT_DUAL_READ_CANARY_QUILT_IDS: 'quilt-a',
+      FEATURE_QUILT_DUAL_READ_CANARY_PRINCIPAL_IDS: 'principal-a',
+    })
+    const subject = { quiltId: 'quilt-a', principalId: 'principal-a' }
+
+    expect(resolveQuiltRollout(subject, globallyEnabled)).toEqual({
+      canary: false,
+      dualReadEnabled: true,
+      protocolV2Enabled: true,
+    })
+    expect(resolveQuiltRollout(subject, rolledBack)).toEqual({
+      canary: false,
+      dualReadEnabled: false,
+      protocolV2Enabled: false,
+    })
   })
 
   it('keeps legacy available until every external exit gate passes', () => {

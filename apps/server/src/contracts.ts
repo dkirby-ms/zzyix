@@ -25,7 +25,7 @@
 // ─── Schema Version ──────────────────────────────────────────────────────────
 // Both client and server MUST use this same version to ensure compatibility.
 // Increment on any breaking change (new required fields, removed events, etc.).
-export const SCHEMA_VERSION = '1.0.0'
+export const SCHEMA_VERSION = '2.0.0'
 export const RUNTIME_CHUNK_WORLD_SIZE = 8
 export const QUILT_PROTOCOL_VERSION = 2
 
@@ -504,6 +504,7 @@ export type QuiltPatchCursor = {
   opSeq: number
   revision: number
   eventId?: string
+  chunkIds?: ChunkId[]
 }
 
 export type QuiltRoomOutcome =
@@ -525,7 +526,10 @@ export type QuiltScopedSnapshotPayload = {
   quiltId: string
   canonicalRoomId: string
   patchId: string
+  payloadMode: ChunkPayloadMode
+  chunkIds: ChunkId[]
   tiles: TileInstance[]
+  aggregates?: Array<Pick<ChunkSnapshotEntry, 'chunkId' | 'aggregate'>>
   cursor: QuiltPatchCursor
 }
 

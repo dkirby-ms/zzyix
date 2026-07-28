@@ -1,4 +1,8 @@
-import { deduplicateCanonicalSubscriptions } from '../../../server/src/domain/quiltTopology'
+import {
+  decomposeWrappedViewport,
+  deduplicateCanonicalSubscriptions,
+  positiveModulo,
+} from '../../../server/src/domain/quiltTopology'
 
 export type Vec2 = { x: number; y: number }
 
@@ -14,7 +18,13 @@ export type ViewportBounds = {
 export type ChunkTopologyMode =
   | { mode: 'unbounded' }
   | { mode: 'bounded'; bounds: ViewportBounds }
-  | { mode: 'toroidal'; chunkColumns: number; chunkRows: number }
+  | {
+      mode: 'toroidal'
+      chunkColumns: number
+      chunkRows: number
+      quiltWidth: number
+      quiltHeight: number
+    }
 
 export const vec2 = (x: number, y: number): Vec2 => ({ x, y })
 
@@ -77,31 +87,58 @@ export const viewportToChunkIds = (
   prefetchRing: number,
   topologyMode: ChunkTopologyMode = { mode: 'unbounded' },
 ): ChunkId[] => {
-  let startChunkX = Math.floor(viewport.minX / chunkSize) - prefetchRing
-  let endChunkX = Math.floor(viewport.maxX / chunkSize) + prefetchRing
-  let startChunkY = Math.floor(viewport.minY / chunkSize) - prefetchRing
-  let endChunkY = Math.floor(viewport.maxY / chunkSize) + prefetchRing
-
-  if (topologyMode.mode === 'bounded') {
-    startChunkX = Math.max(startChunkX, Math.floor(topologyMode.bounds.minX / chunkSize))
-    endChunkX = Math.min(endChunkX, Math.floor(topologyMode.bounds.maxX / chunkSize))
-    startChunkY = Math.max(startChunkY, Math.floor(topologyMode.bounds.minY / chunkSize))
-    endChunkY = Math.min(endChunkY, Math.floor(topologyMode.bounds.maxY / chunkSize))
+  const expandedViewport = {
+    minX: viewport.minX - prefetchRing * chunkSize,
+    maxX: viewport.maxX + prefetchRing * chunkSize,
+    minY: viewport.minY - prefetchRing * chunkSize,
+    maxY: viewport.maxY + prefetchRing * chunkSize,
   }
-
+  const viewports = topologyMode.mode === 'toroidal'
+    ? decomposeWrappedViewport(expandedViewport, {
+        patchRows: 1,
+        patchColumns: 1,
+        patchWidth: topologyMode.quiltWidth,
+        patchHeight: topologyMode.quiltHeight,
+      })
+    : [expandedViewport]
   const chunkAddresses: Array<{ column: number; row: number }> = []
-  for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX += 1) {
-    for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY += 1) {
-      chunkAddresses.push({ column: chunkX, row: chunkY })
+
+  for (const chunkViewport of viewports) {
+    let startChunkX = Math.floor(chunkViewport.minX / chunkSize)
+    let endChunkX = Math.floor(chunkViewport.maxX / chunkSize)
+    let startChunkY = Math.floor(chunkViewport.minY / chunkSize)
+    let endChunkY = Math.floor(chunkViewport.maxY / chunkSize)
+
+    if (topologyMode.mode === 'bounded') {
+      startChunkX = Math.max(startChunkX, Math.floor(topologyMode.bounds.minX / chunkSize))
+      endChunkX = Math.min(endChunkX, Math.floor(topologyMode.bounds.maxX / chunkSize))
+      startChunkY = Math.max(startChunkY, Math.floor(topologyMode.bounds.minY / chunkSize))
+      endChunkY = Math.min(endChunkY, Math.floor(topologyMode.bounds.maxY / chunkSize))
+    }
+
+    for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX += 1) {
+      for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY += 1) {
+        chunkAddresses.push({ column: chunkX, row: chunkY })
+      }
     }
   }
 
   if (topologyMode.mode === 'toroidal') {
+    const startColumn = Math.floor(positiveModulo(expandedViewport.minX, topologyMode.quiltWidth) / chunkSize)
+    const startRow = Math.floor(positiveModulo(expandedViewport.minY, topologyMode.quiltHeight) / chunkSize)
     return deduplicateCanonicalSubscriptions(
       chunkAddresses,
       topologyMode.chunkColumns,
       topologyMode.chunkRows,
-    ).map(({ column, row }) => toChunkId(column, row))
+    )
+      .sort((left, right) => {
+        const leftColumn = positiveModulo(left.column - startColumn, topologyMode.chunkColumns)
+        const rightColumn = positiveModulo(right.column - startColumn, topologyMode.chunkColumns)
+        if (leftColumn !== rightColumn) return leftColumn - rightColumn
+        return positiveModulo(left.row - startRow, topologyMode.chunkRows)
+          - positiveModulo(right.row - startRow, topologyMode.chunkRows)
+      })
+      .map(({ column, row }) => toChunkId(column, row))
   }
 
   return chunkAddresses.map(({ column, row }) => toChunkId(column, row))

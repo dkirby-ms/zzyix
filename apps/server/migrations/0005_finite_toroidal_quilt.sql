@@ -47,6 +47,33 @@ CREATE TABLE "patches" (
 	CONSTRAINT "patches_address_check" CHECK ("patches"."row" >= 0 and "patches"."column" >= 0)
 );
 --> statement-breakpoint
+CREATE FUNCTION "enforce_patch_parent_bounds"() RETURNS trigger AS $$
+DECLARE
+	parent_patch_rows integer;
+	parent_patch_columns integer;
+BEGIN
+	SELECT "patch_rows", "patch_columns"
+	INTO parent_patch_rows, parent_patch_columns
+	FROM "quilts"
+	WHERE "id" = NEW."quilt_id";
+
+	IF parent_patch_rows IS NOT NULL AND (
+		NEW."row" < 0 OR NEW."row" >= parent_patch_rows OR
+		NEW."column" < 0 OR NEW."column" >= parent_patch_columns
+	) THEN
+		RAISE EXCEPTION 'patch address (%, %) is outside parent quilt dimensions (% rows, % columns)',
+			NEW."row", NEW."column", parent_patch_rows, parent_patch_columns
+			USING ERRCODE = '23514', CONSTRAINT = 'patches_parent_bounds_check';
+	END IF;
+
+	RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+--> statement-breakpoint
+CREATE TRIGGER "patches_parent_bounds_trigger"
+	BEFORE INSERT OR UPDATE OF "quilt_id", "row", "column" ON "patches"
+	FOR EACH ROW EXECUTE FUNCTION "enforce_patch_parent_bounds"();
+--> statement-breakpoint
 CREATE TABLE "patch_memberships" (
 	"patch_id" uuid NOT NULL,
 	"principal_id" uuid NOT NULL,

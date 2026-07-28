@@ -15,6 +15,21 @@ export type PeriodicTileImage = {
   image: { x: number; y: number }
 }
 
+export const deriveOrthographicViewport = (
+  center: { x: number; y: number },
+  zoom: number,
+  size: { width: number; height: number },
+): TopologyRect => {
+  const halfWidth = size.width / (2 * zoom)
+  const halfHeight = size.height / (2 * zoom)
+  return {
+    minX: center.x - halfWidth,
+    maxX: center.x + halfWidth,
+    minY: center.y - halfHeight,
+    maxY: center.y + halfHeight,
+  }
+}
+
 export const canonicalizeDisplayPoint = (
   point: { x: number; y: number },
   topology: QuiltTopology,
@@ -70,3 +85,11 @@ export const enumerateVisibleTileImages = (
     })
   })
 }
+
+export const enumerateCameraTileImages = (
+  tiles: TileInstance[],
+  center: { x: number; y: number },
+  zoom: number,
+  size: { width: number; height: number },
+  topology: QuiltTopology,
+) => enumerateVisibleTileImages(tiles, deriveOrthographicViewport(center, zoom, size), topology, 2)

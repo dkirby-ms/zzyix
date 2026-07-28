@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { useMemo, useRef, useEffect } from 'react'
+import { useMemo, useRef, useEffect, useState } from 'react'
 import {
   ExtrudeGeometry,
   Group,
@@ -20,8 +20,9 @@ import type { GridPattern } from '../domain/gridPatterns'
 import type { TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 import { getCollaboratorColor } from '../ui/palettes'
-import { enumerateVisibleTileImages, nearestPeriodicPoint, resolveDisplayHitPoint } from './periodicImages'
+import { deriveOrthographicViewport, enumerateVisibleTileImages, nearestPeriodicPoint, resolveDisplayHitPoint } from './periodicImages'
 import type { QuiltTopology } from '../../../server/src/domain/quiltTopology'
+import type { TopologyRect } from '../../../server/src/domain/quiltTopology'
 
 const geometryCache = new Map<TileShape, ExtrudeGeometry>()
 
@@ -339,30 +340,21 @@ const CanvasBounds = ({ worldBounds }: { worldBounds?: MosaicSceneProps['worldBo
 const ViewportReporter = ({
   onViewportChanged,
   onZoomTierChanged,
+  onCameraViewportChanged,
 }: {
   onViewportChanged?: MosaicSceneProps['onViewportChanged']
   onZoomTierChanged?: MosaicSceneProps['onZoomTierChanged']
+  onCameraViewportChanged: (viewport: TopologyRect) => void
 }) => {
   const { camera, size } = useThree()
   const previousRef = useRef<string | null>(null)
 
   useFrame(() => {
-    if (!onViewportChanged) {
-      return
-    }
-
     const orthographic = camera as OrthographicCamera
     const zoom = orthographic.zoom
-    const halfWidth = size.width / (2 * zoom)
-    const halfHeight = size.height / (2 * zoom)
     const centerX = orthographic.position.x
     const centerY = orthographic.position.y
-    const viewport = {
-      minX: centerX - halfWidth,
-      maxX: centerX + halfWidth,
-      minY: centerY - halfHeight,
-      maxY: centerY + halfHeight,
-    }
+    const viewport = deriveOrthographicViewport({ x: centerX, y: centerY }, zoom, size)
 
     const signature = `${centerX.toFixed(3)}:${centerY.toFixed(3)}:${zoom.toFixed(3)}:${size.width}:${size.height}`
     if (previousRef.current === signature) {
@@ -370,10 +362,11 @@ const ViewportReporter = ({
     }
 
     previousRef.current = signature
+    onCameraViewportChanged(viewport)
     if (onZoomTierChanged) {
       onZoomTierChanged(zoom)
     }
-    onViewportChanged({
+    onViewportChanged?.({
       center: { x: centerX, y: centerY },
       viewport,
       zoom,
@@ -406,6 +399,7 @@ const SceneContents = ({
   const { gl, scene } = useThree()
   const previousFrameAt = useRef<number | undefined>(undefined)
   const controlsRef = useRef(null)
+  const [cameraViewport, setCameraViewport] = useState<TopologyRect | null>(null)
   const tilesById = useMemo(() => {
     const index = new Map<string, TileInstance>()
     for (const tile of tiles) {
@@ -413,17 +407,11 @@ const SceneContents = ({
     }
     return index
   }, [tiles])
-  const viewport = useMemo(() => ({
-    minX: cameraPan.x - 20,
-    maxX: cameraPan.x + 20,
-    minY: cameraPan.y - 15,
-    maxY: cameraPan.y + 15,
-  }), [cameraPan.x, cameraPan.y])
   const tileImages = useMemo(
-    () => topology ? enumerateVisibleTileImages(tiles, viewport, topology, 2) : tiles.map((tile) => ({
+    () => topology && cameraViewport ? enumerateVisibleTileImages(tiles, cameraViewport, topology, 2) : topology ? [] : tiles.map((tile) => ({
       key: tile.id, canonicalId: tile.id, tile, position: tile.transform.position, image: { x: 0, y: 0 },
     })),
-    [tiles, topology, viewport],
+    [cameraViewport, tiles, topology],
   )
   useFrame(() => {
     if (!onSceneMetrics) return
@@ -435,7 +423,11 @@ const SceneContents = ({
 
   return (
     <>
-      <ViewportReporter onViewportChanged={onViewportChanged} onZoomTierChanged={onZoomTierChanged} />
+      <ViewportReporter
+        onViewportChanged={onViewportChanged}
+        onZoomTierChanged={onZoomTierChanged}
+        onCameraViewportChanged={setCameraViewport}
+      />
       <ambientLight intensity={0.58} color="#fff5e8" />
       <directionalLight
         castShadow

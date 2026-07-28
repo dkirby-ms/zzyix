@@ -182,6 +182,15 @@ export const setQuiltUndoMetadata = (
   undo: { ...state.undo, [metadata.tileId]: metadata },
 }, metadata.tileId, 'undo')
 
+export const clearQuiltUndoMetadata = (
+  state: QuiltCacheState,
+  tileId: string,
+): QuiltCacheState => {
+  const undo = { ...state.undo }
+  delete undo[tileId]
+  return unpinQuiltTile({ ...state, undo }, tileId, 'undo')
+}
+
 export const setQuiltSelection = (
   state: QuiltCacheState,
   clientId: string,

@@ -80,7 +80,7 @@ export const resolveQuiltRooms = (
 ): QuiltRoomResolution => {
   const outcomes: QuiltRoomOutcome[] = []
   const accepted: ResolvedQuiltRoom[] = []
-  const acceptedRoomIds = new Set<string>()
+  const acceptedByRoomId = new Map<string, ResolvedQuiltRoom>()
   let requestedChurn = 0
 
   for (const request of requests) {
@@ -104,6 +104,10 @@ export const resolveQuiltRooms = (
       outcomes.push(budgetOutcome(request.requestId, 'CHUNKS_PER_REQUEST'))
       continue
     }
+    if (request.kind !== 'presence' && chunkIds.length === 0) {
+      outcomes.push(invalidOutcome(request.requestId, 'CHUNK_SCOPE_REQUIRED'))
+      continue
+    }
 
     const row = context.topology.topology === 'toroidal'
       ? positiveModulo(request.row, context.topology.patchRows)
@@ -118,7 +122,14 @@ export const resolveQuiltRooms = (
     }
 
     const canonicalRoomId = roomId(context.topology.quiltId, row, column, request.kind)
-    if (acceptedRoomIds.has(canonicalRoomId)) {
+    const existingAccepted = acceptedByRoomId.get(canonicalRoomId)
+    if (existingAccepted) {
+      const mergedChunkIds = Array.from(new Set([...existingAccepted.chunkIds, ...chunkIds]))
+      if (mergedChunkIds.length > context.limits.maxChunksPerRequest) {
+        outcomes.push(budgetOutcome(request.requestId, 'CHUNKS_PER_REQUEST'))
+        continue
+      }
+      existingAccepted.chunkIds = mergedChunkIds
       outcomes.push({ requestId: request.requestId, status: 'accepted', canonicalRoomId })
       continue
     }
@@ -130,7 +141,7 @@ export const resolveQuiltRooms = (
     }
 
     const isNewRoom = !context.currentRoomIds.has(canonicalRoomId)
-    if (isNewRoom && context.currentRoomIds.size + acceptedRoomIds.size >= context.limits.maxRoomsPerConnection) {
+    if (isNewRoom && context.currentRoomIds.size + acceptedByRoomId.size >= context.limits.maxRoomsPerConnection) {
       outcomes.push(budgetOutcome(request.requestId, 'ROOMS_PER_CONNECTION'))
       continue
     }
@@ -141,8 +152,7 @@ export const resolveQuiltRooms = (
       continue
     }
 
-    acceptedRoomIds.add(canonicalRoomId)
-    accepted.push({
+    const resolvedRoom = {
       requestId: request.requestId,
       canonicalRoomId,
       patchId: access.patchId,
@@ -150,7 +160,9 @@ export const resolveQuiltRooms = (
       row,
       column,
       chunkIds,
-    })
+    }
+    acceptedByRoomId.set(canonicalRoomId, resolvedRoom)
+    accepted.push(resolvedRoom)
     outcomes.push({ requestId: request.requestId, status: 'accepted', canonicalRoomId })
   }
 

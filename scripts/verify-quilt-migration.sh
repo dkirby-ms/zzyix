@@ -8,9 +8,6 @@ set -euo pipefail
 
 readonly DEFAULT_ADMIN_URL='postgresql://postgres:postgres@127.0.0.1:5432/postgres'
 readonly DATABASE_PREFIX='zzyix_quilt_rehearsal'
-readonly CANVAS_ID='10000000-0000-4000-8000-000000000071'
-readonly TILE_A_ID='20000000-0000-4000-8000-000000000071'
-readonly TILE_B_ID='20000000-0000-4000-8000-000000000072'
 
 usage() {
   cat <<'EOF'
@@ -100,39 +97,63 @@ SQL
 
 seed_representative_data() {
   local database_url="$1"
-  psql "${database_url}" --no-psqlrc --set ON_ERROR_STOP=1 \
-    --set canvas_id="${CANVAS_ID}" --set tile_a_id="${TILE_A_ID}" \
-    --set tile_b_id="${TILE_B_ID}" <<'SQL'
-INSERT INTO canvases (id, version, canvas_config)
-VALUES (
-  :'canvas_id',
-  2,
-  '{"canvasSize":{"width":20.8,"height":13.6},"boundsPolicy":{"mode":"bounded","bounds":{"minX":-10.4,"maxX":10.4,"minY":-6.8,"maxY":6.8}}}'::jsonb
-);
+  psql "${database_url}" --no-psqlrc --set ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO canvases (id, version, canvas_config, created_at, updated_at)
+VALUES
+  ('10000000-0000-4000-8000-000000000071', 1,
+   '{"canvasSize":{"width":10.4,"height":6.8},"boundsPolicy":{"mode":"bounded","bounds":{"minX":-5.2,"maxX":5.2,"minY":-3.4,"maxY":3.4}}}'::jsonb,
+   '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z'),
+  ('10000000-0000-4000-8000-000000000072', 2,
+   '{"canvasSize":{"width":20.8,"height":13.6},"boundsPolicy":{"mode":"bounded","bounds":{"minX":-10.4,"maxX":10.4,"minY":-6.8,"maxY":6.8}}}'::jsonb,
+   '2026-02-01T00:00:00Z', '2026-02-01T01:00:00Z'),
+  ('10000000-0000-4000-8000-000000000073', 3,
+   '{"canvasSize":{"width":31.2,"height":20.4},"boundsPolicy":{"mode":"bounded","bounds":{"minX":-15.6,"maxX":15.6,"minY":-10.2,"maxY":10.2}}}'::jsonb,
+   '2026-03-01T00:00:00Z', '2026-03-01T01:00:00Z');
 INSERT INTO tiles (
   id, canvas_id, shape, color, material, pos_x, pos_y, rotation, mirrored,
   placed_by, chunk_x, chunk_y, created_at
 )
 VALUES
-  (:'tile_a_id', :'canvas_id', 'square', '#abc', 'ceramic', -7.25, 2.5,
-   0.25, true, 'legacy-author-a', -1, 0, '2026-01-01T00:00:00Z'),
-  (:'tile_b_id', :'canvas_id', 'triangle', '#def', 'glass', 8.75, -3.5,
-   1.5, false, 'legacy-author-b', 1, -1, '2026-01-02T00:00:00Z');
+  ('20000000-0000-4000-8000-000000000071',
+   '10000000-0000-4000-8000-000000000071', 'square', '#abc', 'ceramic',
+   -5.19, -3.39, 0, false, 'classic-author', -1, -1,
+   '2026-01-02T03:04:05.123Z'),
+  ('20000000-0000-4000-8000-000000000072',
+   '10000000-0000-4000-8000-000000000072', 'triangle', '#def', 'glass',
+   7.9, 0, 1.5, true, 'expanded-author', 0, 0,
+   '2026-02-02T03:04:05.456Z'),
+  ('20000000-0000-4000-8000-000000000073',
+   '10000000-0000-4000-8000-000000000073', 'rectangle', '#123456', 'stone',
+   15.59, 10.19, 3.14159, false, NULL, 1, 1,
+   '2026-03-02T03:04:05.789Z'),
+  ('20000000-0000-4000-8000-000000000074',
+   '10000000-0000-4000-8000-000000000073', 'l-shape', '#654321', 'ceramic',
+   -8.01, -8.01, 0.75, true, 'vast-author', -2, -2,
+   '2026-03-03T03:04:05.999Z');
 INSERT INTO operation_log (canvas_id, op_seq, op_type, payload, client_id)
 VALUES
-  (:'canvas_id', 1, 'tile_placed', jsonb_build_object('tileId', :'tile_a_id'), 'legacy-author-a'),
-  (:'canvas_id', 2, 'tile_placed', jsonb_build_object('tileId', :'tile_b_id'), 'legacy-author-b');
+  ('10000000-0000-4000-8000-000000000071', 1, 'tile_placed',
+   '{"tileId":"20000000-0000-4000-8000-000000000071"}', 'classic-author'),
+  ('10000000-0000-4000-8000-000000000072', 1, 'tile_placed',
+   '{"tileId":"20000000-0000-4000-8000-000000000072"}', 'expanded-author'),
+  ('10000000-0000-4000-8000-000000000073', 1, 'tile_placed',
+   '{"tileId":"20000000-0000-4000-8000-000000000073"}', 'vast-author'),
+  ('10000000-0000-4000-8000-000000000073', 2, 'tile_placed',
+   '{"tileId":"20000000-0000-4000-8000-000000000074"}', 'vast-author');
 INSERT INTO snapshots (canvas_id, op_seq, state)
-VALUES (:'canvas_id', 2, jsonb_build_array(
-  jsonb_build_object('id', :'tile_a_id'),
-  jsonb_build_object('id', :'tile_b_id')
-));
+VALUES
+  ('10000000-0000-4000-8000-000000000071', 1,
+   '[{"id":"20000000-0000-4000-8000-000000000071"}]'),
+  ('10000000-0000-4000-8000-000000000072', 1,
+   '[{"id":"20000000-0000-4000-8000-000000000072"}]'),
+  ('10000000-0000-4000-8000-000000000073', 2,
+   '[{"id":"20000000-0000-4000-8000-000000000073"},{"id":"20000000-0000-4000-8000-000000000074"}]');
 SQL
 }
 
 legacy_fingerprint() {
   psql "$1" --no-psqlrc --tuples-only --no-align --set ON_ERROR_STOP=1 \
-    --command="SELECT count(*) || ':' || count(DISTINCT placed_by) || ':' || md5(string_agg(id::text || ':' || pos_x || ':' || pos_y || ':' || rotation || ':' || mirrored || ':' || coalesce(placed_by, ''), ',' ORDER BY id)) FROM tiles;"
+    --command="SELECT md5((SELECT string_agg(concat_ws('|', id, version, canvas_config::text, extract(epoch FROM created_at), extract(epoch FROM updated_at)), ',' ORDER BY id) FROM canvases) || ':' || (SELECT string_agg(concat_ws('|', id, canvas_id, shape, color, material, pos_x, pos_y, chunk_x, chunk_y, rotation, mirrored, coalesce(placed_by, ''), extract(epoch FROM created_at)), ',' ORDER BY id) FROM tiles));"
 }
 
 rehearse() {

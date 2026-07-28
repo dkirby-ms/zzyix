@@ -47,8 +47,8 @@ const context = (overrides: Partial<QuiltRoomResolutionContext> = {}): QuiltRoom
 describe('resolveQuiltRooms', () => {
   it('canonicalizes wrapped addresses and deduplicates canonical rooms', () => {
     const result = resolveQuiltRooms([
-      { requestId: 'a', kind: 'fine', row: 0, column: 0 },
-      { requestId: 'b', kind: 'fine', row: 2, column: -3 },
+      { requestId: 'a', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0'] },
+      { requestId: 'b', kind: 'fine', row: 2, column: -3, chunkIds: ['1:0'] },
     ], context())
 
     expect(result.outcomes).toEqual([
@@ -56,14 +56,15 @@ describe('resolveQuiltRooms', () => {
       { requestId: 'b', status: 'accepted', canonicalRoomId: 'quilt:quilt-1:patch:0:0:fine' },
     ])
     expect(result.accepted).toHaveLength(1)
+    expect(result.accepted[0]?.chunkIds).toEqual(['0:0', '1:0'])
   })
 
   it('applies public, principal, presence, event, and lifecycle visibility consistently', () => {
     const anonymous = resolveQuiltRooms([
-      { requestId: 'fine', kind: 'fine', row: 0, column: 0 },
-      { requestId: 'aggregate', kind: 'aggregate', row: 0, column: 0 },
+      { requestId: 'fine', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0'] },
+      { requestId: 'aggregate', kind: 'aggregate', row: 0, column: 0, chunkIds: ['0:0'] },
       { requestId: 'presence', kind: 'presence', row: 0, column: 0 },
-      { requestId: 'events', kind: 'events', row: 0, column: 0 },
+      { requestId: 'events', kind: 'events', row: 0, column: 0, chunkIds: ['0:0'] },
     ], context({ principalId: undefined }))
 
     expect(anonymous.outcomes.map((outcome) => outcome.status)).toEqual([
@@ -74,7 +75,7 @@ describe('resolveQuiltRooms', () => {
     ])
 
     const deleted = resolveQuiltRooms([
-      { requestId: 'aggregate', kind: 'aggregate', row: 0, column: 0 },
+      { requestId: 'aggregate', kind: 'aggregate', row: 0, column: 0, chunkIds: ['0:0'] },
     ], context({ accessByAddress: new Map([['0:0', access({ state: 'deleted' })]]) }))
     expect(deleted.outcomes[0]?.status).toBe('forbidden')
   })
@@ -82,10 +83,10 @@ describe('resolveQuiltRooms', () => {
   it('returns explicit invalid, forbidden, and budget outcomes', () => {
     const result = resolveQuiltRooms([
       { requestId: 'invalid', kind: 'fine', row: 0.5, column: 0 },
-      { requestId: 'forbidden', kind: 'fine', row: 0, column: 1 },
+      { requestId: 'forbidden', kind: 'fine', row: 0, column: 1, chunkIds: ['0:0'] },
       { requestId: 'chunks', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0', '1:0', '2:0', '3:0'] },
-      { requestId: 'accepted', kind: 'fine', row: 0, column: 0 },
-      { requestId: 'request-limit', kind: 'aggregate', row: 0, column: 0 },
+      { requestId: 'accepted', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0'] },
+      { requestId: 'request-limit', kind: 'aggregate', row: 0, column: 0, chunkIds: ['0:0'] },
     ], context())
 
     expect(result.outcomes.map((outcome) => outcome.status)).toEqual([
@@ -100,12 +101,12 @@ describe('resolveQuiltRooms', () => {
   it('enforces connection and churn budgets only for new canonical rooms', () => {
     const existing = new Set(['quilt:quilt-1:patch:0:0:fine'])
     const existingResult = resolveQuiltRooms([
-      { requestId: 'existing', kind: 'fine', row: 0, column: 0 },
+      { requestId: 'existing', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0'] },
     ], context({ currentRoomIds: existing, churnInWindow: limits.maxRoomChurnPerMinute }))
     expect(existingResult.outcomes[0]?.status).toBe('accepted')
 
     const churnResult = resolveQuiltRooms([
-      { requestId: 'new', kind: 'aggregate', row: 0, column: 0 },
+      { requestId: 'new', kind: 'aggregate', row: 0, column: 0, chunkIds: ['0:0'] },
     ], context({ churnInWindow: limits.maxRoomChurnPerMinute }))
     expect(churnResult.outcomes[0]).toMatchObject({ status: 'budget-exceeded', reason: 'ROOM_CHURN' })
   })

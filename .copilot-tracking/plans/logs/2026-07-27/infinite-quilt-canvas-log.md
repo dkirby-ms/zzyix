@@ -41,6 +41,31 @@ No unaddressed research items remain in the implementation plan. Production thre
 
 All executable repository gates pass after isolating the dedicated multi-replica test from the standard Playwright configuration, enabling protocol-v2 readiness for seam E2E, serializing destructive reset scenarios, and adding retention-age reconstruction to the migration rehearsal. These fixes do not satisfy or bypass the Phase 7.3 product and release gates.
 
+### Post-Implementation Review Findings
+
+* DD-05: Passing baseline gates did not establish canonical exact-lap subscriptions, bounded patch persistence, or stale-cursor recovery
+  * Plan specifies: Canonical subscriptions, bounded patch addresses, and reconstructable scoped recovery
+  * Implementation differs: The review demonstrated three critical untested correctness defects
+  * Rationale: Existing tests did not exercise production non-chunk-aligned periods, direct invalid patch inserts, or deliberately stale event-only cursors
+* DD-06: Completed phase markers overstated AOI scoping, client pin wiring, canary control, and migration parity
+  * Plan specifies: Scoped data delivery, bounded active state, cohort-gated rollout, and full-field migration proof
+  * Implementation differs: The foundations exist, but the runtime paths and focused evidence are incomplete
+  * Rationale: Source review traced the missing behavior through the controlling call sites
+
+Remediation Phases 9 through 14 were added to preserve the historical implementation record while making every critical and major review finding explicit work.
+
+Phase 9 is complete. Toroidal subscription enumeration now canonicalizes the viewport before chunk derivation, and PostgreSQL enforces patch addresses against parent quilt dimensions. Focused tests, client and server lint, client and server builds, diagnostics, and whitespace validation passed.
+
+Phase 10 is complete. The existing schema can represent owner and member roles but not delegated mutation grants or audited moderator assignments, so authorization now allows owners and denies ordinary members. Patch reconstruction reads revision, authoritative tiles, compatibility data, and event cursor from one repeatable-read transaction. Focused repository and PostgreSQL recovery suites passed.
+
+Phase 11 is complete. Accepted chunk IDs now determine fine snapshots, aggregate content, durable replay, cursors, and adapter rooms. Deliberately stale cursors replay contiguous applicable events or receive a scoped snapshot when operation scope is incomplete. Budget failures occur before room joins. Focused server, client, PostgreSQL, and multi-replica tests passed.
+
+Phase 12 is complete. Accepted snapshot chunk scope now protects active cache data, protocol-v2 placement and undo workflows manage optimistic and undo pins, and periodic rendering uses live orthographic camera bounds. Seam E2E performs deterministic seam, corner, and multi-lap traversal with finite test-only budgets. Focused client tests and Playwright passed.
+
+Phase 13 is complete. Quilt and principal cohorts now gate actual protocol-v2 and dual-read execution, rollback disables canary behavior immediately, and normal successful sessions report client telemetry. Contract schema version 2.0.0 is pinned. Database-backed tests and migration rehearsal prove complete field preservation across classic, expanded, and vast canvases, boundary data, repeated backfill, spatial parity, rollback, and zero inferred owners.
+
+Phase 14 is complete. Full lint, build, 265-test unit and integration, seven-scenario standard E2E, one-scenario multi-replica E2E, migration rehearsal, diagnostics, and whitespace gates passed. No final-validation repairs were required. Phase 7.3 remains blocked by its documented external release gates.
+
 ## Implementation Paths Considered
 
 ### Selected: Finite Toroidal Quilt with First-Class Patches
@@ -110,3 +135,9 @@ Items identified during planning that fall outside current implementation scope.
 * WI-11: Legacy contract retirement — Remove protocol v1 and obsolete storage in a separately reviewed contract migration after all fail-closed gates pass (high priority, large effort)
   * Source: Phase 7, Step 7.3
   * Dependency: WI-01, WI-08, WI-10, approved rollback policy, and measured canary window
+* WI-12: Delegated patch mutation grants — Persist scoped delegated capabilities and audited moderator assignments before enabling non-owner mutation (high priority, medium effort)
+  * Source: Phase 10, Step 10.1
+  * Dependency: Approved identity and authorization policy
+* WI-13: Persist removal-event chunk scope — Store affected chunk IDs with protocol-v2 removals so retained removals can always replay without snapshot fallback (medium priority, small effort)
+  * Source: Phase 11, Step 11.2
+  * Dependency: Protocol-v2 mutation enablement

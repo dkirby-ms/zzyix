@@ -193,6 +193,59 @@ scripts/verify-quilt-migration.sh
 * [x] Step 8.3: Report blocking issues
   * Details: `.copilot-tracking/details/2026-07-27/infinite-quilt-canvas-details.md` (Lines 536-538)
 
+### [x] Implementation Phase 9: Review-Critical Canonical Invariants
+
+<!-- parallelizable: false -->
+
+* [x] Step 9.1: Make exact-lap chunk subscriptions periodic
+  * Details: `.copilot-tracking/details/2026-07-27/infinite-quilt-canvas-details.md` (Review Remediation Phase 9)
+* [x] Step 9.2: Enforce canonical patch addresses in PostgreSQL
+  * Details: `.copilot-tracking/details/2026-07-27/infinite-quilt-canvas-details.md` (Review Remediation Phase 9)
+* [x] Step 9.3: Validate canonical invariant remediation
+  * Details: `.copilot-tracking/details/2026-07-27/infinite-quilt-canvas-details.md` (Review Remediation Phase 9)
+
+### [x] Implementation Phase 10: Authorization and Consistent Recovery
+
+<!-- parallelizable: false -->
+
+* [x] Step 10.1: Enforce role and delegated mutation capabilities
+* [x] Step 10.2: Reconstruct patches from one consistent transaction
+* [x] Step 10.3: Add focused authorization and reconstruction tests
+
+### [x] Implementation Phase 11: Complete Area-of-Interest Delivery
+
+<!-- parallelizable: false -->
+
+* [x] Step 11.1: Scope rooms, snapshots, and events by accepted chunks
+* [x] Step 11.2: Recover stale event cursors without data loss
+* [x] Step 11.3: Complete aggregate payloads and pre-join budget enforcement
+* [x] Step 11.4: Validate stale-cursor and scoped-delivery behavior
+
+### [x] Implementation Phase 12: Complete Client Virtualization and Rendering
+
+<!-- parallelizable: false -->
+
+* [x] Step 12.1: Persist accepted chunk scope and wire cache pins
+* [x] Step 12.2: Derive periodic images from actual camera bounds
+* [x] Step 12.3: Enforce deterministic traversal and runtime budgets in E2E
+* [x] Step 12.4: Validate bounded client behavior
+
+### [x] Implementation Phase 13: Canary and Migration Proof
+
+<!-- parallelizable: false -->
+
+* [x] Step 13.1: Gate runtime behavior by canary cohort and expose telemetry
+* [x] Step 13.2: Verify full-field parity across representative canvas sizes
+* [x] Step 13.3: Advance the shared contract schema version and correct runbook claims
+* [x] Step 13.4: Validate migration and canary remediation
+
+### [x] Implementation Phase 14: Remediation Final Validation
+
+<!-- parallelizable: false -->
+
+* [x] Step 14.1: Run focused and full repository validation
+* [x] Step 14.2: Reconcile completion claims and release summary
+
 ## Planning Log
 
 See `.copilot-tracking/plans/logs/2026-07-27/infinite-quilt-canvas-log.md` for discrepancy tracking, implementation paths considered, and suggested follow-on work.

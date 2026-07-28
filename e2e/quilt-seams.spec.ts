@@ -12,6 +12,16 @@ const SERVER_URL = process.env.E2E_SERVER_URL ?? 'http://127.0.0.1:3101'
 const TOKEN = process.env.E2E_RESET_TOKEN ?? 'zzyix-e2e-token'
 type TestSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
+const CLIENT_BUDGETS = {
+  retainedPatches: 64,
+  retainedTiles: 2_000,
+  cursors: 64,
+  sceneObjects: 64,
+  drawCalls: 32,
+  snapshotBytes: 262_144,
+  frameTimeMs: 100,
+} as const
+
 const once = <T>(socket: TestSocket, event: keyof ServerToClientEvents): Promise<T> => new Promise((resolve, reject) => {
   const timeout = setTimeout(() => reject(new Error(`Timed out waiting for ${event}`)), 10_000)
   socket.once(event, (payload: unknown) => {
@@ -40,7 +50,7 @@ const connect = async (canvasId: string): Promise<{ socket: TestSocket; protocol
 const subscribe = (socket: TestSocket, quiltId: string, rooms: Array<{ requestId: string; row: number; column: number }>, cursors?: Parameters<ClientToServerEvents['subscribe_quilt_area']>[0]['cursors']): Promise<SubscribeQuiltAreaAck> =>
   new Promise((resolve) => socket.emit('subscribe_quilt_area', {
     quiltId,
-    rooms: rooms.map((room) => ({ ...room, kind: 'aggregate' })),
+    rooms: rooms.map((room) => ({ ...room, kind: 'aggregate', chunkIds: ['0:0'] })),
     cursors,
   }, resolve))
 
@@ -90,23 +100,53 @@ test('canonical room aliases stay deduplicated across one-axis seams, corners, r
   reconnected.disconnect()
 })
 
-test('client traversal measurement artifact records cache, scene, grid, and frame state', async ({ page }, testInfo) => {
+test('client traversal stays finite across deterministic seams and multiple laps', async ({ page }, testInfo) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
   await page.getByRole('button', { name: 'Create Canvas' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
 
+  const gridOff = await page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState())
+  await page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.setGridEnabled(true))
+  await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState().metrics.drawCalls ?? 0))
+    .toBeGreaterThan(gridOff?.metrics.drawCalls ?? 0)
+  const initial = await page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState())
+  expect(initial?.grid.enabled).toBe(true)
+  expect(initial?.grid.patternId).toBeDefined()
+
+  const worldWidth = 62.4
+  const worldHeight = 40.8
+  const traversal = [
+    { x: worldWidth - 0.1, y: worldHeight / 2 },
+    { x: worldWidth + 0.1, y: worldHeight / 2 },
+    { x: worldWidth - 0.1, y: worldHeight - 0.1 },
+    { x: worldWidth + 0.1, y: worldHeight + 0.1 },
+    { x: worldWidth * 4 + 0.1, y: worldHeight * -3 + 0.1 },
+    { x: worldWidth * -5 - 0.1, y: worldHeight * 6 - 0.1 },
+  ]
   const start = performance.now()
-  for (let lap = 0; lap < 40; lap += 1) {
-    await page.mouse.move(480 + (lap % 2), 360 + (lap % 3))
-    await page.mouse.wheel(0, lap % 2 === 0 ? 120 : -120)
+  for (const position of traversal) {
+    await page.evaluate((nextPosition) => window.__ZZYIX_E2E_CANVAS__?.setCameraPan(nextPosition), position)
+    await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState().cameraPan))
+      .toEqual(position)
   }
+  await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState().metrics.drawCalls ?? 0))
+    .toBeGreaterThan(gridOff?.metrics.drawCalls ?? 0)
   const traversalMs = performance.now() - start
   const state = await page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState())
   expect(state).toBeDefined()
   expect(new Set(state?.tiles.map((tile) => tile.id)).size).toBe(state?.tiles.length)
+  expect(state?.grid).toEqual(initial?.grid)
+  expect(state?.metrics.retainedPatchCount).toBeLessThanOrEqual(CLIENT_BUDGETS.retainedPatches)
+  expect(state?.metrics.retainedTileCount).toBeLessThanOrEqual(CLIENT_BUDGETS.retainedTiles)
+  expect(state?.metrics.cursorCount).toBeLessThanOrEqual(CLIENT_BUDGETS.cursors)
+  expect(state?.metrics.optimisticCount).toBe(0)
+  expect(state?.metrics.sceneObjectCount).toBeLessThanOrEqual(CLIENT_BUDGETS.sceneObjects)
+  expect(state?.metrics.drawCalls).toBeLessThanOrEqual(CLIENT_BUDGETS.drawCalls)
+  expect(state?.metrics.snapshotBytes).toBeLessThanOrEqual(CLIENT_BUDGETS.snapshotBytes)
+  expect(state?.metrics.frameTimeMs).toBeLessThanOrEqual(CLIENT_BUDGETS.frameTimeMs)
   await testInfo.attach('quilt-client-measurements.json', {
-    body: JSON.stringify({ traversalMs, ...state?.metrics, gridAlignmentEvidence: 'covered by periodic/grid domain tests' }, null, 2),
+    body: JSON.stringify({ traversalMs, budgets: CLIENT_BUDGETS, traversal, ...state?.metrics, grid: state?.grid }, null, 2),
     contentType: 'application/json',
   })
 })

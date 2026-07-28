@@ -30,6 +30,7 @@ export default defineConfig({
         `DATABASE_URL=${TEST_DATABASE_URL}`,
         'NODE_ENV=test',
         'FEATURE_MULTI_REPLICA_READY=true',
+        'FEATURE_QUILT_PROTOCOL_V2_ENABLED=true',
         'LOG_LEVEL=info',
         `PORT=${SERVER_PORT}`,
         'HOST=127.0.0.1',

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { canvases, patches, principals, quilts } from './schema.js'
+import { canvases, patches, principals, quilts, tileSpatialRefs, tiles } from './schema.js'
 import {
   loadPatchDeliverySnapshot,
   persistQuiltTilePlacement,
@@ -16,6 +16,19 @@ const QUILT_ID = '60000000-0000-4000-8000-000000000001'
 const PRINCIPAL_ID = '70000000-0000-4000-8000-000000000001'
 const ACTIVE_PATCH_ID = '80000000-0000-4000-8000-000000000001'
 const QUIET_PATCH_ID = '80000000-0000-4000-8000-000000000002'
+
+const queryWithConnection = async <Row extends Record<string, unknown>>(
+  database: PostgresTestDatabase,
+  text: string,
+  values?: unknown[],
+): Promise<Row[]> => {
+  const pool = database.createConnection()
+  try {
+    return (await pool.query<Row>(text, values)).rows
+  } finally {
+    await pool.end()
+  }
+}
 
 describe('authoritative patch recovery with retention', () => {
   let database: PostgresTestDatabase
@@ -99,6 +112,22 @@ describe('authoritative patch recovery with retention', () => {
     expect(quiet.tiles.map((tile) => tile.id)).toEqual(['90000000-0000-4000-8000-000000000002'])
   })
 
+  it('scopes patch delivery by accepted chunks while preserving canonical tile deduplication', async () => {
+    const tileId = '90000000-0000-4000-8000-000000000001'
+    await database.db.insert(tileSpatialRefs).values({
+      tileId,
+      patchId: ACTIVE_PATCH_ID,
+      chunkX: 1,
+      chunkY: 0,
+    })
+
+    const snapshot = await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, { chunkIds: ['0:0', '1:0'] })
+
+    expect(snapshot.tiles.map((tile) => tile.id)).toEqual([tileId])
+    expect(snapshot.tilesByChunk['0:0']?.map((tile) => tile.id)).toEqual([tileId])
+    expect(snapshot.tilesByChunk['1:0']?.map((tile) => tile.id)).toEqual([tileId])
+  })
+
   it('reconstructs from authoritative rows after operation history expires', async () => {
     await pruneRetention({
       operationCutoffMs: 7 * 24 * 60 * 60 * 1000,
@@ -128,6 +157,79 @@ describe('authoritative patch recovery with retention', () => {
     expect(quiet.tiles.map((tile) => tile.id)).toEqual(['90000000-0000-4000-8000-000000000002'])
   })
 
+  it('returns revision, authoritative tiles, and event cursor from one PostgreSQL snapshot', async () => {
+    const pendingTileId = '90000000-0000-4000-8000-000000000003'
+    await database.db.insert(tiles).values({
+      id: pendingTileId,
+      canvasId: CANVAS_ID,
+      quiltId: QUILT_ID,
+      anchorPatchId: ACTIVE_PATCH_ID,
+      shape: 'square',
+      color: '#789',
+      material: 'ceramic',
+      posX: 6,
+      posY: 5,
+      chunkX: 0,
+      chunkY: 0,
+      rotation: 0,
+      mirrored: false,
+    })
+    const blockerPool = database.createConnection()
+    const blocker = await blockerPool.connect()
+    let blockerCommitted = false
+    await blocker.query('BEGIN')
+    await blocker.query('LOCK TABLE quilts IN ACCESS EXCLUSIVE MODE')
+
+    try {
+      const snapshotPromise = loadPatchDeliverySnapshot(ACTIVE_PATCH_ID)
+      await expect.poll(async () => {
+        const rows = await queryWithConnection<{ waiting: boolean }>(database,
+          `SELECT EXISTS (
+             SELECT 1
+             FROM pg_stat_activity
+             WHERE datname = current_database()
+               AND wait_event_type = 'Lock'
+               AND pid <> pg_backend_pid()
+               AND query ILIKE '%quilts%'
+           ) AS waiting`,
+        )
+        return rows[0]?.waiting
+      }).toBe(true)
+
+      const writer = database.createConnection()
+      await writer.query('BEGIN')
+      await writer.query(
+        'INSERT INTO tile_spatial_refs (tile_id, patch_id, chunk_x, chunk_y) VALUES ($1, $2, 0, 0)',
+        [pendingTileId, ACTIVE_PATCH_ID],
+      )
+      await writer.query('UPDATE patches SET revision = revision + 1 WHERE id = $1', [ACTIVE_PATCH_ID])
+      const inserted = await writer.query<{ event_id: string }>(
+        `INSERT INTO patch_operations
+           (patch_id, op_seq, operation_id, actor_principal_id, op_type, payload)
+         SELECT id, revision, $2, $3, 'tile_placed', '{}'::jsonb
+         FROM patches WHERE id = $1
+         RETURNING event_id`,
+        [ACTIVE_PATCH_ID, randomUUID(), PRINCIPAL_ID],
+      )
+      await writer.query('COMMIT')
+      await writer.end()
+      await blocker.query('COMMIT')
+      blockerCommitted = true
+
+      const snapshot = await snapshotPromise
+      expect(snapshot.revision).toBe(1)
+      expect(snapshot.tiles.map((tile) => tile.id)).not.toContain(pendingTileId)
+      expect(snapshot.eventId).not.toBe(inserted.rows[0]?.event_id)
+    } finally {
+      if (!blockerCommitted) {
+        await blocker.query('ROLLBACK')
+      }
+      blocker.release()
+      await blockerPool.end()
+      await queryWithConnection(database, 'DELETE FROM tiles WHERE id = $1', [pendingTileId])
+    }
+  })
+
   it('falls back to legacy canvas rows when a bounded compatibility patch diverges', async () => {
     const pool = database.createConnection()
     await pool.query('DELETE FROM tile_spatial_refs')
@@ -147,7 +249,13 @@ describe('authoritative patch recovery with retention', () => {
     const observer = vi.fn()
     configureQuiltTelemetry(observer)
     try {
-      const snapshot = await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, { canary: true })
+      await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, { dualReadEnabled: false })
+      expect(observer.mock.calls.some(([event]) => event.name === 'dual_read_parity')).toBe(false)
+
+      const snapshot = await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, {
+        dualReadEnabled: true,
+        canary: true,
+      })
       expect(snapshot.tiles.map((tile) => tile.id).sort()).toEqual([
         '90000000-0000-4000-8000-000000000001',
         '90000000-0000-4000-8000-000000000002',

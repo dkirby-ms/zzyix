@@ -50,6 +50,7 @@ import {
   loadSessionReplayRecord,
   loadSessionRecord,
   loadPatchDeliverySnapshot,
+  loadPatchDeliveryOperationsAfter,
   loadQuiltDeliveryContext,
   markParticipantJoined,
   markParticipantLeft,
@@ -59,14 +60,15 @@ import {
 } from './db/index.js'
 import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
 import type { SessionSummaryRecord } from './db/repository.js'
+import type { PatchDeliveryOperation } from './db/repository.js'
 import { defaultBounds, validatePlacement } from './domain/placementSolver.js'
 import { startRetentionJob } from './jobs/retention.js'
 import { resolveQuiltRooms, type PatchRoomAccess } from './realtime/quiltRooms.js'
 import {
   decideLegacyRetirement,
-  isQuiltCanarySubject,
   loadLegacyRetirementGates,
   loadQuiltCanaryConfig,
+  resolveQuiltRollout,
 } from './migration/quiltRollout.js'
 import { configureQuiltTelemetry, emitQuiltTelemetry } from './migration/quiltTelemetry.js'
 
@@ -220,6 +222,51 @@ export const isQuiltRoomRequest = (value: unknown): value is QuiltRoomRequest =>
     && typeof value.row === 'number'
     && typeof value.column === 'number'
     && (value.chunkIds === undefined || Array.isArray(value.chunkIds))
+}
+
+export const isQuiltClientRuntimeMetrics = (value: unknown): value is QuiltClientRuntimeMetrics => {
+  if (!isObjectRecord(value) || typeof value.quiltId !== 'string') return false
+  const measurements = [
+    value.retainedPatchCount,
+    value.retainedTileCount,
+    value.sceneObjectCount,
+    value.drawCalls,
+    value.frameTimeMs,
+  ]
+  return measurements.every((measurement) =>
+    typeof measurement === 'number' && Number.isFinite(measurement) && measurement >= 0,
+  )
+}
+
+export const recordQuiltClientRuntimeMetrics = (
+  payload: unknown,
+  context: {
+    canaryTelemetryEnabled: boolean
+    quiltId?: string
+    principalId?: string
+  },
+): boolean => {
+  if (
+    !context.canaryTelemetryEnabled
+    || !context.quiltId
+    || !isQuiltClientRuntimeMetrics(payload)
+    || payload.quiltId !== context.quiltId
+  ) return false
+
+  emitQuiltTelemetry({
+    name: 'client_runtime',
+    quiltId: context.quiltId,
+    principalId: context.principalId,
+    canary: true,
+    measurements: {
+      retainedPatchCount: payload.retainedPatchCount,
+      retainedTileCount: payload.retainedTileCount,
+      sceneObjectCount: payload.sceneObjectCount,
+      drawCalls: payload.drawCalls,
+      frameTimeMs: payload.frameTimeMs,
+    },
+  })
+  return true
 }
 
 const getRealtimeCapabilities = (sessionId: string): RealtimeCapabilities => {
@@ -439,6 +486,41 @@ const buildChunkSnapshot = (
   }
 }
 
+export const buildChunkAggregate = (tiles: Session['tiles']) => {
+  const byShape: NonNullable<ChunkSnapshotPayload['chunks'][number]['aggregate']>['byShape'] = {}
+  const byMaterial: NonNullable<ChunkSnapshotPayload['chunks'][number]['aggregate']>['byMaterial'] = {}
+  for (const tile of tiles) {
+    byShape[tile.shape] = (byShape[tile.shape] ?? 0) + 1
+    byMaterial[tile.material] = (byMaterial[tile.material] ?? 0) + 1
+  }
+  return { tileCount: tiles.length, byShape, byMaterial }
+}
+
+export const haveEqualChunkScope = (left: readonly ChunkId[] | undefined, right: readonly ChunkId[]): boolean => {
+  if (!left || left.length !== right.length) return false
+  const leftSet = new Set(left)
+  return leftSet.size === right.length && right.every((chunkId) => leftSet.has(chunkId))
+}
+
+export const selectScopedReplayOperations = (
+  operations: PatchDeliveryOperation[],
+  acceptedChunkIds: readonly ChunkId[],
+): PatchDeliveryOperation[] | null => {
+  const acceptedChunks = new Set(acceptedChunkIds)
+  const selected: PatchDeliveryOperation[] = []
+
+  for (const operation of operations) {
+    if (operation.chunkIds.length === 0) return null
+    if (operation.chunkIds.some((chunkId) => acceptedChunks.has(chunkId as ChunkId))) {
+      selected.push(operation)
+    }
+  }
+  return selected
+}
+
+export const quiltChunkRoomName = (canonicalRoomId: string, chunkId: ChunkId): string =>
+  `${canonicalRoomId}:chunk:${chunkId}`
+
 const cloneCanvasConfig = (config: SessionCanvasConfig): SessionCanvasConfig => ({
   canvasSize: {
     width: config.canvasSize.width,
@@ -549,12 +631,8 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
 }
 
 configureQuiltTelemetry((event) => {
-  const canary = event.canary || (
-    event.quiltId !== undefined
-    && isQuiltCanarySubject({ quiltId: event.quiltId, principalId: event.principalId }, quiltCanaryConfig)
-  )
   writeLog(event.name === 'dual_read_parity' && event.dimensions?.matched === false ? 'warn' : 'info',
-    `quilt_migration_${event.name}`, { ...event, canary })
+    `quilt_migration_${event.name}`, event)
 })
 
 const DB_CONNECT_MAX_ATTEMPTS = Number(process.env.DB_CONNECT_MAX_ATTEMPTS ?? 10)
@@ -1448,6 +1526,8 @@ if (isTestControlEnabled) {
     const canvasId = crypto.randomUUID()
     const quiltId = crypto.randomUUID()
     const patchId = crypto.randomUUID()
+    const principalId = crypto.randomUUID()
+    const tileId = crypto.randomUUID()
     try {
       await getDatabaseBundle().db.transaction(async (tx) => {
         await tx.execute(sql`INSERT INTO canvases (id, version) VALUES (${canvasId}, 0)`)
@@ -1456,11 +1536,30 @@ if (isTestControlEnabled) {
           VALUES (${quiltId}, ${canvasId}, 1, 2, 31.2, 20.4, 'toroidal', 2)
         `)
         await tx.execute(sql`
+          INSERT INTO principals (id, kind)
+          VALUES (${principalId}, 'human')
+        `)
+        await tx.execute(sql`
           INSERT INTO patches (id, quilt_id, row, "column", state, revision)
           VALUES (${patchId}, ${quiltId}, 0, 0, 'active', 0)
         `)
+        await tx.execute(sql`UPDATE patches SET owner_principal_id = ${principalId} WHERE id = ${patchId}`)
+        await tx.execute(sql`
+          INSERT INTO tiles (
+            id, canvas_id, quilt_id, anchor_patch_id, shape, color, material,
+            pos_x, pos_y, chunk_x, chunk_y, rotation, mirrored
+          )
+          VALUES (
+            ${tileId}, ${canvasId}, ${quiltId}, ${patchId}, 'square', '#123456', 'ceramic',
+            1, 1, 0, 0, 0, false
+          )
+        `)
+        await tx.execute(sql`
+          INSERT INTO tile_spatial_refs (tile_id, patch_id, chunk_x, chunk_y)
+          VALUES (${tileId}, ${patchId}, 0, 0)
+        `)
       })
-      res.status(200).json({ canvasId, quiltId, patchId })
+      res.status(200).json({ canvasId, quiltId, patchId, principalId })
     } catch (error) {
       writeLog('error', 'test_quilt_setup_failed', { error })
       res.status(500).json({ error: 'Failed to seed quilt' })
@@ -1480,6 +1579,7 @@ if (isTestControlEnabled) {
     const operationId = crypto.randomUUID()
     const eventId = crypto.randomUUID()
     const attachment = typeof req.body.attachment === 'string' ? req.body.attachment : ''
+    const chunkId = typeof req.body.chunkId === 'string' && isChunkId(req.body.chunkId) ? req.body.chunkId : '0:0'
     try {
       const result = await getDatabaseBundle().db.transaction(async (tx) => {
         const updated = await tx.execute(sql`
@@ -1498,13 +1598,15 @@ if (isTestControlEnabled) {
             ${eventId},
             ${operationId},
             'tile_removed',
-            ${JSON.stringify({ tileId: crypto.randomUUID(), attachment })}::jsonb
+            ${JSON.stringify({ tileId: crypto.randomUUID(), attachment, chunkIds: [chunkId] })}::jsonb
           )
         `)
         return revision
       })
 
       const canonicalRoomId = `quilt:${req.body.quiltId}:patch:0:0:aggregate`
+      const adapterRoomId = quiltChunkRoomName(canonicalRoomId, chunkId)
+      const recipientCount = (await io.in(adapterRoomId).fetchSockets()).length
       emitQuiltTelemetry({
         name: 'attachment_use',
         quiltId: req.body.quiltId,
@@ -1512,7 +1614,7 @@ if (isTestControlEnabled) {
         measurements: { attachmentBytes: Buffer.byteLength(attachment, 'utf8') },
         dimensions: { source: 'adapter-recovery-test' },
       })
-      io.to(canonicalRoomId).emit('quilt_patch_event', {
+      io.to(adapterRoomId).emit('quilt_patch_event', {
         quiltId: req.body.quiltId,
         canonicalRoomId,
         patchId: req.body.patchId,
@@ -1527,7 +1629,14 @@ if (isTestControlEnabled) {
         },
         testAttachment: attachment,
       })
-      res.status(200).json({ canonicalRoomId, eventId, revision: result, attachmentBytes: Buffer.byteLength(attachment) })
+      res.status(200).json({
+        canonicalRoomId,
+        adapterRoomId,
+        recipientCount,
+        eventId,
+        revision: result,
+        attachmentBytes: Buffer.byteLength(attachment),
+      })
     } catch (error) {
       writeLog('error', 'test_quilt_publish_failed', { error })
       res.status(500).json({ error: 'Failed to publish quilt event' })
@@ -1631,6 +1740,12 @@ io.use((socket, next) => {
   socket.data.clientId = auth.clientId
   socket.data.protocolVersion = auth.protocolVersion === 2 ? 2 : 1
   socket.data.enableProtocolV1Compatibility = auth.enableProtocolV1Compatibility === true
+  const testPrincipalId = (auth as Record<string, unknown>).testPrincipalId
+  socket.data.principalId = process.env.E2E_TEST_MODE === 'true'
+    && typeof testPrincipalId === 'string'
+    && UUID_PATTERN.test(testPrincipalId)
+    ? testPrincipalId
+    : undefined
 
   writeLog('info', 'socket_connecting', {
     clientId: auth.clientId,
@@ -1646,10 +1761,12 @@ io.on('connection', (socket) => {
   const { sessionId, clientId } = socket.data
   registerClientSocket(sessionId, clientId, socket.id)
   let selectedProtocolVersion: 1 | 2 = 1
-    let canaryTelemetryEnabled = false
-    let selectedQuiltId: string | undefined
-    let selectedPrincipalId: string | undefined
+  let canaryTelemetryEnabled = false
+  let dualReadEnabled = false
+  let selectedQuiltId: string | undefined
+  let selectedPrincipalId: string | undefined
   let quiltRoomIds = new Set<string>()
+    let quiltAdapterRoomIds = new Set<string>()
   let roomChurnWindowStartedAt = Date.now()
   let roomChurnInWindow = 0
 
@@ -1666,24 +1783,28 @@ io.on('connection', (socket) => {
     const joinedAt = Date.now()
 
     if (socket.data.protocolVersion === 2) {
-      const deliveryContext = await loadQuiltDeliveryContext({ sessionId })
+      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: socket.data.principalId })
       if (deliveryContext?.topology.protocolVersion === 2) {
-        selectedProtocolVersion = 2
-        selectedQuiltId = deliveryContext.topology.quiltId
-        selectedPrincipalId = deliveryContext.principalId
-        canaryTelemetryEnabled = isQuiltCanarySubject({
-          quiltId: selectedQuiltId,
-          principalId: selectedPrincipalId,
+        const rollout = resolveQuiltRollout({
+          quiltId: deliveryContext.topology.quiltId,
+          principalId: deliveryContext.principalId,
         }, quiltCanaryConfig)
-        socket.emit('quilt_protocol', {
-          selectedProtocolVersion: 2,
-          v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
-          mutationEnabled: false,
-          canaryTelemetryEnabled,
-          topology: deliveryContext.topology,
-          limits: QUILT_PROTOCOL_LIMITS,
-        })
-        return
+        if (rollout.protocolV2Enabled) {
+          selectedProtocolVersion = 2
+          selectedQuiltId = deliveryContext.topology.quiltId
+          selectedPrincipalId = deliveryContext.principalId
+          canaryTelemetryEnabled = rollout.canary
+          dualReadEnabled = rollout.dualReadEnabled
+          socket.emit('quilt_protocol', {
+            selectedProtocolVersion: 2,
+            v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
+            mutationEnabled: false,
+            canaryTelemetryEnabled,
+            topology: deliveryContext.topology,
+            limits: QUILT_PROTOCOL_LIMITS,
+          })
+          return
+        }
       }
     }
 
@@ -2218,6 +2339,14 @@ io.on('connection', (socket) => {
     }
   })
 
+  socket.on('quilt_client_runtime_metrics', (payload) => {
+    recordQuiltClientRuntimeMetrics(payload, {
+      canaryTelemetryEnabled,
+      quiltId: selectedQuiltId,
+      principalId: selectedPrincipalId,
+    })
+  })
+
   socket.on('subscribe_quilt_area', async (payload, ack) => {
     if (
       selectedProtocolVersion !== 2
@@ -2234,7 +2363,7 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const deliveryContext = await loadQuiltDeliveryContext({ sessionId })
+      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: socket.data.principalId })
       if (!deliveryContext || deliveryContext.topology.quiltId !== payload.quiltId) {
         invokeAckSafely<SubscribeQuiltAreaAck>(ack, {
           outcomes: payload.rooms.map((room) => ({
@@ -2265,54 +2394,102 @@ io.on('connection', (socket) => {
         accessByAddress,
         limits: QUILT_PROTOCOL_LIMITS,
       })
-      const nextRoomIds = new Set(resolution.accepted.map((room) => room.canonicalRoomId))
-        const priorRoomCount = quiltRoomIds.size
-      for (const existingRoomId of quiltRoomIds) {
-        if (!nextRoomIds.has(existingRoomId)) await socket.leave(existingRoomId)
-      }
-      for (const nextRoomId of nextRoomIds) {
-        if (!quiltRoomIds.has(nextRoomId)) {
-          await socket.join(nextRoomId)
-          roomChurnInWindow += 1
-        }
-      }
-      quiltRoomIds = nextRoomIds
-      emitQuiltTelemetry({
-        name: 'room_churn',
-        quiltId: deliveryContext.topology.quiltId,
-        principalId: deliveryContext.principalId,
-        canary: canaryTelemetryEnabled,
-        measurements: {
-          priorRoomCount,
-          nextRoomCount: nextRoomIds.size,
-          churnInWindow: roomChurnInWindow,
-        },
-      })
-
       const acceptedCursors: SubscribeQuiltAreaAck['acceptedCursors'] = {}
       const snapshots: Array<Parameters<ServerToClientEvents['quilt_patch_snapshot']>[0]> = []
+      const replayEvents: Array<Parameters<ServerToClientEvents['quilt_patch_event']>[0]> = []
       const budgetFailures = new Map<string, string>()
       for (const room of resolution.accepted) {
         const snapshot = await loadPatchDeliverySnapshot(room.patchId, {
           principalId: deliveryContext.principalId,
+          dualReadEnabled,
           canary: canaryTelemetryEnabled,
+          chunkIds: room.chunkIds,
         })
         const cursor = {
           patchId: room.patchId,
           opSeq: snapshot.opSeq,
           revision: snapshot.revision,
           eventId: snapshot.eventId,
+          chunkIds: room.chunkIds,
         }
         acceptedCursors[room.canonicalRoomId] = cursor
         const suppliedCursor = payload.cursors?.[room.canonicalRoomId]
         const cursorMatches = suppliedCursor?.opSeq === cursor.opSeq
           && suppliedCursor.revision === cursor.revision
           && suppliedCursor.eventId === cursor.eventId
-        if (cursorMatches || room.kind === 'presence' || room.kind === 'events') continue
+          && haveEqualChunkScope(suppliedCursor.chunkIds, room.chunkIds)
+        if (cursorMatches || room.kind === 'presence') continue
+
+        if (
+          room.kind === 'events'
+          && suppliedCursor
+          && suppliedCursor.patchId === room.patchId
+          && suppliedCursor.opSeq < cursor.opSeq
+          && haveEqualChunkScope(suppliedCursor.chunkIds, room.chunkIds)
+        ) {
+          const operations = await loadPatchDeliveryOperationsAfter(room.patchId, suppliedCursor.opSeq)
+          const isContiguous = operations.length > 0
+            && operations[0]?.opSeq === suppliedCursor.opSeq + 1
+            && operations.at(-1)?.opSeq === cursor.opSeq
+          const scopedOperations = isContiguous ? selectScopedReplayOperations(operations, room.chunkIds) : null
+          if (scopedOperations) {
+            const roomReplayEvents: typeof replayEvents = []
+            for (const operation of scopedOperations) {
+              if (operation.opType === 'tile_placed' && isPlaceTilePayload(operation.payload)) {
+                roomReplayEvents.push({
+                  quiltId: deliveryContext.topology.quiltId,
+                  canonicalRoomId: room.canonicalRoomId,
+                  patchId: room.patchId,
+                  eventId: operation.eventId,
+                  opSeq: operation.opSeq,
+                  revision: operation.opSeq,
+                  operation: {
+                    tile: {
+                      id: operation.payload.tileId,
+                      shape: operation.payload.shape,
+                      color: operation.payload.color,
+                      material: operation.payload.material,
+                      transform: operation.payload.transform,
+                      createdAt: operation.createdAt,
+                    },
+                    placedBy: operation.actorPrincipalId ?? 'system',
+                    opSeq: operation.opSeq,
+                    revision: operation.opSeq,
+                  },
+                })
+                continue
+              }
+              if (operation.opType === 'tile_removed' && isRemoveTilePayload(operation.payload)) {
+                roomReplayEvents.push({
+                  quiltId: deliveryContext.topology.quiltId,
+                  canonicalRoomId: room.canonicalRoomId,
+                  patchId: room.patchId,
+                  eventId: operation.eventId,
+                  opSeq: operation.opSeq,
+                  revision: operation.opSeq,
+                  operation: {
+                    tileId: operation.payload.tileId,
+                    removedBy: operation.actorPrincipalId ?? 'system',
+                    opSeq: operation.opSeq,
+                    revision: operation.opSeq,
+                  },
+                })
+              }
+            }
+            const replayBytes = Buffer.byteLength(JSON.stringify(roomReplayEvents), 'utf8')
+            if (replayBytes > QUILT_PROTOCOL_LIMITS.maxPayloadBytes) {
+              budgetFailures.set(room.canonicalRoomId, 'PAYLOAD_BYTES')
+              delete acceptedCursors[room.canonicalRoomId]
+            } else {
+              replayEvents.push(...roomReplayEvents)
+            }
+            continue
+          }
+        }
 
         const roomTiles = room.kind === 'aggregate' ? [] : snapshot.tiles
         if (roomTiles.length > QUILT_PROTOCOL_LIMITS.maxSnapshotTiles) {
-          budgetFailures.set(room.requestId, 'SNAPSHOT_TILES')
+          budgetFailures.set(room.canonicalRoomId, 'SNAPSHOT_TILES')
           delete acceptedCursors[room.canonicalRoomId]
           continue
         }
@@ -2320,7 +2497,15 @@ io.on('connection', (socket) => {
           quiltId: deliveryContext.topology.quiltId,
           canonicalRoomId: room.canonicalRoomId,
           patchId: room.patchId,
+          payloadMode: room.kind === 'aggregate' ? 'aggregate' as const : 'fine' as const,
+          chunkIds: room.chunkIds,
           tiles: roomTiles,
+          aggregates: room.kind === 'aggregate'
+            ? room.chunkIds.map((chunkId) => ({
+                chunkId,
+                aggregate: buildChunkAggregate(snapshot.tilesByChunk[chunkId] ?? []),
+              }))
+            : undefined,
           cursor,
         }
         const snapshotBytes = Buffer.byteLength(JSON.stringify(scopedSnapshot), 'utf8')
@@ -2333,30 +2518,7 @@ io.on('connection', (socket) => {
           dimensions: { kind: room.kind },
         })
         if (snapshotBytes > QUILT_PROTOCOL_LIMITS.maxPayloadBytes) {
-
-            socket.on('quilt_client_runtime_metrics', (payload: QuiltClientRuntimeMetrics) => {
-              if (
-                !canaryTelemetryEnabled
-                || !selectedQuiltId
-                || payload.quiltId !== selectedQuiltId
-                || Object.values(payload).some((value) => typeof value === 'number' && (!Number.isFinite(value) || value < 0))
-              ) return
-
-              emitQuiltTelemetry({
-                name: 'client_runtime',
-                quiltId: selectedQuiltId,
-                principalId: selectedPrincipalId,
-                canary: true,
-                measurements: {
-                  retainedPatchCount: payload.retainedPatchCount,
-                  retainedTileCount: payload.retainedTileCount,
-                  sceneObjectCount: payload.sceneObjectCount,
-                  drawCalls: payload.drawCalls,
-                  frameTimeMs: payload.frameTimeMs,
-                },
-              })
-            })
-          budgetFailures.set(room.requestId, 'PAYLOAD_BYTES')
+          budgetFailures.set(room.canonicalRoomId, 'PAYLOAD_BYTES')
           delete acceptedCursors[room.canonicalRoomId]
           continue
         }
@@ -2364,11 +2526,39 @@ io.on('connection', (socket) => {
       }
 
       const outcomes = resolution.outcomes.map((outcome) => {
-        const reason = budgetFailures.get(outcome.requestId)
+        const reason = outcome.status === 'accepted' ? budgetFailures.get(outcome.canonicalRoomId) : undefined
         return reason ? { requestId: outcome.requestId, status: 'budget-exceeded' as const, reason } : outcome
+      })
+      const acceptedRoomIds = new Set(Object.keys(acceptedCursors))
+      const acceptedRooms = resolution.accepted.filter((room) => acceptedRoomIds.has(room.canonicalRoomId))
+      const nextRoomIds = new Set(acceptedRooms.map((room) => room.canonicalRoomId))
+      const nextAdapterRoomIds = new Set(acceptedRooms.flatMap((room) =>
+        room.chunkIds.map((chunkId) => quiltChunkRoomName(room.canonicalRoomId, chunkId)),
+      ))
+      const priorRoomCount = quiltRoomIds.size
+      for (const existingRoomId of quiltAdapterRoomIds) {
+        if (!nextAdapterRoomIds.has(existingRoomId)) await socket.leave(existingRoomId)
+      }
+      for (const nextRoomId of nextAdapterRoomIds) {
+        if (!quiltAdapterRoomIds.has(nextRoomId)) await socket.join(nextRoomId)
+      }
+      roomChurnInWindow += Array.from(nextRoomIds).filter((roomId) => !quiltRoomIds.has(roomId)).length
+      quiltRoomIds = nextRoomIds
+      quiltAdapterRoomIds = nextAdapterRoomIds
+      emitQuiltTelemetry({
+        name: 'room_churn',
+        quiltId: deliveryContext.topology.quiltId,
+        principalId: deliveryContext.principalId,
+        canary: canaryTelemetryEnabled,
+        measurements: {
+          priorRoomCount,
+          nextRoomCount: nextRoomIds.size,
+          churnInWindow: roomChurnInWindow,
+        },
       })
       invokeAckSafely<SubscribeQuiltAreaAck>(ack, { outcomes, acceptedCursors })
       for (const snapshot of snapshots) socket.emit('quilt_patch_snapshot', snapshot)
+      for (const event of replayEvents) socket.emit('quilt_patch_event', event)
     } catch (error) {
       writeLog('error', 'subscribe_quilt_area_failed', { sessionId, clientId, error })
       invokeAckSafely<SubscribeQuiltAreaAck>(ack, {

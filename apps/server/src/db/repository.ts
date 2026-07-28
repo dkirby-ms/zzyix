@@ -791,19 +791,26 @@ export const persistQuiltTilePlacement = async (params: {
       },
     })
     const memberships = await tx
-      .select({ patchId: patchMemberships.patchId })
+      .select({ patchId: patchMemberships.patchId, role: patchMemberships.role })
       .from(patchMemberships)
       .where(and(
         inArray(patchMemberships.patchId, sortedPatchIds),
         eq(patchMemberships.principalId, params.principalId),
       ))
-    const memberPatchIds = new Set(memberships.map((membership) => membership.patchId))
+    const mutationPatchIds = new Set(
+      memberships
+        .filter((membership) => membership.role === 'owner')
+        .map((membership) => membership.patchId),
+    )
 
     for (const patch of lockedPatches) {
       if (!intersectedPatchIdSet.has(patch.id)) {
         continue
       }
-      if (patch.state !== 'active' || (patch.ownerPrincipalId !== params.principalId && !memberPatchIds.has(patch.id))) {
+      if (
+        patch.state !== 'active'
+        || (patch.ownerPrincipalId !== params.principalId && !mutationPatchIds.has(patch.id))
+      ) {
         return { committed: false, reason: 'UNAUTHORIZED' }
       }
       const expectedRevision = params.expectedPatchRevisions[patch.id]
@@ -1396,8 +1403,10 @@ export const loadSessionReplayRecord = async (sessionId: string): Promise<Replay
   }
 }
 
-export const reconstructPatchState = async (patchId: string): Promise<{ opSeq: number; tiles: TileInstance[] }> => {
-  const { db } = getDatabaseBundle()
+const reconstructPatchStateWithDatabase = async (
+  db: DatabaseClient,
+  patchId: string,
+): Promise<{ opSeq: number; tiles: TileInstance[] }> => {
   const [patch] = await db.select({ revision: patches.revision }).from(patches).where(eq(patches.id, patchId)).limit(1)
   if (!patch) {
     throw new Error(`Patch ${patchId} does not exist`)
@@ -1409,6 +1418,14 @@ export const reconstructPatchState = async (patchId: string): Promise<{ opSeq: n
     .where(eq(tileSpatialRefs.patchId, patchId))
     .orderBy(asc(tiles.createdAt), asc(tiles.id))
   return { opSeq: patch.revision, tiles: rows.map((row) => mapTile(row.tile)) }
+}
+
+export const reconstructPatchState = async (patchId: string): Promise<{ opSeq: number; tiles: TileInstance[] }> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(
+    (tx) => reconstructPatchStateWithDatabase(tx, patchId),
+    { isolationLevel: 'repeatable read', accessMode: 'read only' },
+  )
 }
 
 export type QuiltDeliveryContext = {
@@ -1434,14 +1451,15 @@ export type QuiltDeliveryContext = {
 
 export const loadQuiltDeliveryContext = async (params: {
   sessionId: string
+  principalId?: string
   identity?: { providerNamespace: string; externalSubject: string }
 }): Promise<QuiltDeliveryContext | null> => {
   const { db } = getDatabaseBundle()
   const [quilt] = await db.select().from(quilts).where(eq(quilts.legacyCanvasId, params.sessionId)).limit(1)
   if (!quilt) return null
 
-  let principalId: string | undefined
-  if (params.identity) {
+  let principalId = params.principalId
+  if (!principalId && params.identity) {
     const [mapping] = await db
       .select({ principalId: externalPrincipalMappings.principalId })
       .from(externalPrincipalMappings)
@@ -1498,72 +1516,169 @@ export const loadQuiltDeliveryContext = async (params: {
 
 export const loadPatchDeliverySnapshot = async (patchId: string, options: {
   principalId?: string
+  dualReadEnabled?: boolean
   canary?: boolean
+  chunkIds?: string[]
 } = {}): Promise<{
   opSeq: number
   revision: number
   eventId?: string
   tiles: TileInstance[]
+  tilesByChunk: Record<string, TileInstance[]>
 }> => {
   const { db } = getDatabaseBundle()
-  const state = await reconstructPatchState(patchId)
-  const [compatibilityContext] = await db
+  return db.transaction(async (tx) => {
+    const state = await reconstructPatchStateWithDatabase(tx, patchId)
+    const acceptedChunkIds = new Set(options.chunkIds ?? [])
+    const scopedRows = acceptedChunkIds.size === 0
+      ? []
+      : await tx
+          .select({
+            tileId: tileSpatialRefs.tileId,
+            chunkX: tileSpatialRefs.chunkX,
+            chunkY: tileSpatialRefs.chunkY,
+          })
+          .from(tileSpatialRefs)
+          .where(and(
+            eq(tileSpatialRefs.patchId, patchId),
+            inArray(sql<string>`concat(${tileSpatialRefs.chunkX}, ':', ${tileSpatialRefs.chunkY})`, Array.from(acceptedChunkIds)),
+          ))
+    const scopedTileIds = new Set(scopedRows.map((row) => row.tileId))
+    const [compatibilityContext] = await tx
+      .select({
+        quiltId: quilts.id,
+        legacyCanvasId: quilts.legacyCanvasId,
+        topology: quilts.topology,
+        patchRows: quilts.patchRows,
+        patchColumns: quilts.patchColumns,
+      })
+      .from(patches)
+      .innerJoin(quilts, eq(patches.quiltId, quilts.id))
+      .where(eq(patches.id, patchId))
+      .limit(1)
+    let tilesForDelivery = acceptedChunkIds.size === 0
+      ? state.tiles
+      : state.tiles.filter((tile) => scopedTileIds.has(tile.id))
+
+    if (
+      options.dualReadEnabled === true
+      &&
+      compatibilityContext?.legacyCanvasId
+      && compatibilityContext.topology === 'bounded'
+      && compatibilityContext.patchRows === 1
+      && compatibilityContext.patchColumns === 1
+    ) {
+      const legacyRows = await tx
+        .select()
+        .from(tiles)
+        .where(eq(tiles.canvasId, compatibilityContext.legacyCanvasId))
+        .orderBy(asc(tiles.createdAt), asc(tiles.id))
+      const legacyTiles = legacyRows.map(mapTile)
+      const parityReport = compareLegacyAndPatchTiles(legacyTiles, state.tiles)
+      emitQuiltTelemetry({
+        name: 'dual_read_parity',
+        quiltId: compatibilityContext.quiltId,
+        principalId: options.principalId,
+        canary: options.canary ?? false,
+        measurements: {
+          legacyTileCount: parityReport.legacyTileCount,
+          patchTileCount: parityReport.patchTileCount,
+          mismatchCount: parityReport.mismatches.length
+            + parityReport.missingFromLegacy.length
+            + parityReport.missingFromPatch.length,
+        },
+        dimensions: { matched: parityReport.matches, readPath: 'legacy-patch' },
+        details: parityReport.matches ? undefined : parityReport,
+      })
+      const parityTiles = parityReport.matches ? state.tiles : legacyTiles
+      tilesForDelivery = acceptedChunkIds.size === 0
+        ? parityTiles
+        : parityTiles.filter((tile) => {
+            const chunk = worldToChunk(tile.transform.position.x, tile.transform.position.y)
+            return acceptedChunkIds.has(`${chunk.x}:${chunk.y}`)
+          })
+    }
+    const [latestEvent] = await tx
+      .select({ eventId: patchOperations.eventId })
+      .from(patchOperations)
+      .where(eq(patchOperations.patchId, patchId))
+      .orderBy(desc(patchOperations.opSeq))
+      .limit(1)
+
+    return {
+      opSeq: state.opSeq,
+      revision: state.opSeq,
+      eventId: latestEvent?.eventId,
+      tiles: tilesForDelivery,
+      tilesByChunk: Object.fromEntries(Array.from(acceptedChunkIds, (chunkId) => [
+        chunkId,
+        tilesForDelivery.filter((tile) => {
+          if (scopedRows.length > 0) {
+            return scopedRows.some((row) => row.tileId === tile.id && `${row.chunkX}:${row.chunkY}` === chunkId)
+          }
+          const chunk = worldToChunk(tile.transform.position.x, tile.transform.position.y)
+          return `${chunk.x}:${chunk.y}` === chunkId
+        }),
+      ])),
+    }
+  }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
+}
+
+export type PatchDeliveryOperation = {
+  eventId: string
+  opSeq: number
+  opType: 'tile_placed' | 'tile_removed'
+  payload: unknown
+  actorPrincipalId?: string
+  createdAt: number
+  chunkIds: string[]
+}
+
+export const loadPatchDeliveryOperationsAfter = async (
+  patchId: string,
+  opSeq: number,
+): Promise<PatchDeliveryOperation[]> => {
+  const { db } = getDatabaseBundle()
+  const rows = await db
     .select({
-      quiltId: quilts.id,
-      legacyCanvasId: quilts.legacyCanvasId,
-      topology: quilts.topology,
-      patchRows: quilts.patchRows,
-      patchColumns: quilts.patchColumns,
+      eventId: patchOperations.eventId,
+      opSeq: patchOperations.opSeq,
+      opType: patchOperations.opType,
+      payload: patchOperations.payload,
+      actorPrincipalId: patchOperations.actorPrincipalId,
+      createdAt: patchOperations.createdAt,
     })
-    .from(patches)
-    .innerJoin(quilts, eq(patches.quiltId, quilts.id))
-    .where(eq(patches.id, patchId))
-    .limit(1)
-  let tilesForDelivery = state.tiles
-
-  if (
-    compatibilityContext?.legacyCanvasId
-    && compatibilityContext.topology === 'bounded'
-    && compatibilityContext.patchRows === 1
-    && compatibilityContext.patchColumns === 1
-  ) {
-    const legacyRows = await db
-      .select()
-      .from(tiles)
-      .where(eq(tiles.canvasId, compatibilityContext.legacyCanvasId))
-      .orderBy(asc(tiles.createdAt), asc(tiles.id))
-    const legacyTiles = legacyRows.map(mapTile)
-    const parityReport = compareLegacyAndPatchTiles(legacyTiles, state.tiles)
-    emitQuiltTelemetry({
-      name: 'dual_read_parity',
-      quiltId: compatibilityContext.quiltId,
-      principalId: options.principalId,
-      canary: options.canary ?? false,
-      measurements: {
-        legacyTileCount: parityReport.legacyTileCount,
-        patchTileCount: parityReport.patchTileCount,
-        mismatchCount: parityReport.mismatches.length
-          + parityReport.missingFromLegacy.length
-          + parityReport.missingFromPatch.length,
-      },
-      dimensions: { matched: parityReport.matches, readPath: 'legacy-patch' },
-      details: parityReport.matches ? undefined : parityReport,
-    })
-    tilesForDelivery = parityReport.matches ? state.tiles : legacyTiles
-  }
-  const [latestEvent] = await db
-    .select({ eventId: patchOperations.eventId })
     .from(patchOperations)
-    .where(eq(patchOperations.patchId, patchId))
-    .orderBy(desc(patchOperations.opSeq))
-    .limit(1)
+    .where(and(eq(patchOperations.patchId, patchId), sql`${patchOperations.opSeq} > ${opSeq}`))
+    .orderBy(asc(patchOperations.opSeq))
 
-  return {
-    opSeq: state.opSeq,
-    revision: state.opSeq,
-    eventId: latestEvent?.eventId,
-    tiles: tilesForDelivery,
-  }
+  const placedTileIds = rows
+    .filter((row) => row.opType === 'tile_placed' && isPlaceOperationPayload(row.payload))
+    .map((row) => (row.payload as PlaceTilePayload).tileId)
+  const spatialRows = placedTileIds.length === 0
+    ? []
+    : await db
+        .select({
+          tileId: tileSpatialRefs.tileId,
+          chunkX: tileSpatialRefs.chunkX,
+          chunkY: tileSpatialRefs.chunkY,
+        })
+        .from(tileSpatialRefs)
+        .where(and(eq(tileSpatialRefs.patchId, patchId), inArray(tileSpatialRefs.tileId, placedTileIds)))
+
+  return rows.map((row) => ({
+    eventId: row.eventId,
+    opSeq: row.opSeq,
+    opType: row.opType as PatchDeliveryOperation['opType'],
+    payload: row.payload,
+    actorPrincipalId: row.actorPrincipalId ?? undefined,
+    createdAt: toMillis(row.createdAt),
+    chunkIds: isObjectRecord(row.payload) && Array.isArray(row.payload.chunkIds)
+      ? row.payload.chunkIds.filter((chunkId): chunkId is string => typeof chunkId === 'string')
+      : spatialRows
+          .filter((spatialRow) => isPlaceOperationPayload(row.payload) && spatialRow.tileId === row.payload.tileId)
+          .map((spatialRow) => `${spatialRow.chunkX}:${spatialRow.chunkY}`),
+  }))
 }
 
 export const savePatchSnapshot = async (patchId: string): Promise<{ opSeq: number; tiles: TileInstance[] }> => {

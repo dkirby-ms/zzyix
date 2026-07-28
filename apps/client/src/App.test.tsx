@@ -810,10 +810,12 @@ describe('App lobby-first behavior', () => {
     const onQuiltProtocol = socketCall[17] as (payload: any) => void
     const onQuiltPatchSnapshot = socketCall[18] as (payload: any) => void
 
+    vi.useFakeTimers()
     act(() => onQuiltProtocol({
       selectedProtocolVersion: 2,
       v1CompatibilityEnabled: false,
       mutationEnabled: false,
+      canaryTelemetryEnabled: true,
       topology: {
         quiltId: 'quilt-1',
         topology: 'toroidal',
@@ -832,6 +834,14 @@ describe('App lobby-first behavior', () => {
         source: 'canary-default',
       },
     }))
+
+    act(() => vi.advanceTimersByTime(10_000))
+    expect(emitMock).toHaveBeenCalledWith('quilt_client_runtime_metrics', expect.objectContaining({
+      quiltId: 'quilt-1',
+      retainedPatchCount: 0,
+      retainedTileCount: 0,
+    }))
+    vi.useRealTimers()
 
     fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport' }))
     await waitFor(() => expect(emitMock).toHaveBeenCalledWith(

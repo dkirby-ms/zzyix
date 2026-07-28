@@ -55,6 +55,12 @@ These values are conservative canary defaults. They are not final measured produ
 
 Protocol-v2 clients request `protocolVersion: 2` in Socket.IO auth. The server selects v2 only for quilts whose persisted `protocol_version` is `2`, announces immutable topology and negotiated limits with `quilt_protocol`, and accepts canonical `subscribe_quilt_area` requests. Acknowledgements report `accepted`, `forbidden`, `invalid`, or `budget-exceeded` for every requested room. Reconnect recovery compares patch operation sequence, revision, and event ID cursors, then emits only the required `quilt_patch_snapshot`; it does not send a whole-quilt snapshot.
 
+Protocol-v2 execution is fail-closed. `FEATURE_QUILT_PROTOCOL_V2_ENABLED=true`
+enables it globally. Otherwise, only authenticated quilt and principal pairs
+selected by the canary controls receive v2; other requested v2 connections
+negotiate v1. `FEATURE_QUILT_DUAL_READ_ENABLED=true` enables migration dual
+reads globally. Otherwise, dual reads run only for selected canary pairs.
+
 Protocol v1 remains available only through explicit compatibility settings. V2 connections suppress session-wide durable mutation events. Toroidal mutation stays disabled until authentication maps an external identity to a stable internal principal; `clientId`, socket identity, and attribution fields are not principals.
 
 Rollout notes:
@@ -64,20 +70,20 @@ Rollout notes:
 
 ## Quilt Migration Canary
 
-Migration dual reads compare full persisted tile identity, shape, color, material,
-position, rotation, mirroring, creation time, and authorship. A mismatch returns
-the legacy read and emits `quilt_migration_dual_read_parity` with a bounded
-mismatch report. Legacy tables and nullable compatibility links remain the
-rollback source of truth.
+Migration dual reads compare stable tile ID, shape, color, material, position,
+rotation, mirrored state, creation time, and authorship. A mismatch returns the
+legacy read and emits `quilt_migration_dual_read_parity` with a bounded mismatch
+report. Disabling the global dual-read flag and canary controls stops those
+comparisons without changing legacy data or nullable compatibility links.
 
 Canary telemetry requires both a quilt and a resolved authenticated principal.
-Current protocol-v2 connections do not resolve an external identity, so these
-controls cannot enroll a client until principal integration is implemented:
 
 * `FEATURE_QUILT_DUAL_READ_CANARY_ENABLED`
 * `FEATURE_QUILT_DUAL_READ_CANARY_QUILT_IDS`
 * `FEATURE_QUILT_DUAL_READ_CANARY_PRINCIPAL_IDS`
 * `FEATURE_QUILT_DUAL_READ_CANARY_PERCENT`
+* `FEATURE_QUILT_DUAL_READ_ENABLED`
+* `FEATURE_QUILT_PROTOCOL_V2_ENABLED`
 
 The structured migration events cover parity failures, patch lock wait,
 mutation latency, snapshot bytes, resyncs, room churn, attachment bytes,
@@ -95,10 +101,17 @@ docker compose up -d postgres
 ./scripts/verify-quilt-migration.sh rehearse
 ```
 
-The rehearsal creates a temporary database, applies migrations, seeds stable
-tile IDs with transforms and authorship, runs backfill twice, verifies parity,
-rolls additive quilt data back, verifies the legacy fingerprint, recovers, and
-verifies parity again. Its cleanup trap drops the temporary database.
+The rehearsal creates a temporary database and seeds classic, expanded, and
+vast bounded canvases with edge and chunk-boundary tiles. Its parity command
+fingerprints stable ID, canvas ID, shape, color, material, position, stored
+chunk layout, rotation, mirrored state, nullable authorship, and creation time
+for every authoritative tile row visible through the migrated links. It also
+checks bounded canvas dimensions and origins, tile linkage, spatial-reference
+coverage, and the absence of inferred patch owners.
+
+The rehearsal runs backfill twice in separate Node processes, rolls additive
+quilt data back, compares complete legacy canvas and tile fingerprints, then
+backfills and verifies again. The cleanup trap drops the temporary database.
 
 Individual loopback operations use `DATABASE_URL`:
 

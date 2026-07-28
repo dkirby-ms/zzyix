@@ -30,6 +30,11 @@ export type CanvasTestStateSnapshot = {
   resyncEvents: number
   collaboratorIds: string[]
   activeTile: ActiveTile
+  cameraPan: { x: number; y: number }
+  grid: {
+    enabled: boolean
+    patternId?: string
+  }
   tiles: CanvasTestTileSnapshot[]
   metrics: {
     retainedPatchCount: number
@@ -49,6 +54,8 @@ export type CanvasTestApi = {
   joinSession: (sessionId: string) => void
   setActiveTile: (patch: Partial<ActiveTile>) => void
   movePointer: (position: { x: number; y: number }) => void
+  setCameraPan: (position: { x: number; y: number }) => void
+  setGridEnabled: (enabled: boolean) => void
   placeTileAt: (position: { x: number; y: number }) => void
   placeTileAtWithAck: (input: {
     position: { x: number; y: number }

@@ -45,6 +45,9 @@ Legacy retirement remains gated and was not performed.
 * `apps/server/src/migration/quiltTelemetry.ts` - Captures threshold-neutral server and client canary measurements
 * `apps/server/src/migration/quiltTelemetry.test.ts` - Covers telemetry aggregation
 * `scripts/verify-quilt-migration.sh` - Rehearses migration, repeated backfill, parity, rollback, and recovery with production safeguards
+* `apps/server/src/db/schema.postgres.integration.test.ts` - Proves PostgreSQL accepts valid patch boundaries and rejects negative or out-of-range canonical addresses
+* `apps/server/src/contracts.test.ts` - Pins the protocol-v2 shared contract schema version
+* `apps/server/src/db/quiltBackfill.postgres.integration.test.ts` - Proves database-backed restart idempotency, complete field preservation, spatial parity, and no inferred owners
 
 ### Modified
 
@@ -99,10 +102,59 @@ Legacy retirement remains gated and was not performed.
 * `apps/server/README.md` - Documents canary, rollback, and recovery operations
 * `README.md` - Describes quilt topology and legacy compatibility behavior
 * `playwright.config.ts` - Isolates the dedicated multi-replica suite, enables protocol-v2 readiness, and serializes destructive shared-state E2E tests
+* `apps/client/src/domain/math2d.ts` - Canonicalizes toroidal viewports before chunk enumeration so exact quilt laps preserve canonical subscriptions for non-aligned periods
+* `apps/client/src/domain/math2d.test.ts` - Covers zero, positive, negative, seam, and corner exact-lap subscriptions with production quilt dimensions
+* `apps/client/src/App.tsx` - Supplies canonical quilt bounds to periodic chunk enumeration
+* `apps/server/src/db/schema.ts` - Defines the canonical parent-quilt patch-bound constraint contract
+* `apps/server/migrations/0005_finite_toroidal_quilt.sql` - Enforces patch rows and columns against parent quilt dimensions with a PostgreSQL constraint trigger
+* `apps/server/src/db/repository.ts` - Fails closed for ordinary patch membership, authorizes persisted owner capability, and reconstructs patch state inside one read-only repeatable-read transaction
+* `apps/server/src/db/repository.postgres.integration.test.ts` - Covers member denial and owner mutation capability under real PostgreSQL transactions
+* `apps/server/src/db/recovery.postgres.integration.test.ts` - Detects mixed-commit reconstruction and proves consistent revision, tiles, and cursor reads
+* `apps/server/src/contracts.ts` - Carries accepted chunk scope and useful per-chunk aggregate snapshot content
+* `apps/server/src/db/repository.ts` - Queries scoped fine and aggregate snapshots and replays retained operations only when their chunk scope is provable
+* `apps/server/src/realtime/quiltRooms.ts` - Merges canonical chunk scope and creates internal chunk-qualified delivery rooms
+* `apps/server/src/index.ts` - Applies snapshot and payload budgets before room joins and falls back to scoped snapshots for unsafe stale-cursor replay
+* `apps/server/src/index.integration.test.ts` - Covers deliberately stale cursors, aggregate content, scoped delivery, and rejected-room non-membership
+* `apps/server/src/realtime/quiltRooms.test.ts` - Covers canonical scope merging and chunk-qualified room identity
+* `e2e/quilt-reconnect.spec.ts` - Proves stale cross-replica recovery and scoped adapter delivery
+* `e2e/quilt-seams.spec.ts` - Uses the accepted scoped snapshot contract
+* `apps/client/src/App.tsx` - Retains accepted snapshot chunk scope and manages optimistic and undo pins through real protocol-v2 workflows
+* `apps/client/src/domain/quiltCache.ts` - Protects active scoped patch data during eviction and exposes workflow pin lifecycle operations
+* `apps/client/src/domain/quiltCache.test.ts` - Covers accepted scope and optimistic and undo pin retention
+* `apps/client/src/render/MosaicScene.tsx` - Enumerates periodic images from live orthographic camera bounds, zoom, and renderer aspect
+* `apps/client/src/render/MosaicScene.test.tsx` - Covers camera-bound periodic rendering behavior
+* `apps/client/src/render/periodicImages.ts` - Supports live viewport bounds used by the scene
+* `apps/client/src/test/canvasTestApi.ts` - Exposes traversal, grid, and bounded-runtime measurements for deterministic E2E
+* `e2e/quilt-seams.spec.ts` - Performs seam, corner, positive-lap, and negative-lap traversal and enforces test-specific finite budgets
+* `apps/server/src/migration/quiltRollout.ts` - Makes deterministic quilt and principal cohorts gate actual protocol-v2 and dual-read execution with immediate rollback
+* `apps/server/src/migration/quiltRollout.test.ts` - Covers cohort inclusion, exclusion, global overrides, and rollback
+* `apps/server/src/index.ts` - Applies runtime cohort gates and accepts normal successful client telemetry
+* `apps/server/src/index.integration.test.ts` - Covers cohort-controlled execution, rollback, and normal telemetry delivery
+* `apps/server/src/db/repository.ts` - Executes dual-read parity only for enabled canary paths
+* `apps/server/src/db/quiltBackfill.ts` - Verifies complete persisted field and canvas geometry parity
+* `apps/server/src/contracts.ts` - Advances the shared schema version to 2.0.0
+* `apps/client/src/App.test.tsx` - Proves successful protocol-v2 sessions report runtime measurements
+* `scripts/verify-quilt-migration.sh` - Rehearses classic, expanded, and vast canvases with boundary data and full-field fingerprints
+* `apps/server/README.md` - Describes field-level parity evidence precisely
+* `playwright.config.ts` - Supplies deterministic canary configuration to standard E2E
+* `playwright.multi-replica.config.ts` - Supplies deterministic canary configuration to replica E2E
 
 ### Removed
 
 ## Additional or Deviating Changes
+
+* Post-implementation review changed the release status to Needs Rework
+	* Remediation Phases 9 through 14 now track three critical and fourteen major findings before protocol-v2 or quilt canary enablement
+* Phase 9 corrected the two canonical invariant defects identified by review
+	* Focused client tests passed with production dimensions, and five PostgreSQL integration cases proved database-enforced patch bounds
+* Phase 10 enforced the exact persisted capability model without inventing unavailable delegated grants
+	* Ordinary members fail closed, owners may mutate active patches, and stable external identity remains a release gate
+* Phase 11 made accepted chunks authoritative for snapshot, aggregate, replay, cursor, and adapter scope
+	* Older removal events without chunk metadata use a scoped snapshot fallback instead of risking loss or leakage
+* Phase 12 uses conservative test-specific runtime thresholds only
+	* Production cache, scene, draw-call, snapshot-byte, and frame-time gates still require measured canary evidence
+* Phase 13 operationalized canary cohorts without retiring compatibility paths
+	* Stable external identity, production measurements, retirement approval, protocol v1, and legacy storage remain unchanged release gates
 
 * No Phase 1 deviations from the implementation details
 * Phase 2 did not export topology types from protocol contracts because they do not yet cross the wire
@@ -124,8 +176,8 @@ Legacy retirement remains gated and was not performed.
 
 ## Release Summary
 
-The implementation affects 69 product files: 32 added, 37 modified, and none removed. It adds the accepted quilt ADR, shared topology resolver, additive migration and backfill, patch-scoped PostgreSQL correctness and recovery, protocol-v2 scoped delivery, bounded client virtualization, periodic seam rendering, canary telemetry, and guarded migration operations.
+Review remediation affects 32 implementation files: 3 added, 29 modified, and none removed. Phases 9 through 13 correct periodic subscriptions for non-chunk-aligned quilt periods, database-enforced patch bounds, capability-based authorization, transactionally consistent reconstruction, stale-cursor convergence, chunk-scoped delivery, useful aggregates, pre-join budgets, client cache pinning, camera-derived periodic images, deterministic traversal gates, operational canary cohorts, normal telemetry, and full-field migration proof.
 
-No dependency packages were added. Migration 0005 is additive, production replicas are schema-verification-only, and one-shot migration remains an explicit release operation. The complete lint, build, 245-test unit and integration, seven-test standard E2E, one-test multi-replica, and disposable migration, rollback, parity, and recovery gates pass.
+No dependency packages were added. Migration 0005 remains additive, protocol v1 and legacy storage remain deployable rollback paths, and production replicas remain schema-verification-only. The complete lint and build gates pass. Unit and integration validation passes 265 tests across 42 files, standard Playwright passes 7 scenarios, multi-replica Playwright passes 1 scenario, and migration rehearsal proves three canvas sizes, four representative tiles, matching full-field fingerprints, zero inferred owners, zero geometry mismatches, and six recovery checks.
 
-Protocol v1 and legacy storage remain deployable rollback paths. Their removal is blocked until authenticated principal integration, persisted visibility policy, production measurements, authenticated alias mutation coverage, and the approved canary and rollback gates are complete.
+The three critical and fourteen major review findings have implementation remediation and passing focused evidence. Release enablement remains blocked by stable external identity, persisted visibility policy, production-measured thresholds, authenticated alias-mutation E2E, migration metadata repair, production migration-job ownership, and approved rollback and retirement gates. Attachment telemetry still requires production adapter instrumentation. Protocol v1 and legacy storage must not be retired before those gates pass.
