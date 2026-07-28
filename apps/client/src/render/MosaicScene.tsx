@@ -20,6 +20,8 @@ import type { GridPattern } from '../domain/gridPatterns'
 import type { TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 import { getCollaboratorColor } from '../ui/palettes'
+import { enumerateVisibleTileImages, nearestPeriodicPoint, resolveDisplayHitPoint } from './periodicImages'
+import type { QuiltTopology } from '../../../server/src/domain/quiltTopology'
 
 const geometryCache = new Map<TileShape, ExtrudeGeometry>()
 
@@ -57,6 +59,7 @@ type MosaicSceneProps = {
     minY: number
     maxY: number
   }
+  topology?: QuiltTopology
   onPointerMove: (x: number, y: number) => void
   onPointerDown: (x: number, y: number) => void
   onPointerUp: () => void
@@ -74,6 +77,7 @@ type MosaicSceneProps = {
     zoom: number
   }) => void
   onZoomTierChanged?: (zoom: number) => void
+  onSceneMetrics?: (metrics: { sceneObjectCount: number; drawCalls: number; frameTimeMs: number }) => void
 }
 
 const DEFAULT_CAMERA_POLICY = {
@@ -219,7 +223,9 @@ const InteractionPlane = ({
   onRotateDrag,
   onCameraPan,
   worldBounds,
-}: Pick<MosaicSceneProps, 'onPointerMove' | 'onPointerDown' | 'onPointerUp' | 'onRotateDrag' | 'onCameraPan' | 'worldBounds'>) => {
+  topology,
+}: Pick<MosaicSceneProps, 'onPointerMove' | 'onPointerDown' | 'onPointerUp' | 'onRotateDrag' | 'onCameraPan' | 'worldBounds' | 'topology'>) => {
+  const { camera, size } = useThree()
   const meshRef = useRef<any>(null)
   const isRightMouseDown = useRef(false)
   const lastMiddlePos = useRef<{ x: number; y: number } | null>(null)
@@ -252,7 +258,8 @@ const InteractionPlane = ({
       return
     }
     lastMiddlePos.current = null
-    onPointerMove(event.point.x, event.point.y)
+    const point = resolveDisplayHitPoint(event.point, topology)
+    onPointerMove(point.x, point.y)
   }
 
   const handleDown = (event: ThreeEvent<PointerEvent>): void => {
@@ -269,7 +276,8 @@ const InteractionPlane = ({
       event.stopPropagation()
       return
     }
-    onPointerDown(event.point.x, event.point.y)
+    const point = resolveDisplayHitPoint(event.point, topology)
+    onPointerDown(point.x, point.y)
   }
 
   const handleUp = (event: ThreeEvent<PointerEvent>): void => {
@@ -291,10 +299,11 @@ const InteractionPlane = ({
   }
 
   const bounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
-  const width = (bounds.maxX - bounds.minX) + 6
-  const height = (bounds.maxY - bounds.minY) + 6
-  const centerX = (bounds.minX + bounds.maxX) / 2
-  const centerY = (bounds.minY + bounds.maxY) / 2
+  const orthographic = camera as OrthographicCamera
+  const width = topology ? size.width / orthographic.zoom + 6 : (bounds.maxX - bounds.minX) + 6
+  const height = topology ? size.height / orthographic.zoom + 6 : (bounds.maxY - bounds.minY) + 6
+  const centerX = topology ? orthographic.position.x : (bounds.minX + bounds.maxX) / 2
+  const centerY = topology ? orthographic.position.y : (bounds.minY + bounds.maxY) / 2
 
   return (
     <mesh
@@ -391,7 +400,11 @@ const SceneContents = ({
   cameraPolicy,
   onViewportChanged,
   onZoomTierChanged,
+  topology,
+  onSceneMetrics,
 }: MosaicSceneProps) => {
+  const { gl, scene } = useThree()
+  const previousFrameAt = useRef<number | undefined>(undefined)
   const controlsRef = useRef(null)
   const tilesById = useMemo(() => {
     const index = new Map<string, TileInstance>()
@@ -400,6 +413,25 @@ const SceneContents = ({
     }
     return index
   }, [tiles])
+  const viewport = useMemo(() => ({
+    minX: cameraPan.x - 20,
+    maxX: cameraPan.x + 20,
+    minY: cameraPan.y - 15,
+    maxY: cameraPan.y + 15,
+  }), [cameraPan.x, cameraPan.y])
+  const tileImages = useMemo(
+    () => topology ? enumerateVisibleTileImages(tiles, viewport, topology, 2) : tiles.map((tile) => ({
+      key: tile.id, canonicalId: tile.id, tile, position: tile.transform.position, image: { x: 0, y: 0 },
+    })),
+    [tiles, topology, viewport],
+  )
+  useFrame(() => {
+    if (!onSceneMetrics) return
+    const now = performance.now()
+    const frameTimeMs = previousFrameAt.current === undefined ? 0 : now - previousFrameAt.current
+    previousFrameAt.current = now
+    onSceneMetrics({ sceneObjectCount: scene.children.length, drawCalls: gl.info.render.calls, frameTimeMs })
+  })
 
   return (
     <>
@@ -422,12 +454,15 @@ const SceneContents = ({
             pattern={gridOverlay.pattern}
             activeShape={activeShape}
             tiles={tiles}
-            bounds={worldBounds ?? DEFAULT_WORLD_BOUNDS}
+            bounds={topology ? { mode: 'unbounded' } : worldBounds ?? DEFAULT_WORLD_BOUNDS}
             activeSlotId={gridOverlay.activeSlotId}
+            topology={topology}
           />
         )}
-        {tiles.map((tile) => (
-          <TileMesh key={tile.id} tile={tile} />
+        {tileImages.map((image) => (
+          <group key={image.key} position={[image.position.x - image.tile.transform.position.x, image.position.y - image.tile.transform.position.y, 0]} data-canonical-id={image.canonicalId}>
+            <TileMesh tile={image.tile} />
+          </group>
         ))}
         {remoteSelections.map((selection) => {
           const selectedTile = tilesById.get(selection.tileId)
@@ -438,16 +473,22 @@ const SceneContents = ({
           return (
             <RemoteSelectionHalo
               key={`${selection.clientId}-${selection.tileId}`}
-              tile={selectedTile}
+              tile={topology ? { ...selectedTile, transform: { ...selectedTile.transform, position: nearestPeriodicPoint(selectedTile.transform.position, cameraPan, topology) } } : selectedTile}
               clientId={selection.clientId}
             />
           )
         })}
       </group>
 
-      <GhostMesh ghost={ghost} shape={activeShape} />
+      <GhostMesh ghost={topology ? {
+        ...ghost,
+        transform: { ...ghost.transform, position: nearestPeriodicPoint(ghost.transform.position, cameraPan, topology) },
+      } : ghost} shape={activeShape} />
       {remoteCursors.map((cursor) => (
-        <RemoteCursorMesh key={cursor.clientId} cursor={cursor} />
+        <RemoteCursorMesh key={cursor.clientId} cursor={topology ? {
+          ...cursor,
+          position: nearestPeriodicPoint(cursor.position, cameraPan, topology),
+        } : cursor} />
       ))}
 
       <InteractionPlane
@@ -457,6 +498,7 @@ const SceneContents = ({
         onRotateDrag={onRotateDrag}
         onCameraPan={onCameraPan}
         worldBounds={worldBounds}
+        topology={topology}
       />
 
       <mesh
@@ -510,6 +552,8 @@ export const MosaicScene = ({
   cameraPolicy,
   onViewportChanged,
   onZoomTierChanged,
+  topology,
+  onSceneMetrics,
 }: MosaicSceneProps) => {
   const resolvedBounds = worldBounds ?? DEFAULT_WORLD_BOUNDS
   const width = resolvedBounds.maxX - resolvedBounds.minX
@@ -597,6 +641,8 @@ export const MosaicScene = ({
             onPointerUp={onPointerUp}
             onViewportChanged={onViewportChanged}
             onZoomTierChanged={onZoomTierChanged}
+            topology={topology}
+            onSceneMetrics={onSceneMetrics}
           />
         </Canvas>
       </div>

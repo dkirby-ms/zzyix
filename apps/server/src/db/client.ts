@@ -1,6 +1,7 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { Pool, type PoolConfig } from 'pg'
 import * as schema from './schema.js'
+import { emitQuiltTelemetry } from '../migration/quiltTelemetry.js'
 
 export type DatabaseSchema = typeof schema
 export type DatabaseClient = NodePgDatabase<DatabaseSchema>
@@ -37,6 +38,16 @@ export const getDatabaseBundle = (): DatabaseBundle => {
   if (!sharedBundle) {
     sharedBundle = createDatabaseBundle()
   }
+
+  emitQuiltTelemetry({
+    name: 'pool_wait',
+    canary: false,
+    measurements: {
+      waitingClients: sharedBundle.pool.waitingCount,
+      idleClients: sharedBundle.pool.idleCount,
+      totalClients: sharedBundle.pool.totalCount,
+    },
+  })
 
   return sharedBundle
 }

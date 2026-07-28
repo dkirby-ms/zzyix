@@ -36,6 +36,10 @@ import type {
   ChunkPayloadMode,
   RealtimeCapabilities,
   ChunkCoordinationMetadata,
+  QuiltProtocolLimits,
+  QuiltRoomRequest,
+  SubscribeQuiltAreaAck,
+  QuiltClientRuntimeMetrics,
 } from './contracts.js'
 import {
   closeDatabaseBundle,
@@ -45,16 +49,26 @@ import {
   listActiveParticipants,
   loadSessionReplayRecord,
   loadSessionRecord,
+  loadPatchDeliverySnapshot,
+  loadQuiltDeliveryContext,
   markParticipantJoined,
   markParticipantLeft,
   persistSnapshotIfNeeded,
   persistTilePlacement,
   persistTileRemoval,
 } from './db/index.js'
-import { applyDatabaseMigrationsIfNeeded } from './db/migrate.js'
+import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
 import type { SessionSummaryRecord } from './db/repository.js'
 import { defaultBounds, validatePlacement } from './domain/placementSolver.js'
 import { startRetentionJob } from './jobs/retention.js'
+import { resolveQuiltRooms, type PatchRoomAccess } from './realtime/quiltRooms.js'
+import {
+  decideLegacyRetirement,
+  isQuiltCanarySubject,
+  loadLegacyRetirementGates,
+  loadQuiltCanaryConfig,
+} from './migration/quiltRollout.js'
+import { configureQuiltTelemetry, emitQuiltTelemetry } from './migration/quiltTelemetry.js'
 
 type AuthoritativeSessionState = {
   session: Session
@@ -166,6 +180,47 @@ const isAggregatePayloadEnabledByDefault = parseBooleanFlag(process.env.FEATURE_
 const isChunkCanaryEnabled = parseBooleanFlag(process.env.FEATURE_CHUNK_CANARY_ENABLED, false)
 const canarySessionIds = parseCanarySessions(process.env.FEATURE_CHUNK_CANARY_SESSION_IDS)
 const isMultiReplicaReady = parseBooleanFlag(process.env.FEATURE_MULTI_REPLICA_READY, false)
+const isLegacyMutationCompatibilityEnabled = parseBooleanFlag(
+  process.env.FEATURE_LEGACY_MUTATION_COMPATIBILITY_ENABLED,
+  true,
+)
+const quiltCanaryConfig = loadQuiltCanaryConfig()
+const legacyRetirementGates = loadLegacyRetirementGates()
+const legacyRetirementDecision = decideLegacyRetirement(legacyRetirementGates)
+const QUILT_PROTOCOL_LIMITS: QuiltProtocolLimits = {
+  maxRoomsPerConnection: Number(process.env.QUILT_V2_MAX_ROOMS_PER_CONNECTION ?? 64),
+  maxRoomsPerRequest: Number(process.env.QUILT_V2_MAX_ROOMS_PER_REQUEST ?? 32),
+  maxChunksPerRequest: Number(process.env.QUILT_V2_MAX_CHUNKS_PER_REQUEST ?? 64),
+  maxRoomChurnPerMinute: Number(process.env.QUILT_V2_MAX_ROOM_CHURN_PER_MINUTE ?? 120),
+  maxSnapshotTiles: Number(process.env.QUILT_V2_MAX_SNAPSHOT_TILES ?? 2_000),
+  maxPayloadBytes: Number(process.env.QUILT_V2_MAX_PAYLOAD_BYTES ?? 256 * 1024),
+  source: 'canary-default',
+}
+
+export const buildPatchRoomAccess = (patch: {
+  id: string
+  state: PatchRoomAccess['state']
+  isMember: boolean
+}): PatchRoomAccess => ({
+  patchId: patch.id,
+  state: patch.state,
+  publishesExistence: patch.state !== 'deleted' && patch.state !== 'deletion_requested',
+  publicFine: false,
+  publicAggregate: patch.state === 'active' || patch.state === 'unclaimed' || patch.state === 'suspended',
+  principalFine: patch.isMember && patch.state !== 'deleted' && patch.state !== 'deletion_requested',
+  principalAggregate: patch.isMember && patch.state !== 'deleted',
+  principalPresence: patch.isMember && patch.state === 'active',
+  principalEvents: patch.isMember && patch.state !== 'deleted' && patch.state !== 'deletion_requested',
+})
+
+export const isQuiltRoomRequest = (value: unknown): value is QuiltRoomRequest => {
+  if (!isObjectRecord(value)) return false
+  return typeof value.requestId === 'string'
+    && (value.kind === 'fine' || value.kind === 'aggregate' || value.kind === 'presence' || value.kind === 'events')
+    && typeof value.row === 'number'
+    && typeof value.column === 'number'
+    && (value.chunkIds === undefined || Array.isArray(value.chunkIds))
+}
 
 const getRealtimeCapabilities = (sessionId: string): RealtimeCapabilities => {
   const canarySessionEnabled = !isChunkCanaryEnabled || canarySessionIds.has(sessionId)
@@ -492,6 +547,15 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
 
   console.log(line)
 }
+
+configureQuiltTelemetry((event) => {
+  const canary = event.canary || (
+    event.quiltId !== undefined
+    && isQuiltCanarySubject({ quiltId: event.quiltId, principalId: event.principalId }, quiltCanaryConfig)
+  )
+  writeLog(event.name === 'dual_read_parity' && event.dimensions?.matched === false ? 'warn' : 'info',
+    `quilt_migration_${event.name}`, { ...event, canary })
+})
 
 const DB_CONNECT_MAX_ATTEMPTS = Number(process.env.DB_CONNECT_MAX_ATTEMPTS ?? 10)
 const DB_CONNECT_RETRY_BASE_MS = Number(process.env.DB_CONNECT_RETRY_BASE_MS ?? 3_000)
@@ -1374,6 +1438,110 @@ if (isTestControlEnabled) {
       res.status(500).json({ error: 'Failed to reset test state' })
     }
   })
+
+  app.post('/test/quilt/setup', async (req, res) => {
+    if (req.header(TEST_CONTROL_HEADER) !== testControlToken) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+
+    const canvasId = crypto.randomUUID()
+    const quiltId = crypto.randomUUID()
+    const patchId = crypto.randomUUID()
+    try {
+      await getDatabaseBundle().db.transaction(async (tx) => {
+        await tx.execute(sql`INSERT INTO canvases (id, version) VALUES (${canvasId}, 0)`)
+        await tx.execute(sql`
+          INSERT INTO quilts (id, legacy_canvas_id, patch_rows, patch_columns, patch_width, patch_height, topology, protocol_version)
+          VALUES (${quiltId}, ${canvasId}, 1, 2, 31.2, 20.4, 'toroidal', 2)
+        `)
+        await tx.execute(sql`
+          INSERT INTO patches (id, quilt_id, row, "column", state, revision)
+          VALUES (${patchId}, ${quiltId}, 0, 0, 'active', 0)
+        `)
+      })
+      res.status(200).json({ canvasId, quiltId, patchId })
+    } catch (error) {
+      writeLog('error', 'test_quilt_setup_failed', { error })
+      res.status(500).json({ error: 'Failed to seed quilt' })
+    }
+  })
+
+  app.post('/test/quilt/publish', async (req, res) => {
+    if (req.header(TEST_CONTROL_HEADER) !== testControlToken) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+    if (!isObjectRecord(req.body) || typeof req.body.quiltId !== 'string' || typeof req.body.patchId !== 'string') {
+      res.status(400).json({ error: 'Invalid publish payload' })
+      return
+    }
+
+    const operationId = crypto.randomUUID()
+    const eventId = crypto.randomUUID()
+    const attachment = typeof req.body.attachment === 'string' ? req.body.attachment : ''
+    try {
+      const result = await getDatabaseBundle().db.transaction(async (tx) => {
+        const updated = await tx.execute(sql`
+          UPDATE patches
+          SET revision = revision + 1, updated_at = now()
+          WHERE id = ${req.body.patchId} AND quilt_id = ${req.body.quiltId}
+          RETURNING revision
+        `)
+        const revision = Number(updated.rows[0]?.revision)
+        if (!Number.isInteger(revision)) throw new Error('Patch not found')
+        await tx.execute(sql`
+          INSERT INTO patch_operations (patch_id, op_seq, event_id, operation_id, op_type, payload)
+          VALUES (
+            ${req.body.patchId},
+            ${revision},
+            ${eventId},
+            ${operationId},
+            'tile_removed',
+            ${JSON.stringify({ tileId: crypto.randomUUID(), attachment })}::jsonb
+          )
+        `)
+        return revision
+      })
+
+      const canonicalRoomId = `quilt:${req.body.quiltId}:patch:0:0:aggregate`
+      emitQuiltTelemetry({
+        name: 'attachment_use',
+        quiltId: req.body.quiltId,
+        canary: true,
+        measurements: { attachmentBytes: Buffer.byteLength(attachment, 'utf8') },
+        dimensions: { source: 'adapter-recovery-test' },
+      })
+      io.to(canonicalRoomId).emit('quilt_patch_event', {
+        quiltId: req.body.quiltId,
+        canonicalRoomId,
+        patchId: req.body.patchId,
+        eventId,
+        opSeq: result,
+        revision: result,
+        operation: {
+          tileId: crypto.randomUUID(),
+          removedBy: 'system-test',
+          opSeq: result,
+          revision: result,
+        },
+        testAttachment: attachment,
+      })
+      res.status(200).json({ canonicalRoomId, eventId, revision: result, attachmentBytes: Buffer.byteLength(attachment) })
+    } catch (error) {
+      writeLog('error', 'test_quilt_publish_failed', { error })
+      res.status(500).json({ error: 'Failed to publish quilt event' })
+    }
+  })
+
+  app.post('/test/shutdown', (req, res) => {
+    if (req.header(TEST_CONTROL_HEADER) !== testControlToken) {
+      res.status(403).json({ error: 'Forbidden' })
+      return
+    }
+    res.status(202).json({ shuttingDown: true })
+    setImmediate(() => void shutdown('test-control'))
+  })
 }
 
 // ─── Initialize Socket.IO ────────────────────────────────────────────────────
@@ -1461,6 +1629,8 @@ io.use((socket, next) => {
   // Store per-socket metadata
   socket.data.sessionId = auth.sessionId
   socket.data.clientId = auth.clientId
+  socket.data.protocolVersion = auth.protocolVersion === 2 ? 2 : 1
+  socket.data.enableProtocolV1Compatibility = auth.enableProtocolV1Compatibility === true
 
   writeLog('info', 'socket_connecting', {
     clientId: auth.clientId,
@@ -1475,6 +1645,13 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   const { sessionId, clientId } = socket.data
   registerClientSocket(sessionId, clientId, socket.id)
+  let selectedProtocolVersion: 1 | 2 = 1
+    let canaryTelemetryEnabled = false
+    let selectedQuiltId: string | undefined
+    let selectedPrincipalId: string | undefined
+  let quiltRoomIds = new Set<string>()
+  let roomChurnWindowStartedAt = Date.now()
+  let roomChurnInWindow = 0
 
   socket.onAny((eventName, ...args) => {
     writeLog('debug', 'socket_event_received', {
@@ -1487,6 +1664,34 @@ io.on('connection', (socket) => {
 
   const initializeConnection = async (): Promise<void> => {
     const joinedAt = Date.now()
+
+    if (socket.data.protocolVersion === 2) {
+      const deliveryContext = await loadQuiltDeliveryContext({ sessionId })
+      if (deliveryContext?.topology.protocolVersion === 2) {
+        selectedProtocolVersion = 2
+        selectedQuiltId = deliveryContext.topology.quiltId
+        selectedPrincipalId = deliveryContext.principalId
+        canaryTelemetryEnabled = isQuiltCanarySubject({
+          quiltId: selectedQuiltId,
+          principalId: selectedPrincipalId,
+        }, quiltCanaryConfig)
+        socket.emit('quilt_protocol', {
+          selectedProtocolVersion: 2,
+          v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
+          mutationEnabled: false,
+          canaryTelemetryEnabled,
+          topology: deliveryContext.topology,
+          limits: QUILT_PROTOCOL_LIMITS,
+        })
+        return
+      }
+    }
+
+    socket.emit('quilt_protocol', {
+      selectedProtocolVersion: 1,
+      v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
+      mutationEnabled: isLegacyMutationCompatibilityEnabled,
+    })
 
     socket.join(sessionId)
     const connectionState = await initializeParticipantPresence(sessionId, clientId, joinedAt)
@@ -1535,6 +1740,15 @@ io.on('connection', (socket) => {
     })
 
     if (!isPlaceTilePayload(payload)) {
+      invokeAckSafely(ack, {
+        placed: null,
+        rejected: true,
+        reason: 'PLACEMENT_REJECTED',
+      })
+      return
+    }
+
+    if (selectedProtocolVersion === 2 || !isLegacyMutationCompatibilityEnabled) {
       invokeAckSafely(ack, {
         placed: null,
         rejected: true,
@@ -1647,7 +1861,7 @@ io.on('connection', (socket) => {
       payload,
     })
 
-    if (!isRemoveTilePayload(payload) || !isValidTileId(payload.tileId)) {
+    if (selectedProtocolVersion === 2 || !isRemoveTilePayload(payload) || !isValidTileId(payload.tileId)) {
       invokeAckSafely(ack, { removed: false })
       return
     }
@@ -1720,6 +1934,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('pointer_move', (payload) => {
+    if (selectedProtocolVersion === 2) return
     if (!isPointerMovePayload(payload)) {
       return
     }
@@ -1737,6 +1952,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('subscribe_chunks', async (payload) => {
+    if (selectedProtocolVersion === 2) return
     if (!isSubscribeChunksPayload(payload) || payload.canvasId !== sessionId) {
       return
     }
@@ -1802,6 +2018,7 @@ io.on('connection', (socket) => {
           sessionId,
           clientId,
           chunks,
+          parityReport: chunkRead.parityReport,
         })
       }
 
@@ -1814,6 +2031,12 @@ io.on('connection', (socket) => {
 
           if (clientCursor.opSeq > chunkRead.opSeq || clientCursor.revision > chunkRead.revision) {
             chunkTelemetry.resyncEvents += 1
+            emitQuiltTelemetry({
+              name: 'resync',
+              canary: false,
+              measurements: { totalResyncEvents: chunkTelemetry.resyncEvents },
+              dimensions: { protocol: 'chunk-v1', reason: 'REVISION_MISMATCH' },
+            })
             emitChunkTelemetry('chunk_resync_required', {
               sessionId,
               clientId,
@@ -1845,6 +2068,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('unsubscribe_chunks', (payload) => {
+    if (selectedProtocolVersion === 2) return
     if (!isUnsubscribeChunksPayload(payload) || payload.canvasId !== sessionId) {
       return
     }
@@ -1869,6 +2093,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('request_chunk_snapshot', async (payload) => {
+    if (selectedProtocolVersion === 2) return
     if (!isRequestChunkSnapshotPayload(payload) || payload.canvasId !== sessionId) {
       return
     }
@@ -1916,6 +2141,7 @@ io.on('connection', (socket) => {
           sessionId,
           clientId,
           chunks: payload.chunks,
+            parityReport: chunkRead.parityReport,
         })
       }
     } catch (error) {
@@ -1928,6 +2154,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('selection_update', (payload) => {
+    if (selectedProtocolVersion === 2) return
     if (!isSelectionUpdatePayload(payload)) {
       return
     }
@@ -1957,6 +2184,7 @@ io.on('connection', (socket) => {
   })
 
   socket.on('request_snapshot', async () => {
+    if (selectedProtocolVersion === 2) return
     try {
       const record = await loadSessionReplayRecord(sessionId)
       const sessionState = getSessionState(sessionId)
@@ -1986,6 +2214,170 @@ io.on('connection', (socket) => {
         sessionId,
         clientId,
         error,
+      })
+    }
+  })
+
+  socket.on('subscribe_quilt_area', async (payload, ack) => {
+    if (
+      selectedProtocolVersion !== 2
+      || !isObjectRecord(payload)
+      || typeof payload.quiltId !== 'string'
+      || !Array.isArray(payload.rooms)
+      || payload.rooms.some((room) => !isQuiltRoomRequest(room))
+    ) {
+      invokeAckSafely<SubscribeQuiltAreaAck>(ack, {
+        outcomes: [{ requestId: '', status: 'invalid', reason: 'PROTOCOL_OR_PAYLOAD' }],
+        acceptedCursors: {},
+      })
+      return
+    }
+
+    try {
+      const deliveryContext = await loadQuiltDeliveryContext({ sessionId })
+      if (!deliveryContext || deliveryContext.topology.quiltId !== payload.quiltId) {
+        invokeAckSafely<SubscribeQuiltAreaAck>(ack, {
+          outcomes: payload.rooms.map((room) => ({
+            requestId: room.requestId,
+            status: 'forbidden',
+            reason: 'QUILT_NOT_VISIBLE',
+          })),
+          acceptedCursors: {},
+        })
+        return
+      }
+
+      const now = Date.now()
+      if (now - roomChurnWindowStartedAt >= 60_000) {
+        roomChurnWindowStartedAt = now
+        roomChurnInWindow = 0
+      }
+
+      const accessByAddress = new Map(deliveryContext.patches.map((patch) => [
+        `${patch.row}:${patch.column}`,
+        buildPatchRoomAccess(patch),
+      ]))
+      const resolution = resolveQuiltRooms(payload.rooms, {
+        topology: deliveryContext.topology,
+        principalId: deliveryContext.principalId,
+        currentRoomIds: quiltRoomIds,
+        churnInWindow: roomChurnInWindow,
+        accessByAddress,
+        limits: QUILT_PROTOCOL_LIMITS,
+      })
+      const nextRoomIds = new Set(resolution.accepted.map((room) => room.canonicalRoomId))
+        const priorRoomCount = quiltRoomIds.size
+      for (const existingRoomId of quiltRoomIds) {
+        if (!nextRoomIds.has(existingRoomId)) await socket.leave(existingRoomId)
+      }
+      for (const nextRoomId of nextRoomIds) {
+        if (!quiltRoomIds.has(nextRoomId)) {
+          await socket.join(nextRoomId)
+          roomChurnInWindow += 1
+        }
+      }
+      quiltRoomIds = nextRoomIds
+      emitQuiltTelemetry({
+        name: 'room_churn',
+        quiltId: deliveryContext.topology.quiltId,
+        principalId: deliveryContext.principalId,
+        canary: canaryTelemetryEnabled,
+        measurements: {
+          priorRoomCount,
+          nextRoomCount: nextRoomIds.size,
+          churnInWindow: roomChurnInWindow,
+        },
+      })
+
+      const acceptedCursors: SubscribeQuiltAreaAck['acceptedCursors'] = {}
+      const snapshots: Array<Parameters<ServerToClientEvents['quilt_patch_snapshot']>[0]> = []
+      const budgetFailures = new Map<string, string>()
+      for (const room of resolution.accepted) {
+        const snapshot = await loadPatchDeliverySnapshot(room.patchId, {
+          principalId: deliveryContext.principalId,
+          canary: canaryTelemetryEnabled,
+        })
+        const cursor = {
+          patchId: room.patchId,
+          opSeq: snapshot.opSeq,
+          revision: snapshot.revision,
+          eventId: snapshot.eventId,
+        }
+        acceptedCursors[room.canonicalRoomId] = cursor
+        const suppliedCursor = payload.cursors?.[room.canonicalRoomId]
+        const cursorMatches = suppliedCursor?.opSeq === cursor.opSeq
+          && suppliedCursor.revision === cursor.revision
+          && suppliedCursor.eventId === cursor.eventId
+        if (cursorMatches || room.kind === 'presence' || room.kind === 'events') continue
+
+        const roomTiles = room.kind === 'aggregate' ? [] : snapshot.tiles
+        if (roomTiles.length > QUILT_PROTOCOL_LIMITS.maxSnapshotTiles) {
+          budgetFailures.set(room.requestId, 'SNAPSHOT_TILES')
+          delete acceptedCursors[room.canonicalRoomId]
+          continue
+        }
+        const scopedSnapshot = {
+          quiltId: deliveryContext.topology.quiltId,
+          canonicalRoomId: room.canonicalRoomId,
+          patchId: room.patchId,
+          tiles: roomTiles,
+          cursor,
+        }
+        const snapshotBytes = Buffer.byteLength(JSON.stringify(scopedSnapshot), 'utf8')
+        emitQuiltTelemetry({
+          name: 'snapshot_bytes',
+          quiltId: deliveryContext.topology.quiltId,
+          principalId: deliveryContext.principalId,
+          canary: canaryTelemetryEnabled,
+          measurements: { snapshotBytes, tileCount: roomTiles.length },
+          dimensions: { kind: room.kind },
+        })
+        if (snapshotBytes > QUILT_PROTOCOL_LIMITS.maxPayloadBytes) {
+
+            socket.on('quilt_client_runtime_metrics', (payload: QuiltClientRuntimeMetrics) => {
+              if (
+                !canaryTelemetryEnabled
+                || !selectedQuiltId
+                || payload.quiltId !== selectedQuiltId
+                || Object.values(payload).some((value) => typeof value === 'number' && (!Number.isFinite(value) || value < 0))
+              ) return
+
+              emitQuiltTelemetry({
+                name: 'client_runtime',
+                quiltId: selectedQuiltId,
+                principalId: selectedPrincipalId,
+                canary: true,
+                measurements: {
+                  retainedPatchCount: payload.retainedPatchCount,
+                  retainedTileCount: payload.retainedTileCount,
+                  sceneObjectCount: payload.sceneObjectCount,
+                  drawCalls: payload.drawCalls,
+                  frameTimeMs: payload.frameTimeMs,
+                },
+              })
+            })
+          budgetFailures.set(room.requestId, 'PAYLOAD_BYTES')
+          delete acceptedCursors[room.canonicalRoomId]
+          continue
+        }
+        snapshots.push(scopedSnapshot)
+      }
+
+      const outcomes = resolution.outcomes.map((outcome) => {
+        const reason = budgetFailures.get(outcome.requestId)
+        return reason ? { requestId: outcome.requestId, status: 'budget-exceeded' as const, reason } : outcome
+      })
+      invokeAckSafely<SubscribeQuiltAreaAck>(ack, { outcomes, acceptedCursors })
+      for (const snapshot of snapshots) socket.emit('quilt_patch_snapshot', snapshot)
+    } catch (error) {
+      writeLog('error', 'subscribe_quilt_area_failed', { sessionId, clientId, error })
+      invokeAckSafely<SubscribeQuiltAreaAck>(ack, {
+        outcomes: payload.rooms.map((room) => ({
+          requestId: room.requestId,
+          status: 'invalid',
+          reason: 'SUBSCRIPTION_FAILED',
+        })),
+        acceptedCursors: {},
       })
     }
   })
@@ -2039,7 +2431,7 @@ io.on('connection', (socket) => {
 
 const retentionJob = process.env.NODE_ENV === 'test' ? null : startRetentionJob()
 
-const shutdown = async (signal: string): Promise<void> => {
+async function shutdown(signal: string): Promise<void> {
   writeLog('info', 'shutdown_signal_received', { signal })
   retentionJob?.stop()
 
@@ -2081,10 +2473,18 @@ if (process.env.NODE_ENV !== 'test') {
     featureMultiReplicaReady: isMultiReplicaReady,
     replicaId: REPLICA_ID,
   })
+  writeLog(legacyRetirementGates.requested && !legacyRetirementDecision.retireLegacy ? 'warn' : 'info',
+    'legacy_retirement_status', {
+      requested: legacyRetirementGates.requested,
+      retireLegacy: legacyRetirementDecision.retireLegacy,
+      unmetGates: legacyRetirementDecision.unmetGates,
+      legacyProtocolAvailable: true,
+      legacyStorageAvailable: true,
+    })
 
   void verifyDatabaseConnectivity()
     .then(() => {
-      return applyDatabaseMigrationsIfNeeded()
+      return prepareDatabaseSchemaForStartup()
     })
     .then((migrationsApplied) => {
       configureRealtimeAdapter()
@@ -2119,7 +2519,7 @@ if (isTestControlEnabled) {
 
   void verifyDatabaseConnectivity()
     .then(() => {
-      return applyDatabaseMigrationsIfNeeded()
+      return prepareDatabaseSchemaForStartup()
     })
     .then((migrationsApplied) => {
       configureRealtimeAdapter()

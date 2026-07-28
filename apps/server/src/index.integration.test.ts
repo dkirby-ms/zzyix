@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyPlaceTile,
+  buildPatchRoomAccess,
   buildListSessionsResponse,
   createAuthoritativeSessionState,
   finalizeParticipantPresence,
   getSessionState,
   initializeParticipantPresence,
+  isQuiltRoomRequest,
   isPlaceTilePayload,
   isSelectionUpdatePayload,
   registerClientSocket,
@@ -872,5 +874,45 @@ describe('multi-client collaboration', () => {
     expect(legacyIdentity).not.toBe(chunkIdentity)
     expect(legacyIdentity).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd:0:0')
     expect(chunkIdentity).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd:1:0')
+  })
+})
+
+describe('protocol-v2 authorization boundary', () => {
+  it('does not infer fine, presence, or event visibility from transport identity', () => {
+    const anonymousPatch = buildPatchRoomAccess({
+      id: 'patch-1',
+      state: 'active',
+      isMember: false,
+    })
+
+    expect(anonymousPatch).toMatchObject({
+      publicFine: false,
+      publicAggregate: true,
+      principalFine: false,
+      principalPresence: false,
+      principalEvents: false,
+    })
+  })
+
+  it('grants member surfaces according to lifecycle without bypassing deletion', () => {
+    expect(buildPatchRoomAccess({ id: 'patch-1', state: 'active', isMember: true })).toMatchObject({
+      principalFine: true,
+      principalAggregate: true,
+      principalPresence: true,
+      principalEvents: true,
+    })
+    expect(buildPatchRoomAccess({ id: 'patch-1', state: 'deleted', isMember: true })).toMatchObject({
+      publishesExistence: false,
+      principalFine: false,
+      principalAggregate: false,
+      principalPresence: false,
+      principalEvents: false,
+    })
+  })
+
+  it('validates each requested room before database or adapter work', () => {
+    expect(isQuiltRoomRequest({ requestId: 'fine:0:0', kind: 'fine', row: 0, column: 0 })).toBe(true)
+    expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'owner', row: 0, column: 0 })).toBe(false)
+    expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'fine', row: '0', column: 0 })).toBe(false)
   })
 })

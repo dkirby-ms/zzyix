@@ -88,8 +88,14 @@ export const GridOverlay = ({
   tiles,
   bounds,
   activeSlotId,
+  topology,
 }: GridOverlayProps) => {
-  const viewport = useVisibleWorldViewport(bounds)
+  const viewportFallback = 'mode' in bounds
+    ? bounds.mode === 'bounded'
+      ? bounds.bounds
+      : { minX: -5, maxX: 5, minY: -5, maxY: 5 }
+    : bounds
+  const viewport = useVisibleWorldViewport(viewportFallback)
   const groups = useMemo(
     () => buildGridOverlaySegments({
       pattern,
@@ -98,8 +104,9 @@ export const GridOverlay = ({
       tiles,
       bounds,
       activeSlotId,
+      topology,
     }),
-    [activeShape, activeSlotId, bounds, pattern, tiles, viewport],
+    [activeShape, activeSlotId, bounds, pattern, tiles, topology, viewport],
   )
 
   return (

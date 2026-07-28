@@ -59,6 +59,11 @@ import type {
   ChunkTileRemovedPayload,
   ChunkPayloadMode,
   RealtimeCapabilities,
+  QuiltPatchCursor,
+  QuiltPatchEventPayload,
+  QuiltPatchResyncRequiredPayload,
+  QuiltProtocolHandshake,
+  QuiltScopedSnapshotPayload,
 } from '../../server/src/contracts'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
@@ -79,6 +84,17 @@ import {
   type RemoteCollaboratorMap,
 } from './domain/collaboratorUtils'
 import { registerCanvasTestApi, toCanvasTestTileSnapshot } from './test/canvasTestApi'
+import {
+  applyQuiltPatchPlacement,
+  applyQuiltPatchRemoval,
+  createQuiltCache,
+  evictQuiltCache,
+  mergeQuiltPatchSnapshot,
+  selectQuiltCursors,
+  selectQuiltTiles,
+  setQuiltSelection,
+  type QuiltCacheState,
+} from './domain/quiltCache'
 import './App.css'
 
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
@@ -87,6 +103,7 @@ const CHUNK_SOFT_SUBSCRIPTION_LIMIT = 64
 const CHUNK_HARD_SUBSCRIPTION_LIMIT = 128
 const CHUNK_MOVEMENT_HYSTERESIS_RATIO = 0.25
 const CHUNK_ZOOM_HYSTERESIS = 0.5
+const QUILT_CACHE_PATCH_BUDGET = 64
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
 
@@ -354,10 +371,14 @@ function App() {
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
   const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
+  const [quiltProtocol, setQuiltProtocol] = useState<QuiltProtocolHandshake | null>(null)
+  const [quiltCache, setQuiltCache] = useState<QuiltCacheState>(createQuiltCache)
+  const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
   const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
   const activeTileRef = useRef(activeTileUiState.activeTile)
   const sequencedStateRef = useRef(sequencedState)
+  const quiltCursorsRef = useRef<Record<string, QuiltPatchCursor>>({})
   const ghostRef = useRef(ghost)
   const ghostVisibleRef = useRef(ghostVisible)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
@@ -385,11 +406,17 @@ function App() {
     unsubscribeEvents: 0,
     resyncEvents: 0,
   })
+  const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const clientId = useMemo(() => ensureClientId(), [])
   const serverUrl = useMemo(() => resolveServerUrl(), [])
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
+  const isQuiltV2 = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology !== undefined
+  const visibleTiles = useMemo(
+    () => isQuiltV2 ? selectQuiltTiles(quiltCache) : sequencedState.tiles,
+    [isQuiltV2, quiltCache, sequencedState.tiles],
+  )
 
   useEffect(() => {
     activeTileRef.current = activeTile
@@ -479,6 +506,9 @@ function App() {
     setMode('lobby')
     setSessionId(null)
     setRealtimeCapabilities(null)
+    setQuiltProtocol(null)
+    setQuiltCache(createQuiltCache())
+    quiltCursorsRef.current = {}
     setActiveChunkIds([])
     setCollaborators({})
   }, [])
@@ -533,6 +563,57 @@ function App() {
       }),
     )
     setCollaborators((prev) => mergeCollaboratorsFromSnapshot(prev, payload.clients))
+  }, [])
+
+  const onQuiltProtocol = useCallback((payload: QuiltProtocolHandshake): void => {
+    setQuiltProtocol(payload)
+    if (payload.selectedProtocolVersion !== 2 || !payload.topology) return
+
+    setRealtimeCapabilities(null)
+    setWorldBounds({
+      minX: 0,
+      maxX: payload.topology.patchColumns * payload.topology.patchWidth,
+      minY: 0,
+      maxY: payload.topology.patchRows * payload.topology.patchHeight,
+    })
+  }, [])
+
+  const onQuiltPatchSnapshot = useCallback((payload: QuiltScopedSnapshotPayload): void => {
+    quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
+    setQuiltCache((previous) => mergeQuiltPatchSnapshot(previous, {
+      patchId: payload.patchId,
+      roomId: payload.canonicalRoomId,
+      tiles: payload.tiles,
+      cursor: payload.cursor,
+    }))
+    setSequencedState((previous) => ({ ...previous, lastOpSeq: Math.max(previous.lastOpSeq, payload.cursor.opSeq), revision: Math.max(previous.revision, payload.cursor.revision) }))
+  }, [])
+
+  const onQuiltPatchEvent = useCallback((payload: QuiltPatchEventPayload): void => {
+    quiltCursorsRef.current[payload.canonicalRoomId] = {
+      patchId: payload.patchId,
+      opSeq: payload.opSeq,
+      revision: payload.revision,
+      eventId: payload.eventId,
+    }
+
+    const operation = payload.operation
+    if ('tile' in operation) {
+      setQuiltCache((previous) => applyQuiltPatchPlacement(previous, payload.patchId, {
+        ...operation.tile,
+        placedBy: operation.placedBy,
+      }, quiltCursorsRef.current[payload.canonicalRoomId]))
+      setSequencedState((previous) => ({ ...previous, lastOpSeq: Math.max(previous.lastOpSeq, payload.opSeq), revision: Math.max(previous.revision, payload.revision) }))
+      return
+    }
+
+    setQuiltCache((previous) => applyQuiltPatchRemoval(previous, payload.patchId, operation.tileId, quiltCursorsRef.current[payload.canonicalRoomId]))
+    setSequencedState((previous) => ({ ...previous, lastOpSeq: Math.max(previous.lastOpSeq, payload.opSeq), revision: Math.max(previous.revision, payload.revision) }))
+  }, [])
+
+  const onQuiltPatchResyncRequired = useCallback((payload: QuiltPatchResyncRequiredPayload): void => {
+    quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
+    setQuiltSubscriptionEpoch((previous) => previous + 1)
   }, [])
 
   const onTilePlaced = useCallback((payload: TilePlacedPayload): void => {
@@ -675,6 +756,7 @@ function App() {
   }, [])
 
   const onSelectionUpdate = useCallback((payload: SelectionUpdatePayload): void => {
+    setQuiltCache((previous) => setQuiltSelection(previous, payload.clientId, payload.tileId))
     setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
       present: true,
       selectionTileId: payload.tileId,
@@ -706,6 +788,17 @@ function App() {
       })),
     [activeCollaborators, clientId],
   )
+
+  useEffect(() => {
+    if (!isQuiltV2) return
+    setQuiltCache((previous) => {
+      const activePatchIds = new Set<string>()
+      for (const patch of Object.values(previous.patches)) {
+        if (activeChunkIds.some((chunkId) => patch.chunkIds.includes(chunkId))) activePatchIds.add(patch.patchId)
+      }
+      return evictQuiltCache(previous, activePatchIds, QUILT_CACHE_PATCH_BUDGET)
+    })
+  }, [activeChunkIds, isQuiltV2])
 
   const emitPointerMove = useCallback((position: { x: number; y: number }): void => {
     const socket = socketActionRef.current
@@ -814,9 +907,30 @@ function App() {
     onChunkTileRemoved,
     onChunkResyncRequired,
     realtimeCapabilities?.chunkStreamingEnabled ?? false,
+    onQuiltProtocol,
+    onQuiltPatchSnapshot,
+    onQuiltPatchEvent,
+    onQuiltPatchResyncRequired,
   )
 
   const connectionState = useConnectionStatus(socketRef)
+
+  useEffect(() => {
+    if (!quiltProtocol?.canaryTelemetryEnabled || !quiltProtocol.topology) return
+
+    const intervalId = window.setInterval(() => {
+      const socket = socketActionRef.current
+      if (!socket?.connected) return
+      socket.emit('quilt_client_runtime_metrics', {
+        quiltId: quiltProtocol.topology!.quiltId,
+        retainedPatchCount: Object.keys(quiltCache.patches).length,
+        retainedTileCount: visibleTiles.length,
+        ...sceneMetricsRef.current,
+      })
+    }, 10_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [quiltCache.patches, quiltProtocol, visibleTiles.length])
 
   const onViewportChanged = useCallback((payload: {
     center: { x: number; y: number }
@@ -843,14 +957,63 @@ function App() {
 
     lastChunkViewportRef.current = payload
 
+    const topologyMode = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology?.topology === 'toroidal'
+      ? {
+          mode: 'toroidal' as const,
+          chunkColumns: Math.max(1, Math.ceil(
+            quiltProtocol.topology.patchColumns * quiltProtocol.topology.patchWidth / CHUNK_WORLD_SIZE,
+          )),
+          chunkRows: Math.max(1, Math.ceil(
+            quiltProtocol.topology.patchRows * quiltProtocol.topology.patchHeight / CHUNK_WORLD_SIZE,
+          )),
+        }
+      : { mode: 'unbounded' as const }
     const nextChunkIds = applyChunkSubscriptionBudgets(
-      viewportToChunkIds(payload.viewport, CHUNK_WORLD_SIZE, CHUNK_PREFETCH_RING),
+      viewportToChunkIds(payload.viewport, CHUNK_WORLD_SIZE, CHUNK_PREFETCH_RING, topologyMode),
       CHUNK_SOFT_SUBSCRIPTION_LIMIT,
       CHUNK_HARD_SUBSCRIPTION_LIMIT,
     )
 
     setActiveChunkIds(nextChunkIds)
-  }, [])
+  }, [quiltProtocol])
+
+  useEffect(() => {
+    const socket = socketActionRef.current
+    const topology = quiltProtocol?.topology
+    if (!socket || !topology || quiltProtocol.selectedProtocolVersion !== 2) return
+
+    const grouped = new Map<string, { row: number; column: number; chunks: ChunkId[] }>()
+    for (const chunkId of activeChunkIds) {
+      const [rawColumn, rawRow] = chunkId.split(':')
+      const chunkColumn = Number(rawColumn)
+      const chunkRow = Number(rawRow)
+      const column = Math.floor((chunkColumn * CHUNK_WORLD_SIZE) / topology.patchWidth)
+      const row = Math.floor((chunkRow * CHUNK_WORLD_SIZE) / topology.patchHeight)
+      const canonicalColumn = ((column % topology.patchColumns) + topology.patchColumns) % topology.patchColumns
+      const canonicalRow = ((row % topology.patchRows) + topology.patchRows) % topology.patchRows
+      const key = `${canonicalRow}:${canonicalColumn}`
+      const entry = grouped.get(key) ?? { row: canonicalRow, column: canonicalColumn, chunks: [] }
+      entry.chunks.push(chunkId)
+      grouped.set(key, entry)
+    }
+
+    const kind = zoomTier === 'aggregate' ? 'aggregate' as const : 'fine' as const
+    const rooms = Array.from(grouped.values()).map((entry) => ({
+      requestId: `${kind}:${entry.row}:${entry.column}`,
+      kind,
+      row: entry.row,
+      column: entry.column,
+      chunkIds: entry.chunks,
+    }))
+
+    socket.emit('subscribe_quilt_area', {
+      quiltId: topology.quiltId,
+      rooms,
+      cursors: selectQuiltCursors(quiltCache),
+    }, (ack) => {
+      quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
+    })
+  }, [activeChunkIds, quiltCache, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
 
   useEffect(() => {
     const socket = socketActionRef.current
@@ -1042,8 +1205,8 @@ function App() {
 
   const resolveGhostFromPointer = useCallback(
     (pointer: { x: number; y: number }) =>
-      updateGhostTarget(pointer, activeTile, sequencedState.tiles, worldBounds, placementGuide),
-    [activeTile, placementGuide, sequencedState.tiles, worldBounds],
+      updateGhostTarget(pointer, activeTile, visibleTiles, isQuiltV2 ? { mode: 'unbounded' } : worldBounds, placementGuide, quiltProtocol?.topology),
+    [activeTile, isQuiltV2, placementGuide, quiltProtocol?.topology, visibleTiles, worldBounds],
   )
 
   useEffect(() => {
@@ -1082,7 +1245,7 @@ function App() {
   }, [activeTile.mirrored, activeTile.rotation, placementGuide.enabled])
 
   const placeFromState = useCallback((tileState: ActiveTile, ghostState: typeof ghost, tileSequenceState: SequencedTilesState): void => {
-    const result = tryPlaceTile(tileState, ghostState, tileSequenceState.tiles)
+    const result = tryPlaceTile(tileState, ghostState, visibleTiles)
     if (!result.placed) {
       triggerInvalidPulse()
       return
@@ -1117,14 +1280,14 @@ function App() {
       emitSelectionUpdate(ack.placed.id)
       setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
     })
-  }, [clientId, emitSelectionUpdate, socketRef, triggerInvalidPulse])
+  }, [clientId, emitSelectionUpdate, socketRef, triggerInvalidPulse, visibleTiles])
 
   const updatePointer = useCallback((x: number, y: number): void => {
     const pointer = vec2(x, y)
     lastPointerWorldRef.current = pointer
     emitPointerMove(pointer)
     const updated = resolveGhostFromPointer(pointer)
-    emitSelectionUpdate(findHoveredTileId(x, y, sequencedState.tiles))
+    emitSelectionUpdate(findHoveredTileId(x, y, visibleTiles))
     setGhostVisible(true)
     setGhost((prev) => {
       const nextGhost = {
@@ -1141,7 +1304,7 @@ function App() {
       ghostRef.current = nextGhost
       return nextGhost
     })
-  }, [emitPointerMove, emitSelectionUpdate, ghostVisible, resolveGhostFromPointer, sequencedState.tiles])
+  }, [emitPointerMove, emitSelectionUpdate, ghostVisible, resolveGhostFromPointer, visibleTiles])
 
   const attemptPlace = useCallback((): void => {
     placeFromState(activeTile, ghost, sequencedState)
@@ -1157,7 +1320,16 @@ function App() {
       resyncEvents: clientTelemetryRef.current.resyncEvents,
       collaboratorIds: activeCollaborators.map((collaborator) => collaborator.clientId),
       activeTile,
-      tiles: sequencedState.tiles.map(toCanvasTestTileSnapshot),
+      tiles: visibleTiles.map(toCanvasTestTileSnapshot),
+      metrics: {
+        retainedPatchCount: Object.keys(quiltCache.patches).length,
+        retainedTileCount: visibleTiles.length,
+        cursorCount: Object.keys(selectQuiltCursors(quiltCache)).length,
+        optimisticCount: Object.keys(quiltCache.optimistic).length,
+        undoCount: Object.keys(quiltCache.undo).length,
+        snapshotBytes: new TextEncoder().encode(JSON.stringify(quiltCache.patches)).byteLength,
+        ...sceneMetricsRef.current,
+      },
     }),
     joinSession: (nextSessionId) => {
       handleJoinSession(nextSessionId)
@@ -1281,8 +1453,12 @@ function App() {
     mode,
     placeFromState,
     resolveGhostFromPointer,
-    sequencedState.tiles,
+    sequencedState.revision,
+    quiltCache,
+    visibleTiles,
     sessionId,
+    socketRef,
+    triggerInvalidPulse,
     updatePointer,
   ])
 
@@ -1334,7 +1510,7 @@ function App() {
         onReturnToLobby={returnToLobby}
         connectionState={connectionState.status}
         collaboratorCount={activeCollaborators.length}
-        canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
+        canUndo={visibleTiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
         onUndo={handleUndo}
       />
       <div className="canvas-workspace">
@@ -1342,7 +1518,7 @@ function App() {
           <div className="status-strip" data-state={ghost.confidence}>
             <StatusIndicator connectionState={connectionState} />
             <span>{ghost.confidence.replace('-', ' ')}</span>
-            <span>{sequencedState.tiles.length} placed</span>
+            <span>{visibleTiles.length} placed</span>
           </div>
           {activeCollaborators.length > 0 && (
             <div className="collaborator-roster" aria-label="Active collaborators">
@@ -1376,7 +1552,7 @@ function App() {
           <CanvasErrorBoundary>
             <Suspense fallback={<CanvasLoadingFallback />}>
               <MosaicScene
-                tiles={sequencedState.tiles}
+                tiles={visibleTiles}
                 activeShape={activeTile.shape}
                 ghost={{
                   transform: ghost.current,
@@ -1398,6 +1574,10 @@ function App() {
                     }
                   : undefined}
                 worldBounds={worldBounds}
+                topology={isQuiltV2 && quiltProtocol.topology?.topology === 'toroidal' ? quiltProtocol.topology : undefined}
+                onSceneMetrics={(metrics) => {
+                  sceneMetricsRef.current = metrics
+                }}
                 cameraPan={cameraPan}
                 cameraPolicy={cameraPolicy}
                 onCameraPan={(deltaX, deltaY) => {
@@ -1445,7 +1625,7 @@ function App() {
               </div>
               <div className="debug-row">
                 <span className="debug-label">tiles</span>
-                <span className="debug-value">{sequencedState.tiles.length}</span>
+                <span className="debug-value">{visibleTiles.length}</span>
               </div>
             </div>
           )}

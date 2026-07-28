@@ -27,6 +27,7 @@
 // Increment on any breaking change (new required fields, removed events, etc.).
 export const SCHEMA_VERSION = '1.0.0'
 export const RUNTIME_CHUNK_WORLD_SIZE = 8
+export const QUILT_PROTOCOL_VERSION = 2
 
 // ─── Domain primitives ────────────────────────────────────────────────────────
 
@@ -239,12 +240,17 @@ export type ListSessionsResponse = {
 export type ConnectionAuth = {
   sessionId: string
   clientId: string
+  protocolVersion?: 1 | 2
+  enableProtocolV1Compatibility?: boolean
 }
 
 /** Per-socket metadata stored by Socket.IO (accessible as socket.data). */
 export type SocketData = {
   clientId: string
   sessionId: string
+  protocolVersion: 1 | 2
+  enableProtocolV1Compatibility: boolean
+  principalId?: string
 }
 
 // ── Event payload types ───────────────────────────────────────────────────────
@@ -446,6 +452,102 @@ export type ChunkResyncRequiredPayload = {
   reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
 }
 
+export type QuiltTopologyHandshake = {
+  quiltId: string
+  topology: 'bounded' | 'toroidal'
+  patchRows: number
+  patchColumns: number
+  patchWidth: number
+  patchHeight: number
+}
+
+export type QuiltProtocolLimits = {
+  maxRoomsPerConnection: number
+  maxRoomsPerRequest: number
+  maxChunksPerRequest: number
+  maxRoomChurnPerMinute: number
+  maxSnapshotTiles: number
+  maxPayloadBytes: number
+  source: 'canary-default' | 'measured'
+}
+
+export type QuiltProtocolHandshake = {
+  selectedProtocolVersion: 1 | 2
+  v1CompatibilityEnabled: boolean
+  mutationEnabled: boolean
+  canaryTelemetryEnabled?: boolean
+  topology?: QuiltTopologyHandshake
+  limits?: QuiltProtocolLimits
+}
+
+export type QuiltClientRuntimeMetrics = {
+  quiltId: string
+  retainedPatchCount: number
+  retainedTileCount: number
+  sceneObjectCount: number
+  drawCalls: number
+  frameTimeMs: number
+}
+
+export type QuiltRoomKind = 'fine' | 'aggregate' | 'presence' | 'events'
+
+export type QuiltRoomRequest = {
+  requestId: string
+  kind: QuiltRoomKind
+  row: number
+  column: number
+  chunkIds?: ChunkId[]
+}
+
+export type QuiltPatchCursor = {
+  patchId: string
+  opSeq: number
+  revision: number
+  eventId?: string
+}
+
+export type QuiltRoomOutcome =
+  | { requestId: string; status: 'accepted'; canonicalRoomId: string; cursor?: QuiltPatchCursor }
+  | { requestId: string; status: 'forbidden' | 'invalid' | 'budget-exceeded'; reason: string }
+
+export type SubscribeQuiltAreaPayload = {
+  quiltId: string
+  rooms: QuiltRoomRequest[]
+  cursors?: Record<string, QuiltPatchCursor>
+}
+
+export type SubscribeQuiltAreaAck = {
+  outcomes: QuiltRoomOutcome[]
+  acceptedCursors: Record<string, QuiltPatchCursor>
+}
+
+export type QuiltScopedSnapshotPayload = {
+  quiltId: string
+  canonicalRoomId: string
+  patchId: string
+  tiles: TileInstance[]
+  cursor: QuiltPatchCursor
+}
+
+export type QuiltPatchEventPayload = {
+  quiltId: string
+  canonicalRoomId: string
+  patchId: string
+  eventId: string
+  opSeq: number
+  revision: number
+  operation: TilePlacedPayload | TileRemovedPayload
+  testAttachment?: string
+}
+
+export type QuiltPatchResyncRequiredPayload = {
+  quiltId: string
+  canonicalRoomId: string
+  patchId: string
+  cursor: QuiltPatchCursor
+  reason: 'EVENT_GAP' | 'CURSOR_AHEAD' | 'SNAPSHOT_REQUIRED'
+}
+
 // ── Typed event maps ──────────────────────────────────────────────────────────
 // Pass these to Server<C, S, I, D> and Socket<C, S, I, D>.
 
@@ -467,10 +569,16 @@ export interface ClientToServerEvents {
   unsubscribe_chunks: (payload: UnsubscribeChunksPayload) => void
   /** Request chunk-scoped snapshots without reconnecting. */
   request_chunk_snapshot: (payload: RequestChunkSnapshotPayload) => void
+  /** Subscribe to authorized protocol-v2 quilt rooms and reconcile patch cursors. */
+  subscribe_quilt_area: (payload: SubscribeQuiltAreaPayload, ack: (response: SubscribeQuiltAreaAck) => void) => void
+  /** Submit sampled client runtime measurements for an authenticated canary subject. */
+  quilt_client_runtime_metrics: (payload: QuiltClientRuntimeMetrics) => void
 }
 
 /** Events emitted by the server, received by clients. */
 export interface ServerToClientEvents {
+  /** Announces the selected transport protocol and immutable quilt topology. */
+  quilt_protocol: (payload: QuiltProtocolHandshake) => void
   /** Sent once to the connecting socket after it joins the session room. */
   session_snapshot: (payload: SessionSnapshotPayload) => void
   /** Broadcast to all sockets in the session room when a tile is placed. */
@@ -495,6 +603,12 @@ export interface ServerToClientEvents {
   chunk_tile_removed: (payload: ChunkTileRemovedPayload) => void
   /** Emitted when chunk offsets diverge and chunk snapshot replay is required. */
   chunk_resync_required: (payload: ChunkResyncRequiredPayload) => void
+  /** Reconstructable protocol-v2 snapshot scoped to one accepted room. */
+  quilt_patch_snapshot: (payload: QuiltScopedSnapshotPayload) => void
+  /** Durable protocol-v2 event scoped to one accepted room. */
+  quilt_patch_event: (payload: QuiltPatchEventPayload) => void
+  /** Requests cursor-based recovery for one accepted room. */
+  quilt_patch_resync_required: (payload: QuiltPatchResyncRequiredPayload) => void
 }
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */

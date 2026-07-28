@@ -31,6 +31,17 @@ export type CanvasTestStateSnapshot = {
   collaboratorIds: string[]
   activeTile: ActiveTile
   tiles: CanvasTestTileSnapshot[]
+  metrics: {
+    retainedPatchCount: number
+    retainedTileCount: number
+    cursorCount: number
+    optimisticCount: number
+    undoCount: number
+    snapshotBytes: number
+    sceneObjectCount: number
+    drawCalls: number
+    frameTimeMs: number
+  }
 }
 
 export type CanvasTestApi = {

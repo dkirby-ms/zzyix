@@ -17,6 +17,12 @@ type MockSocket = {
   disconnect: ReturnType<typeof vi.fn>
 }
 
+const registeredHandler = <T extends (...args: any[]) => any>(socket: MockSocket, eventName: string): T => {
+  const call = socket.on.mock.calls.find(([event]) => event === eventName)
+  if (!call) throw new Error(`Missing handler for ${eventName}`)
+  return call[1] as T
+}
+
 const createMockSocket = (): MockSocket => ({
   id: 'socket-1',
   on: vi.fn(),
@@ -66,9 +72,10 @@ describe('useSocketConnection collaboration subscriptions', () => {
     )
 
     expect(ioMock).toHaveBeenCalledTimes(1)
-    expect(socket.on).toHaveBeenCalledWith('session_snapshot', callbacks.onSnapshot)
-    expect(socket.on).toHaveBeenCalledWith('tile_placed', callbacks.onTilePlaced)
-    expect(socket.on).toHaveBeenCalledWith('tile_removed', callbacks.onTileRemoved)
+    expect(socket.on).toHaveBeenCalledWith('quilt_protocol', expect.any(Function))
+    expect(socket.on).toHaveBeenCalledWith('session_snapshot', expect.any(Function))
+    expect(socket.on).toHaveBeenCalledWith('tile_placed', expect.any(Function))
+    expect(socket.on).toHaveBeenCalledWith('tile_removed', expect.any(Function))
     expect(socket.on).toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
     expect(socket.on).toHaveBeenCalledWith('pointer_update', callbacks.onPointerUpdate)
     expect(socket.on).toHaveBeenCalledWith('client_joined', callbacks.onClientJoined)
@@ -194,14 +201,62 @@ describe('useSocketConnection collaboration subscriptions', () => {
 
     unmount()
 
-    expect(socket.off).toHaveBeenCalledWith('session_snapshot', callbacks.onSnapshot)
-    expect(socket.off).toHaveBeenCalledWith('tile_placed', callbacks.onTilePlaced)
-    expect(socket.off).toHaveBeenCalledWith('tile_removed', callbacks.onTileRemoved)
+    expect(socket.off).toHaveBeenCalledWith('quilt_protocol', expect.any(Function))
+    expect(socket.off).toHaveBeenCalledWith('session_snapshot', expect.any(Function))
+    expect(socket.off).toHaveBeenCalledWith('tile_placed', expect.any(Function))
+    expect(socket.off).toHaveBeenCalledWith('tile_removed', expect.any(Function))
     expect(socket.off).toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
     expect(socket.off).toHaveBeenCalledWith('pointer_update', callbacks.onPointerUpdate)
     expect(socket.off).toHaveBeenCalledWith('client_joined', callbacks.onClientJoined)
     expect(socket.off).toHaveBeenCalledWith('client_left', callbacks.onClientLeft)
     expect(socket.off).toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
     expect(socket.disconnect).toHaveBeenCalledTimes(1)
+  })
+
+  it('negotiates v2 and suppresses duplicate v1 durable events unless the server selects v1', () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+    const onSnapshot = vi.fn()
+    const onTilePlaced = vi.fn()
+    const onTileRemoved = vi.fn()
+
+    renderHook(() => useSocketConnection(
+      'http://localhost:3001',
+      'session-1',
+      'client-1',
+      onSnapshot,
+      onTilePlaced,
+      onTileRemoved,
+    ))
+
+    expect(ioMock).toHaveBeenCalledWith('http://localhost:3001', expect.objectContaining({
+      auth: {
+        sessionId: 'session-1',
+        clientId: 'client-1',
+        protocolVersion: 2,
+        enableProtocolV1Compatibility: false,
+      },
+    }))
+
+    const protocol = registeredHandler<(payload: { selectedProtocolVersion: 1 | 2 }) => void>(socket, 'quilt_protocol')
+    const snapshot = registeredHandler<(payload: unknown) => void>(socket, 'session_snapshot')
+    const placed = registeredHandler<(payload: unknown) => void>(socket, 'tile_placed')
+    const removed = registeredHandler<(payload: unknown) => void>(socket, 'tile_removed')
+
+    protocol({ selectedProtocolVersion: 2 })
+    snapshot({})
+    placed({})
+    removed({})
+    expect(onSnapshot).not.toHaveBeenCalled()
+    expect(onTilePlaced).not.toHaveBeenCalled()
+    expect(onTileRemoved).not.toHaveBeenCalled()
+
+    protocol({ selectedProtocolVersion: 1 })
+    snapshot({})
+    placed({})
+    removed({})
+    expect(onSnapshot).toHaveBeenCalledTimes(1)
+    expect(onTilePlaced).toHaveBeenCalledTimes(1)
+    expect(onTileRemoved).toHaveBeenCalledTimes(1)
   })
 })

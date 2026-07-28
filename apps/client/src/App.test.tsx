@@ -789,6 +789,89 @@ describe('App lobby-first behavior', () => {
     expect(enabledSocketCall[16]).toBe(true)
   })
 
+  it('subscribes canonical v2 AOI rooms and replaces only the recovered patch', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'subscribe_quilt_area') callback?.({ outcomes: [], acceptedCursors: {} })
+    })
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[7] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock, on: vi.fn(), off: vi.fn(), connected: true } }
+      if (actionRef) actionRef.current = socketRef.current
+      return socketRef as any
+    })
+
+    render(<App />)
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+    expect(await screen.findByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onQuiltProtocol = socketCall[17] as (payload: any) => void
+    const onQuiltPatchSnapshot = socketCall[18] as (payload: any) => void
+
+    act(() => onQuiltProtocol({
+      selectedProtocolVersion: 2,
+      v1CompatibilityEnabled: false,
+      mutationEnabled: false,
+      topology: {
+        quiltId: 'quilt-1',
+        topology: 'toroidal',
+        patchRows: 1,
+        patchColumns: 2,
+        patchWidth: RUNTIME_CHUNK_WORLD_SIZE,
+        patchHeight: RUNTIME_CHUNK_WORLD_SIZE,
+      },
+      limits: {
+        maxRoomsPerConnection: 64,
+        maxRoomsPerRequest: 32,
+        maxChunksPerRequest: 64,
+        maxRoomChurnPerMinute: 120,
+        maxSnapshotTiles: 2_000,
+        maxPayloadBytes: 262_144,
+        source: 'canary-default',
+      },
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport' }))
+    await waitFor(() => expect(emitMock).toHaveBeenCalledWith(
+      'subscribe_quilt_area',
+      expect.objectContaining({ quiltId: 'quilt-1' }),
+      expect.any(Function),
+    ))
+    const subscription = emitMock.mock.calls.find((call) => call[0] === 'subscribe_quilt_area')?.[1] as any
+    const roomKeys = subscription.rooms.map((room: any) => `${room.row}:${room.column}:${room.kind}`)
+    expect(new Set(roomKeys).size).toBe(roomKeys.length)
+
+    const tileA = {
+      id: '11111111-1111-4111-8111-111111111111',
+      shape: 'square', color: '#111', material: 'ceramic',
+      transform: { position: { x: 1, y: 1 }, rotation: 0 }, createdAt: 1,
+    }
+    const tileB = {
+      id: '22222222-2222-4222-8222-222222222222',
+      shape: 'triangle', color: '#222', material: 'stone',
+      transform: { position: { x: 9, y: 1 }, rotation: 0 }, createdAt: 2,
+    }
+    act(() => {
+      onQuiltPatchSnapshot({
+        quiltId: 'quilt-1', canonicalRoomId: 'room-a', patchId: 'patch-a', tiles: [tileA],
+        cursor: { patchId: 'patch-a', opSeq: 1, revision: 1, eventId: 'event-a' },
+      })
+      onQuiltPatchSnapshot({
+        quiltId: 'quilt-1', canonicalRoomId: 'room-b', patchId: 'patch-b', tiles: [tileB],
+        cursor: { patchId: 'patch-b', opSeq: 1, revision: 1, eventId: 'event-b' },
+      })
+    })
+    expect(screen.getByText('2 placed')).toBeInTheDocument()
+
+    act(() => onQuiltPatchSnapshot({
+      quiltId: 'quilt-1', canonicalRoomId: 'room-a', patchId: 'patch-a', tiles: [],
+      cursor: { patchId: 'patch-a', opSeq: 2, revision: 2, eventId: 'event-c' },
+    }))
+    expect(screen.getByText('1 placed')).toBeInTheDocument()
+  })
+
   it('canvas shell does not produce horizontal overflow at 320px viewport', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
 

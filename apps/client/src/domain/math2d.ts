@@ -1,3 +1,5 @@
+import { deduplicateCanonicalSubscriptions } from '../../../server/src/domain/quiltTopology'
+
 export type Vec2 = { x: number; y: number }
 
 export type ChunkId = `${number}:${number}`
@@ -8,6 +10,11 @@ export type ViewportBounds = {
   minY: number
   maxY: number
 }
+
+export type ChunkTopologyMode =
+  | { mode: 'unbounded' }
+  | { mode: 'bounded'; bounds: ViewportBounds }
+  | { mode: 'toroidal'; chunkColumns: number; chunkRows: number }
 
 export const vec2 = (x: number, y: number): Vec2 => ({ x, y })
 
@@ -68,20 +75,36 @@ export const viewportToChunkIds = (
   viewport: ViewportBounds,
   chunkSize: number,
   prefetchRing: number,
+  topologyMode: ChunkTopologyMode = { mode: 'unbounded' },
 ): ChunkId[] => {
-  const startChunkX = Math.floor(viewport.minX / chunkSize) - prefetchRing
-  const endChunkX = Math.floor(viewport.maxX / chunkSize) + prefetchRing
-  const startChunkY = Math.floor(viewport.minY / chunkSize) - prefetchRing
-  const endChunkY = Math.floor(viewport.maxY / chunkSize) + prefetchRing
+  let startChunkX = Math.floor(viewport.minX / chunkSize) - prefetchRing
+  let endChunkX = Math.floor(viewport.maxX / chunkSize) + prefetchRing
+  let startChunkY = Math.floor(viewport.minY / chunkSize) - prefetchRing
+  let endChunkY = Math.floor(viewport.maxY / chunkSize) + prefetchRing
 
-  const chunkIds: ChunkId[] = []
+  if (topologyMode.mode === 'bounded') {
+    startChunkX = Math.max(startChunkX, Math.floor(topologyMode.bounds.minX / chunkSize))
+    endChunkX = Math.min(endChunkX, Math.floor(topologyMode.bounds.maxX / chunkSize))
+    startChunkY = Math.max(startChunkY, Math.floor(topologyMode.bounds.minY / chunkSize))
+    endChunkY = Math.min(endChunkY, Math.floor(topologyMode.bounds.maxY / chunkSize))
+  }
+
+  const chunkAddresses: Array<{ column: number; row: number }> = []
   for (let chunkX = startChunkX; chunkX <= endChunkX; chunkX += 1) {
     for (let chunkY = startChunkY; chunkY <= endChunkY; chunkY += 1) {
-      chunkIds.push(toChunkId(chunkX, chunkY))
+      chunkAddresses.push({ column: chunkX, row: chunkY })
     }
   }
 
-  return chunkIds
+  if (topologyMode.mode === 'toroidal') {
+    return deduplicateCanonicalSubscriptions(
+      chunkAddresses,
+      topologyMode.chunkColumns,
+      topologyMode.chunkRows,
+    ).map(({ column, row }) => toChunkId(column, row))
+  }
+
+  return chunkAddresses.map(({ column, row }) => toChunkId(column, row))
 }
 
 export const shouldRecomputeVisibleChunks = (

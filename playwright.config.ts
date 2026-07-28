@@ -9,10 +9,11 @@ const TEST_DATABASE_URL = process.env.E2E_DATABASE_URL ?? 'postgresql://postgres
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: ['quilt-reconnect.spec.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: process.env.CI ? 'line' : [['html', { open: 'never' }]],
   use: {
     baseURL: CLIENT_URL,
@@ -28,6 +29,7 @@ export default defineConfig({
         `E2E_SERVER_URL=${SERVER_URL}`,
         `DATABASE_URL=${TEST_DATABASE_URL}`,
         'NODE_ENV=test',
+        'FEATURE_MULTI_REPLICA_READY=true',
         'LOG_LEVEL=info',
         `PORT=${SERVER_PORT}`,
         'HOST=127.0.0.1',

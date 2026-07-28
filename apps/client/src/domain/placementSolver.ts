@@ -5,6 +5,7 @@ import {
 } from './tileGeometry'
 import type { Vec2 } from './math2d'
 import type { ConfidenceState, TileShape, Transform2D } from './tileGeometry'
+import { nearestImageDelta, type QuiltTopology } from '../../../server/src/domain/quiltTopology'
 
 export type MosaicBounds = {
   minX: number
@@ -59,6 +60,26 @@ export type GuidedPlacement = {
   magnetStrength: number
   correction: Vec2
   reason: string
+}
+
+export const projectNearestPeriodicTiles = (
+  settled: TileInstance[],
+  reference: Vec2,
+  topology?: QuiltTopology,
+): TileInstance[] => {
+  if (!topology) return settled
+  const width = topology.patchColumns * topology.patchWidth
+  const height = topology.patchRows * topology.patchHeight
+  return settled.map((tile) => ({
+    ...tile,
+    transform: {
+      ...tile.transform,
+      position: {
+        x: reference.x + nearestImageDelta(tile.transform.position.x - reference.x, width),
+        y: reference.y + nearestImageDelta(tile.transform.position.y - reference.y, height),
+      },
+    },
+  }))
 }
 
 /** Maximum allowed edge-to-edge gap between a candidate tile and the nearest settled tile. */
@@ -176,6 +197,7 @@ export const validatePlacement = (
   candidateTransform: Transform2D,
   settled: TileInstance[],
   bounds: MosaicBounds | BoundsPolicy,
+  topology?: QuiltTopology,
 ): ValidationResult => {
   const candidate = transformTile(candidateShape, candidateTransform)
   const policy = resolveBoundsPolicy(bounds)
@@ -196,8 +218,9 @@ export const validatePlacement = (
 
   let maxPenetration = 0
   let correction = vec2(0, 0)
+  const nearbySettled = projectNearestPeriodicTiles(settled, candidateTransform.position, topology)
 
-  for (const tile of settled) {
+  for (const tile of nearbySettled) {
     const transformed = transformTile(tile.shape, tile.transform)
     for (const partA of candidate.convexParts) {
       for (const partB of transformed.convexParts) {
@@ -227,10 +250,10 @@ export const validatePlacement = (
 
   // Adjacency check: once tiles have been placed, the candidate must sit within
   // grout distance of at least one settled tile — no floating islands.
-  if (settled.length > 0) {
+  if (nearbySettled.length > 0) {
     let minGap = Number.POSITIVE_INFINITY
 
-    for (const tile of settled) {
+    for (const tile of nearbySettled) {
       const transformed = transformTile(tile.shape, tile.transform)
       const gap = minOutlineGap(candidate.outline, transformed.outline)
       if (gap < minGap) minGap = gap
@@ -263,6 +286,7 @@ export const solveGuidedPlacement = (
   mirrored: boolean,
   settled: TileInstance[],
   bounds: MosaicBounds | BoundsPolicy,
+  topology?: QuiltTopology,
 ): GuidedPlacement => {
   // Snapping disabled: always use the raw pointer position
   const baseTransform: Transform2D = {
@@ -271,7 +295,7 @@ export const solveGuidedPlacement = (
     mirrored,
   }
 
-  const baseValidation = validatePlacement(candidateShape, baseTransform, settled, bounds)
+  const baseValidation = validatePlacement(candidateShape, baseTransform, settled, bounds, topology)
   const chosen = { transform: baseTransform, validation: baseValidation }
   const magnetStrength = 0
 

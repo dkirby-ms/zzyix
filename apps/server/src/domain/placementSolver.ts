@@ -3,6 +3,7 @@ import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
 import {
   transformTile,
 } from './tileGeometry.js'
+import { nearestImageDelta, type QuiltTopology, type TopologyRect } from './quiltTopology.js'
 import type { Vec2 } from './math2d.js'
 import type { ConfidenceState, TileShape, Transform2D } from './tileGeometry.js'
 
@@ -61,7 +62,41 @@ export type GuidedPlacement = {
 }
 
 /** Maximum allowed edge-to-edge gap between a candidate tile and the nearest settled tile. */
-const MAX_GROUT_GAP = 0.22
+export const MAX_GROUT_GAP = 0.22
+
+export const derivePlacementBounds = (
+  shape: TileShape,
+  transform: Transform2D,
+  halo = 0,
+): TopologyRect => {
+  const outline = transformTile(shape, transform).outline
+  return {
+    minX: Math.min(...outline.map((point) => point.x)) - halo,
+    maxX: Math.max(...outline.map((point) => point.x)) + halo,
+    minY: Math.min(...outline.map((point) => point.y)) - halo,
+    maxY: Math.max(...outline.map((point) => point.y)) + halo,
+  }
+}
+
+export const projectPeriodicNeighbors = (
+  settled: TileInstance[],
+  candidatePosition: Vec2,
+  topology: QuiltTopology,
+): TileInstance[] => {
+  const quiltWidth = topology.patchColumns * topology.patchWidth
+  const quiltHeight = topology.patchRows * topology.patchHeight
+
+  return settled.map((tile) => ({
+    ...tile,
+    transform: {
+      ...tile.transform,
+      position: {
+        x: candidatePosition.x + nearestImageDelta(tile.transform.position.x - candidatePosition.x, quiltWidth),
+        y: candidatePosition.y + nearestImageDelta(tile.transform.position.y - candidatePosition.y, quiltHeight),
+      },
+    },
+  }))
+}
 
 const pointToSegmentDist = (p: Vec2, a: Vec2, b: Vec2): number => {
   const ab = sub(b, a)

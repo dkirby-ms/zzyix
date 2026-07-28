@@ -22,6 +22,13 @@ Current and near-term themes include:
 * Realtime multi-user synchronization
 * Persistent canvas and operation history
 
+The canvas model now supports finite rectangular quilts with toroidal edge
+wrapping. Canonical patches own authorization and consistency, while scoped
+chunks bound delivery and client caching. Existing bounded canvases keep their
+legacy semantics and data through the migration canary. Protocol v1 and legacy
+storage have not been retired because authenticated principal integration, a
+measured canary window, and rollback approval remain required exit gates.
+
 ## Project Structure
 
 * [apps/client](apps/client): React + TypeScript + Three.js client for the mosaic editor
@@ -63,6 +70,20 @@ Default local URLs:
 ```bash
 npm test
 ```
+
+### Rehearse Quilt Migration
+
+With loopback PostgreSQL running, exercise migration, idempotent backfill,
+parity, rollback, and recovery in a disposable database:
+
+```bash
+./scripts/verify-quilt-migration.sh rehearse
+```
+
+The script refuses non-loopback databases unless explicit production approval,
+a reviewed change identifier, and the exact database name are supplied. See
+[the server migration runbook](apps/server/README.md#quilt-migration-canary) for
+individual operations, telemetry, rollback behavior, and retirement gates.
 
 ## Run End-To-End Tests
 

@@ -1,0 +1,192 @@
+import { randomUUID } from 'node:crypto'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { canvases, patches, principals, quilts } from './schema.js'
+import { persistQuiltTilePlacement } from './repository.js'
+import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
+
+const CANVAS_ID = '10000000-0000-4000-8000-000000000001'
+const QUILT_ID = '20000000-0000-4000-8000-000000000001'
+const PRINCIPAL_ID = '30000000-0000-4000-8000-000000000001'
+const PATCH_IDS = [
+  'f0000000-0000-4000-8000-000000000001',
+  'a0000000-0000-4000-8000-000000000001',
+  '90000000-0000-4000-8000-000000000001',
+  '10000000-0000-4000-8000-000000000002',
+]
+
+const placement = (
+  tileId: string,
+  operationId: string,
+  x: number,
+  expectedPatchRevisions: Record<string, number>,
+) => persistQuiltTilePlacement({
+  quiltId: QUILT_ID,
+  operationId,
+  principalId: PRINCIPAL_ID,
+  expectedPatchRevisions,
+  payload: {
+    tileId,
+    shape: 'square',
+    color: '#abc',
+    material: 'ceramic',
+    transform: { position: { x, y: 5 }, rotation: 0 },
+  },
+})
+
+const revisions = (value: number, patchIds = PATCH_IDS): Record<string, number> =>
+  Object.fromEntries(patchIds.map((patchId) => [patchId, value]))
+
+const queryWithConnection = async <Row extends Record<string, unknown>>(
+  database: PostgresTestDatabase,
+  text: string,
+  values?: unknown[],
+): Promise<Row[]> => {
+  const pool = database.createConnection()
+  try {
+    return (await pool.query<Row>(text, values)).rows
+  } finally {
+    await pool.end()
+  }
+}
+
+describe('patch-scoped PostgreSQL placement', () => {
+  let database: PostgresTestDatabase
+
+  beforeAll(async () => {
+    database = await createPostgresTestDatabase('zzyix_repository')
+    await database.db.insert(canvases).values({ id: CANVAS_ID })
+    await database.db.insert(principals).values({ id: PRINCIPAL_ID, kind: 'human' })
+    await database.db.insert(quilts).values({
+      id: QUILT_ID,
+      legacyCanvasId: CANVAS_ID,
+      patchRows: 1,
+      patchColumns: 4,
+      patchWidth: 10,
+      patchHeight: 10,
+      topology: 'toroidal',
+      protocolVersion: 2,
+    })
+    await database.db.insert(patches).values(PATCH_IDS.map((id, column) => ({
+      id,
+      quiltId: QUILT_ID,
+      row: 0,
+      column,
+      ownerPrincipalId: PRINCIPAL_ID,
+      state: 'active',
+    })))
+  }, 30_000)
+
+  afterAll(async () => database?.dispose(), 30_000)
+
+  beforeEach(async () => {
+    await queryWithConnection(database, 'TRUNCATE patch_operations, patch_snapshots, tile_spatial_refs, tiles CASCADE')
+    await queryWithConnection(database, 'UPDATE patches SET revision = 0')
+  })
+
+  it('allows exactly one conflicting placement across the toroidal seam', async () => {
+    const results = await Promise.all([
+      placement('40000000-0000-4000-8000-000000000001', randomUUID(), 0.2, revisions(0, [PATCH_IDS[0], PATCH_IDS[3]])),
+      placement('40000000-0000-4000-8000-000000000002', randomUUID(), 39.8, revisions(0, [PATCH_IDS[0], PATCH_IDS[3]])),
+    ])
+
+    expect(results.filter((result) => result.committed)).toHaveLength(1)
+    const counts = await queryWithConnection<{ tiles: number; operations: number }>(database,
+      'SELECT (SELECT count(*)::int FROM tiles) AS tiles, (SELECT count(*)::int FROM patch_operations) AS operations',
+    )
+    expect(counts[0]).toEqual({ tiles: 1, operations: 2 })
+  })
+
+  it('does not deadlock when address order is reversed from patch ID lock order', async () => {
+    const current = await queryWithConnection<{ id: string; revision: number }>(database,
+      'SELECT id, revision FROM patches ORDER BY id',
+    )
+    const expected = Object.fromEntries(current.map((patch) => [patch.id, patch.revision]))
+    const outcome = await Promise.race([
+      Promise.all([
+        placement('40000000-0000-4000-8000-000000000003', randomUUID(), 9.8, expected),
+        placement('40000000-0000-4000-8000-000000000004', randomUUID(), 10.2, expected),
+      ]),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('possible patch lock deadlock')), 5_000)),
+    ])
+
+    expect(outcome.filter((result) => result.committed)).toHaveLength(1)
+  })
+
+  it('returns an idempotent result without duplicating durable rows', async () => {
+    const operationId = randomUUID()
+    const tileId = '40000000-0000-4000-8000-000000000005'
+    const current = await queryWithConnection<{ id: string; revision: number }>(database,
+      'SELECT id, revision FROM patches',
+    )
+    const expected = Object.fromEntries(current.map((patch) => [patch.id, patch.revision]))
+
+    const first = await placement(tileId, operationId, 25, expected)
+    const retry = await placement(tileId, operationId, 25, expected)
+    const counts = await queryWithConnection<{ tiles: number; refs: number; operations: number }>(database,
+      'SELECT (SELECT count(*)::int FROM tiles WHERE id = $1) AS tiles, ' +
+      '(SELECT count(*)::int FROM tile_spatial_refs WHERE tile_id = $1) AS refs, ' +
+      '(SELECT count(*)::int FROM patch_operations WHERE operation_id = $2) AS operations',
+      [tileId, operationId],
+    )
+
+    expect(first).toMatchObject({ committed: true, idempotent: false })
+    expect(retry).toMatchObject({ committed: true, idempotent: true })
+    expect(counts[0]).toEqual({ tiles: 1, refs: 1, operations: 1 })
+  })
+
+  it('allows a distant patch write while an unrelated patch row is locked', async () => {
+    const blocker = database.createConnection()
+    const client = await blocker.connect()
+    await client.query('BEGIN')
+    await client.query('SELECT id FROM patches WHERE id = $1 FOR UPDATE', [PATCH_IDS[0]])
+    const current = await queryWithConnection<{ id: string; revision: number }>(database,
+      'SELECT id, revision FROM patches',
+    )
+    const expected = Object.fromEntries(current.map((patch) => [patch.id, patch.revision]))
+
+    try {
+      const result = await Promise.race([
+        placement('40000000-0000-4000-8000-000000000006', randomUUID(), 25, expected),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('distant write waited on unrelated patch')), 2_000)),
+      ])
+      expect(result.committed).toBe(true)
+    } finally {
+      await client.query('ROLLBACK')
+      client.release()
+      await blocker.end()
+    }
+  })
+
+  it('persists no partial state for unauthorized or stale writes', async () => {
+    const outsiderId = '30000000-0000-4000-8000-000000000002'
+    await database.db.insert(principals).values({ id: outsiderId, kind: 'human' }).onConflictDoNothing()
+    const unauthorized = await persistQuiltTilePlacement({
+      quiltId: QUILT_ID,
+      operationId: randomUUID(),
+      principalId: outsiderId,
+      expectedPatchRevisions: { [PATCH_IDS[1]]: 0 },
+      payload: {
+        tileId: '40000000-0000-4000-8000-000000000007',
+        shape: 'square',
+        color: '#def',
+        material: 'glass',
+        transform: { position: { x: 15, y: 5 }, rotation: 0 },
+      },
+    })
+    const stale = await placement(
+      '40000000-0000-4000-8000-000000000008',
+      randomUUID(),
+      25,
+      { [PATCH_IDS[2]]: -1 },
+    )
+    const counts = await queryWithConnection<{ tiles: number; refs: number; operations: number }>(database,
+      'SELECT (SELECT count(*)::int FROM tiles) AS tiles, ' +
+      '(SELECT count(*)::int FROM tile_spatial_refs) AS refs, ' +
+      '(SELECT count(*)::int FROM patch_operations) AS operations',
+    )
+
+    expect(unauthorized).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
+    expect(stale).toEqual({ committed: false, reason: 'STALE_REVISION' })
+    expect(counts[0]).toEqual({ tiles: 0, refs: 0, operations: 0 })
+  })
+})

@@ -16,6 +16,10 @@ import type {
   ChunkTilePlacedPayload,
   ChunkTileRemovedPayload,
   ChunkResyncRequiredPayload,
+  QuiltPatchEventPayload,
+  QuiltPatchResyncRequiredPayload,
+  QuiltProtocolHandshake,
+  QuiltScopedSnapshotPayload,
 } from '../../../server/src/contracts'
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
@@ -38,14 +42,19 @@ export const useSocketConnection = (
   onChunkTileRemoved?: (payload: ChunkTileRemovedPayload) => void,
   onChunkResyncRequired?: (payload: ChunkResyncRequiredPayload) => void,
   enableChunkStreaming: boolean = true,
+  onQuiltProtocol?: (payload: QuiltProtocolHandshake) => void,
+  onQuiltPatchSnapshot?: (payload: QuiltScopedSnapshotPayload) => void,
+  onQuiltPatchEvent?: (payload: QuiltPatchEventPayload) => void,
+  onQuiltPatchResyncRequired?: (payload: QuiltPatchResyncRequiredPayload) => void,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
+  const selectedProtocolRef = useRef<1 | 2>(2)
 
   useEffect(() => {
     if (!sessionId) return
 
     const socket: AppSocket = io(serverUrl, {
-      auth: { sessionId, clientId },
+      auth: { sessionId, clientId, protocolVersion: 2, enableProtocolV1Compatibility: false },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionDelay: 1000,
@@ -65,9 +74,27 @@ export const useSocketConnection = (
       console.log('🔌 Socket.IO disconnected:', reason)
     })
 
-    socket.on('session_snapshot', onSnapshot)
-    socket.on('tile_placed', onTilePlaced)
-    socket.on('tile_removed', onTileRemoved)
+    const handleProtocol = (payload: QuiltProtocolHandshake): void => {
+      selectedProtocolRef.current = payload.selectedProtocolVersion
+      onQuiltProtocol?.(payload)
+    }
+    const handleSnapshot = (payload: SessionSnapshotPayload): void => {
+      if (selectedProtocolRef.current === 1) onSnapshot(payload)
+    }
+    const handleTilePlaced = (payload: TilePlacedPayload): void => {
+      if (selectedProtocolRef.current === 1) onTilePlaced(payload)
+    }
+    const handleTileRemoved = (payload: TileRemovedPayload): void => {
+      if (selectedProtocolRef.current === 1) onTileRemoved(payload)
+    }
+
+    socket.on('quilt_protocol', handleProtocol)
+    socket.on('session_snapshot', handleSnapshot)
+    socket.on('tile_placed', handleTilePlaced)
+    socket.on('tile_removed', handleTileRemoved)
+    if (onQuiltPatchSnapshot) socket.on('quilt_patch_snapshot', onQuiltPatchSnapshot)
+    if (onQuiltPatchEvent) socket.on('quilt_patch_event', onQuiltPatchEvent)
+    if (onQuiltPatchResyncRequired) socket.on('quilt_patch_resync_required', onQuiltPatchResyncRequired)
     if (onPointerUpdate) {
       socket.on('pointer_update', onPointerUpdate)
     }
@@ -102,9 +129,13 @@ export const useSocketConnection = (
     }
 
     return () => {
-      socket.off('session_snapshot', onSnapshot)
-      socket.off('tile_placed', onTilePlaced)
-      socket.off('tile_removed', onTileRemoved)
+      socket.off('quilt_protocol', handleProtocol)
+      socket.off('session_snapshot', handleSnapshot)
+      socket.off('tile_placed', handleTilePlaced)
+      socket.off('tile_removed', handleTileRemoved)
+      if (onQuiltPatchSnapshot) socket.off('quilt_patch_snapshot', onQuiltPatchSnapshot)
+      if (onQuiltPatchEvent) socket.off('quilt_patch_event', onQuiltPatchEvent)
+      if (onQuiltPatchResyncRequired) socket.off('quilt_patch_resync_required', onQuiltPatchResyncRequired)
       if (onPointerUpdate) {
         socket.off('pointer_update', onPointerUpdate)
       }
@@ -156,6 +187,10 @@ export const useSocketConnection = (
     onChunkTileRemoved,
     onChunkResyncRequired,
     enableChunkStreaming,
+    onQuiltProtocol,
+    onQuiltPatchSnapshot,
+    onQuiltPatchEvent,
+    onQuiltPatchResyncRequired,
   ])
 
   return socketRef

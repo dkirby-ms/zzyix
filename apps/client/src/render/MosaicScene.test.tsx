@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import { MosaicScene } from './MosaicScene'
+import { resolveDisplayHitPoint } from './periodicImages'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children }: { children: ReactNode }) => <div data-testid="canvas-root">{children}</div>,
@@ -21,6 +22,12 @@ afterEach(() => {
 })
 
 describe('MosaicScene interaction plane', () => {
+  it('canonicalizes alias hits exactly once for toroidal scenes', () => {
+    expect(resolveDisplayHitPoint(
+      { x: 20.25, y: -0.5 },
+      { patchRows: 1, patchColumns: 2, patchWidth: 10, patchHeight: 10 },
+    )).toEqual({ x: 0.25, y: 9.5 })
+  })
   it('routes right-drag motion into rotate drag callbacks', () => {
     const onRotateDrag = vi.fn()
     const onPointerMove = vi.fn()

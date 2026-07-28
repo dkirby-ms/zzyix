@@ -4,8 +4,36 @@ import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
 import type { BoundsPolicy, ClientPresence, Session, SessionCanvasConfig, TileInstance } from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
-import { canvases, idempotencyKeys, operationLog, participants, snapshots, tiles } from './schema.js'
+import {
+  canvases,
+  externalPrincipalMappings,
+  idempotencyKeys,
+  operationLog,
+  participants,
+  patchMemberships,
+  patchOperations,
+  patches,
+  patchSnapshots,
+  quilts,
+  snapshots,
+  tileSpatialRefs,
+  tiles,
+} from './schema.js'
 import { getDatabaseBundle, type DatabaseClient } from './client.js'
+import {
+  derivePlacementBounds,
+  MAX_GROUT_GAP,
+  projectPeriodicNeighbors,
+  validatePlacement,
+} from '../domain/placementSolver.js'
+import {
+  decomposeWrappedViewport,
+  resolveCanonicalPoint,
+  type QuiltTopology,
+  type TopologyRect,
+} from '../domain/quiltTopology.js'
+import { compareLegacyAndPatchTiles, type QuiltParityReport } from './quiltParity.js'
+import { emitQuiltTelemetry } from '../migration/quiltTelemetry.js'
 
 export type AuthoritativeSessionRecord = {
   session: Session
@@ -112,7 +140,23 @@ export type ChunkTileReadResult = {
   opSeq: number
   revision: number
   parityMatched: boolean
+  parityReport: QuiltParityReport
 }
+
+export type PatchAddress = { row: number; column: number }
+
+export type QuiltPlacementResult =
+  | {
+      committed: true
+      idempotent: boolean
+      operationId: string
+      tile: TileInstance
+      patchRevisions: Record<string, number>
+    }
+  | {
+      committed: false
+      reason: 'UNAUTHORIZED' | 'STALE_REVISION' | 'OUT_OF_ORDER_REVISION' | 'PLACEMENT_REJECTED'
+    }
 
 const toMillis = (value: Date): number => value.getTime()
 
@@ -133,6 +177,61 @@ const worldToChunk = (x: number, y: number, chunkWorldSize: number = CHUNK_WORLD
   y: Math.floor(y / chunkWorldSize),
 })
 
+const rectPatchAddresses = (rect: TopologyRect, topology: QuiltTopology): PatchAddress[] => {
+  const maxX = rect.maxX === rect.minX ? rect.maxX : Math.max(rect.minX, rect.maxX - Number.EPSILON)
+  const maxY = rect.maxY === rect.minY ? rect.maxY : Math.max(rect.minY, rect.maxY - Number.EPSILON)
+  const minColumn = Math.min(Math.floor(rect.minX / topology.patchWidth), topology.patchColumns - 1)
+  const maxColumn = Math.min(Math.floor(maxX / topology.patchWidth), topology.patchColumns - 1)
+  const minRow = Math.min(Math.floor(rect.minY / topology.patchHeight), topology.patchRows - 1)
+  const maxRow = Math.min(Math.floor(maxY / topology.patchHeight), topology.patchRows - 1)
+  const addresses: PatchAddress[] = []
+
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      addresses.push({ row, column })
+    }
+  }
+
+  return addresses
+}
+
+export const deriveAffectedPatchAddresses = (
+  topology: QuiltTopology,
+  bounds: TopologyRect,
+): PatchAddress[] => {
+  const unique = new Map<string, PatchAddress>()
+  for (const rect of decomposeWrappedViewport(bounds, topology)) {
+    for (const address of rectPatchAddresses(rect, topology)) {
+      unique.set(`${address.row}:${address.column}`, address)
+    }
+  }
+  return Array.from(unique.values()).sort((left, right) => left.row - right.row || left.column - right.column)
+}
+
+const deriveCanonicalSpatialRefs = (
+  tileId: string,
+  patchRowsByAddress: Map<string, { id: string }>,
+  topology: QuiltTopology,
+  bounds: TopologyRect,
+): Array<{ tileId: string; patchId: string; chunkX: number; chunkY: number }> => {
+  const refs = new Map<string, { tileId: string; patchId: string; chunkX: number; chunkY: number }>()
+  for (const rect of decomposeWrappedViewport(bounds, topology)) {
+    for (const address of rectPatchAddresses(rect, topology)) {
+      const patch = patchRowsByAddress.get(`${address.row}:${address.column}`)
+      if (!patch) continue
+      const maxX = rect.maxX === rect.minX ? rect.maxX : Math.max(rect.minX, rect.maxX - Number.EPSILON)
+      const maxY = rect.maxY === rect.minY ? rect.maxY : Math.max(rect.minY, rect.maxY - Number.EPSILON)
+      for (let chunkX = Math.floor(rect.minX / CHUNK_WORLD_SIZE); chunkX <= Math.floor(maxX / CHUNK_WORLD_SIZE); chunkX += 1) {
+        for (let chunkY = Math.floor(rect.minY / CHUNK_WORLD_SIZE); chunkY <= Math.floor(maxY / CHUNK_WORLD_SIZE); chunkY += 1) {
+          const ref = { tileId, patchId: patch.id, chunkX, chunkY }
+          refs.set(`${patch.id}:${chunkX}:${chunkY}`, ref)
+        }
+      }
+    }
+  }
+  return Array.from(refs.values())
+}
+
 const toChunkIdentity = (tile: TileInstance): string => {
   const chunk = worldToChunk(tile.transform.position.x, tile.transform.position.y)
   return `${tile.id}:${chunk.x}:${chunk.y}`
@@ -149,6 +248,19 @@ export const areChunkTileSetsEquivalent = (left: TileInstance[], right: TileInst
   const leftIds = normalizeTileIdentitySet(left)
   const rightIds = normalizeTileIdentitySet(right)
   return leftIds.every((value, index) => value === rightIds[index])
+}
+
+export const areTileSpatialRefsEquivalent = (
+  expected: Array<{ tileId: string; patchId: string; chunkX: number; chunkY: number }>,
+  actual: Array<{ tileId: string; patchId: string; chunkX: number; chunkY: number }>,
+): boolean => {
+  const toIdentity = (ref: { tileId: string; patchId: string; chunkX: number; chunkY: number }): string =>
+    `${ref.patchId}:${ref.chunkX}:${ref.chunkY}:${ref.tileId}`
+  const expectedIdentities = expected.map(toIdentity).sort((left, right) => left.localeCompare(right))
+  const actualIdentities = actual.map(toIdentity).sort((left, right) => left.localeCompare(right))
+
+  return expectedIdentities.length === actualIdentities.length &&
+    expectedIdentities.every((value, index) => value === actualIdentities[index])
 }
 
 const mapTile = (row: typeof tiles.$inferSelect): TileInstance => ({
@@ -493,6 +605,7 @@ export const listTilesByChunksWithParity = async (
   sessionId: string,
   chunks: ChunkCoordinate[],
 ): Promise<ChunkTileReadResult> => {
+  const readStartedAt = performance.now()
   const record = await loadSessionRecord(sessionId)
   const chunkedTiles = await listTilesByChunks(sessionId, chunks)
 
@@ -502,13 +615,28 @@ export const listTilesByChunksWithParity = async (
     return requestedChunkIds.has(`${tileChunk.x}:${tileChunk.y}`)
   })
 
-  const parityMatched = areChunkTileSetsEquivalent(chunkedTiles, legacyTiles)
+  const parityReport = compareLegacyAndPatchTiles(legacyTiles, chunkedTiles)
+  emitQuiltTelemetry({
+    name: 'dual_read_parity',
+    canary: false,
+    measurements: {
+      durationMs: performance.now() - readStartedAt,
+      legacyTileCount: parityReport.legacyTileCount,
+      patchTileCount: parityReport.patchTileCount,
+      mismatchCount: parityReport.mismatches.length
+        + parityReport.missingFromLegacy.length
+        + parityReport.missingFromPatch.length,
+    },
+    dimensions: { matched: parityReport.matches, readPath: 'legacy-chunk' },
+    details: parityReport.matches ? undefined : parityReport,
+  })
 
   return {
-    tiles: parityMatched ? chunkedTiles : legacyTiles,
+    tiles: parityReport.matches ? chunkedTiles : legacyTiles,
     opSeq: record.lastOpSeq,
     revision: record.revision,
-    parityMatched,
+    parityMatched: parityReport.matches,
+    parityReport,
   }
 }
 
@@ -570,6 +698,213 @@ export const listSessionSummaries = async (): Promise<SessionSummaryRecord[]> =>
     participantCount: Number(row.participantCount),
     canvasConfig: normalizeCanvasConfig(row.canvasConfig),
   }))
+}
+
+export const persistQuiltTilePlacement = async (params: {
+  quiltId: string
+  operationId: string
+  principalId: string
+  expectedPatchRevisions: Record<string, number>
+  payload: PlaceTilePayload
+  createdAt?: number
+}): Promise<QuiltPlacementResult> => {
+  const { db } = getDatabaseBundle()
+  const mutationStartedAt = performance.now()
+
+  try {
+    return await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+
+    const [existingOperation] = await tx
+      .select({ patchId: patchOperations.patchId })
+      .from(patchOperations)
+      .where(eq(patchOperations.operationId, params.operationId))
+      .limit(1)
+
+    if (existingOperation) {
+      const [tileRow] = await tx.select().from(tiles).where(eq(tiles.id, params.payload.tileId)).limit(1)
+      const revisionRows = await tx
+        .select({ id: patches.id, revision: patches.revision })
+        .from(patches)
+        .where(eq(patches.quiltId, params.quiltId))
+      if (!tileRow) {
+        throw new Error(`Operation ${params.operationId} exists without tile ${params.payload.tileId}`)
+      }
+      return {
+        committed: true,
+        idempotent: true,
+        operationId: params.operationId,
+        tile: mapTile(tileRow),
+        patchRevisions: Object.fromEntries(revisionRows.map((patch) => [patch.id, patch.revision])),
+      }
+    }
+
+    const [quilt] = await tx.select().from(quilts).where(eq(quilts.id, params.quiltId)).limit(1)
+    if (!quilt || quilt.topology !== 'toroidal' || !quilt.legacyCanvasId) {
+      return { committed: false, reason: 'PLACEMENT_REJECTED' }
+    }
+
+    const topology: QuiltTopology = {
+      patchRows: quilt.patchRows,
+      patchColumns: quilt.patchColumns,
+      patchWidth: quilt.patchWidth,
+      patchHeight: quilt.patchHeight,
+    }
+    const canonical = resolveCanonicalPoint({
+      x: params.payload.transform.position.x - quilt.originX,
+      y: params.payload.transform.position.y - quilt.originY,
+    }, topology)
+    const canonicalTransform = { ...params.payload.transform, position: canonical.point }
+    const geometryBounds = derivePlacementBounds(params.payload.shape, canonicalTransform)
+    const collisionBounds = derivePlacementBounds(params.payload.shape, canonicalTransform, MAX_GROUT_GAP)
+    const intersectedAddresses = deriveAffectedPatchAddresses(topology, geometryBounds)
+    const lockAddresses = deriveAffectedPatchAddresses(topology, collisionBounds)
+    const allPatchRows = await tx.select().from(patches).where(eq(patches.quiltId, params.quiltId))
+    const patchRowsByAddress = new Map(allPatchRows.map((patch) => [`${patch.row}:${patch.column}`, patch]))
+    const intersectedPatchIds = intersectedAddresses.map((address) =>
+      patchRowsByAddress.get(`${address.row}:${address.column}`)?.id,
+    )
+    const lockPatchIds = lockAddresses.map((address) =>
+      patchRowsByAddress.get(`${address.row}:${address.column}`)?.id,
+    )
+    if (intersectedPatchIds.some((id) => !id) || lockPatchIds.some((id) => !id)) {
+      throw new Error(`Quilt ${params.quiltId} is missing an affected patch`)
+    }
+    const sortedPatchIds = (lockPatchIds as string[]).sort((left, right) => left.localeCompare(right))
+    const intersectedPatchIdSet = new Set(intersectedPatchIds as string[])
+
+    const lockStartedAt = performance.now()
+    const lockedPatches = await tx
+      .select()
+      .from(patches)
+      .where(inArray(patches.id, sortedPatchIds))
+      .orderBy(asc(patches.id))
+      .for('update')
+    emitQuiltTelemetry({
+      name: 'patch_lock_wait',
+      quiltId: params.quiltId,
+      principalId: params.principalId,
+      canary: false,
+      measurements: {
+        waitMs: performance.now() - lockStartedAt,
+        patchCount: sortedPatchIds.length,
+      },
+    })
+    const memberships = await tx
+      .select({ patchId: patchMemberships.patchId })
+      .from(patchMemberships)
+      .where(and(
+        inArray(patchMemberships.patchId, sortedPatchIds),
+        eq(patchMemberships.principalId, params.principalId),
+      ))
+    const memberPatchIds = new Set(memberships.map((membership) => membership.patchId))
+
+    for (const patch of lockedPatches) {
+      if (!intersectedPatchIdSet.has(patch.id)) {
+        continue
+      }
+      if (patch.state !== 'active' || (patch.ownerPrincipalId !== params.principalId && !memberPatchIds.has(patch.id))) {
+        return { committed: false, reason: 'UNAUTHORIZED' }
+      }
+      const expectedRevision = params.expectedPatchRevisions[patch.id]
+      if (expectedRevision === undefined || expectedRevision < patch.revision) {
+        return { committed: false, reason: 'STALE_REVISION' }
+      }
+      if (expectedRevision > patch.revision) {
+        return { committed: false, reason: 'OUT_OF_ORDER_REVISION' }
+      }
+    }
+
+    const nearbyRows = await tx
+      .selectDistinct({ tile: tiles })
+      .from(tileSpatialRefs)
+      .innerJoin(tiles, eq(tileSpatialRefs.tileId, tiles.id))
+      .where(inArray(tileSpatialRefs.patchId, sortedPatchIds))
+    const nearbyTiles = projectPeriodicNeighbors(nearbyRows.map((row) => mapTile(row.tile)), canonical.point, topology)
+    const validation = validatePlacement(params.payload.shape, canonicalTransform, nearbyTiles, { mode: 'unbounded' })
+    if (!validation.valid) {
+      return { committed: false, reason: 'PLACEMENT_REJECTED' }
+    }
+
+    const anchorPatch = patchRowsByAddress.get(`${canonical.patch.row}:${canonical.patch.column}`)
+    if (!anchorPatch) {
+      throw new Error(`Quilt ${params.quiltId} is missing anchor patch`)
+    }
+    const createdAt = new Date(params.createdAt ?? Date.now())
+    const tileChunk = worldToChunk(canonical.point.x, canonical.point.y)
+    await tx.insert(tiles).values({
+      id: params.payload.tileId,
+      canvasId: quilt.legacyCanvasId,
+      quiltId: params.quiltId,
+      anchorPatchId: anchorPatch.id,
+      shape: params.payload.shape,
+      color: params.payload.color,
+      material: params.payload.material,
+      posX: canonical.point.x,
+      posY: canonical.point.y,
+      chunkX: tileChunk.x,
+      chunkY: tileChunk.y,
+      rotation: canonicalTransform.rotation,
+      mirrored: canonicalTransform.mirrored ?? false,
+      placedBy: null,
+      createdAt,
+    })
+
+    const spatialRefs = deriveCanonicalSpatialRefs(params.payload.tileId, patchRowsByAddress, topology, geometryBounds)
+    if (spatialRefs.length > 0) {
+      await tx.insert(tileSpatialRefs).values(spatialRefs)
+    }
+
+    const eventPayload = { ...params.payload, transform: canonicalTransform }
+    for (const patch of lockedPatches) {
+      if (!intersectedPatchIdSet.has(patch.id)) {
+        continue
+      }
+      const nextRevision = patch.revision + 1
+      await tx.insert(patchOperations).values({
+        patchId: patch.id,
+        opSeq: nextRevision,
+        operationId: params.operationId,
+        actorPrincipalId: params.principalId,
+        opType: 'tile_placed',
+        payload: eventPayload,
+        createdAt,
+      })
+      await tx
+        .update(patches)
+        .set({ revision: nextRevision, updatedAt: createdAt })
+        .where(eq(patches.id, patch.id))
+    }
+
+    return {
+      committed: true,
+      idempotent: false,
+      operationId: params.operationId,
+      tile: {
+        id: params.payload.tileId,
+        shape: params.payload.shape,
+        color: params.payload.color,
+        material: params.payload.material,
+        transform: canonicalTransform,
+        createdAt: createdAt.getTime(),
+      },
+      patchRevisions: Object.fromEntries(
+        lockedPatches
+          .filter((patch) => intersectedPatchIdSet.has(patch.id))
+          .map((patch) => [patch.id, patch.revision + 1]),
+      ),
+    }
+    })
+  } finally {
+    emitQuiltTelemetry({
+      name: 'mutation_latency',
+      quiltId: params.quiltId,
+      principalId: params.principalId,
+      canary: false,
+      measurements: { durationMs: performance.now() - mutationStartedAt },
+      dimensions: { mutation: 'place' },
+    })
+  }
 }
 
 export const persistTilePlacement = async (params: {
@@ -1061,6 +1396,192 @@ export const loadSessionReplayRecord = async (sessionId: string): Promise<Replay
   }
 }
 
+export const reconstructPatchState = async (patchId: string): Promise<{ opSeq: number; tiles: TileInstance[] }> => {
+  const { db } = getDatabaseBundle()
+  const [patch] = await db.select({ revision: patches.revision }).from(patches).where(eq(patches.id, patchId)).limit(1)
+  if (!patch) {
+    throw new Error(`Patch ${patchId} does not exist`)
+  }
+  const rows = await db
+    .selectDistinct({ tile: tiles })
+    .from(tileSpatialRefs)
+    .innerJoin(tiles, eq(tileSpatialRefs.tileId, tiles.id))
+    .where(eq(tileSpatialRefs.patchId, patchId))
+    .orderBy(asc(tiles.createdAt), asc(tiles.id))
+  return { opSeq: patch.revision, tiles: rows.map((row) => mapTile(row.tile)) }
+}
+
+export type QuiltDeliveryContext = {
+  topology: {
+    quiltId: string
+    protocolVersion: number
+    topology: 'bounded' | 'toroidal'
+    patchRows: number
+    patchColumns: number
+    patchWidth: number
+    patchHeight: number
+  }
+  principalId?: string
+  patches: Array<{
+    id: string
+    row: number
+    column: number
+    state: 'unclaimed' | 'active' | 'suspended' | 'deletion_requested' | 'deleted'
+    revision: number
+    isMember: boolean
+  }>
+}
+
+export const loadQuiltDeliveryContext = async (params: {
+  sessionId: string
+  identity?: { providerNamespace: string; externalSubject: string }
+}): Promise<QuiltDeliveryContext | null> => {
+  const { db } = getDatabaseBundle()
+  const [quilt] = await db.select().from(quilts).where(eq(quilts.legacyCanvasId, params.sessionId)).limit(1)
+  if (!quilt) return null
+
+  let principalId: string | undefined
+  if (params.identity) {
+    const [mapping] = await db
+      .select({ principalId: externalPrincipalMappings.principalId })
+      .from(externalPrincipalMappings)
+      .where(and(
+        eq(externalPrincipalMappings.providerNamespace, params.identity.providerNamespace),
+        eq(externalPrincipalMappings.externalSubject, params.identity.externalSubject),
+      ))
+      .limit(1)
+    principalId = mapping?.principalId
+  }
+
+  const patchRows = await db
+    .select({
+      id: patches.id,
+      row: patches.row,
+      column: patches.column,
+      state: patches.state,
+      revision: patches.revision,
+      memberPrincipalId: patchMemberships.principalId,
+      ownerPrincipalId: patches.ownerPrincipalId,
+    })
+    .from(patches)
+    .leftJoin(
+      patchMemberships,
+      principalId
+        ? and(eq(patchMemberships.patchId, patches.id), eq(patchMemberships.principalId, principalId))
+        : sql`false`,
+    )
+    .where(eq(patches.quiltId, quilt.id))
+    .orderBy(asc(patches.row), asc(patches.column))
+
+  return {
+    topology: {
+      quiltId: quilt.id,
+      protocolVersion: quilt.protocolVersion,
+      topology: quilt.topology as 'bounded' | 'toroidal',
+      patchRows: quilt.patchRows,
+      patchColumns: quilt.patchColumns,
+      patchWidth: quilt.patchWidth,
+      patchHeight: quilt.patchHeight,
+    },
+    principalId,
+    patches: patchRows.map((patch) => ({
+      id: patch.id,
+      row: patch.row,
+      column: patch.column,
+      state: patch.state as QuiltDeliveryContext['patches'][number]['state'],
+      revision: patch.revision,
+      isMember: principalId !== undefined
+        && (patch.ownerPrincipalId === principalId || patch.memberPrincipalId === principalId),
+    })),
+  }
+}
+
+export const loadPatchDeliverySnapshot = async (patchId: string, options: {
+  principalId?: string
+  canary?: boolean
+} = {}): Promise<{
+  opSeq: number
+  revision: number
+  eventId?: string
+  tiles: TileInstance[]
+}> => {
+  const { db } = getDatabaseBundle()
+  const state = await reconstructPatchState(patchId)
+  const [compatibilityContext] = await db
+    .select({
+      quiltId: quilts.id,
+      legacyCanvasId: quilts.legacyCanvasId,
+      topology: quilts.topology,
+      patchRows: quilts.patchRows,
+      patchColumns: quilts.patchColumns,
+    })
+    .from(patches)
+    .innerJoin(quilts, eq(patches.quiltId, quilts.id))
+    .where(eq(patches.id, patchId))
+    .limit(1)
+  let tilesForDelivery = state.tiles
+
+  if (
+    compatibilityContext?.legacyCanvasId
+    && compatibilityContext.topology === 'bounded'
+    && compatibilityContext.patchRows === 1
+    && compatibilityContext.patchColumns === 1
+  ) {
+    const legacyRows = await db
+      .select()
+      .from(tiles)
+      .where(eq(tiles.canvasId, compatibilityContext.legacyCanvasId))
+      .orderBy(asc(tiles.createdAt), asc(tiles.id))
+    const legacyTiles = legacyRows.map(mapTile)
+    const parityReport = compareLegacyAndPatchTiles(legacyTiles, state.tiles)
+    emitQuiltTelemetry({
+      name: 'dual_read_parity',
+      quiltId: compatibilityContext.quiltId,
+      principalId: options.principalId,
+      canary: options.canary ?? false,
+      measurements: {
+        legacyTileCount: parityReport.legacyTileCount,
+        patchTileCount: parityReport.patchTileCount,
+        mismatchCount: parityReport.mismatches.length
+          + parityReport.missingFromLegacy.length
+          + parityReport.missingFromPatch.length,
+      },
+      dimensions: { matched: parityReport.matches, readPath: 'legacy-patch' },
+      details: parityReport.matches ? undefined : parityReport,
+    })
+    tilesForDelivery = parityReport.matches ? state.tiles : legacyTiles
+  }
+  const [latestEvent] = await db
+    .select({ eventId: patchOperations.eventId })
+    .from(patchOperations)
+    .where(eq(patchOperations.patchId, patchId))
+    .orderBy(desc(patchOperations.opSeq))
+    .limit(1)
+
+  return {
+    opSeq: state.opSeq,
+    revision: state.opSeq,
+    eventId: latestEvent?.eventId,
+    tiles: tilesForDelivery,
+  }
+}
+
+export const savePatchSnapshot = async (patchId: string): Promise<{ opSeq: number; tiles: TileInstance[] }> => {
+  const { db } = getDatabaseBundle()
+  const state = await reconstructPatchState(patchId)
+  await db
+    .insert(patchSnapshots)
+    .values({ id: randomUUID(), patchId, opSeq: state.opSeq, state: state.tiles })
+    .onConflictDoNothing()
+  return state
+}
+
+export const listPatchIds = async (): Promise<string[]> => {
+  const { db } = getDatabaseBundle()
+  const rows = await db.select({ id: patches.id }).from(patches).orderBy(asc(patches.id))
+  return rows.map((patch) => patch.id)
+}
+
 export const pruneRetention = async (params: {
   operationCutoffMs: number
   snapshotCutoffMs: number
@@ -1080,6 +1601,16 @@ export const pruneRetention = async (params: {
     .from(operationLog)
     .where(lte(operationLog.createdAt, operationCutoff))
 
+  const stalePatchSnapshots = await db
+    .select({ id: patchSnapshots.id })
+    .from(patchSnapshots)
+    .where(lte(patchSnapshots.createdAt, snapshotCutoff))
+
+  const stalePatchOperations = await db
+    .select({ id: patchOperations.id })
+    .from(patchOperations)
+    .where(lte(patchOperations.createdAt, operationCutoff))
+
   const staleIdempotencyKeys = await db
     .select({ key: idempotencyKeys.key, clientId: idempotencyKeys.clientId })
     .from(idempotencyKeys)
@@ -1093,13 +1624,21 @@ export const pruneRetention = async (params: {
     await db.delete(operationLog).where(inArray(operationLog.id, staleOperations.map((entry) => entry.id)))
   }
 
+  if (stalePatchSnapshots.length > 0) {
+    await db.delete(patchSnapshots).where(inArray(patchSnapshots.id, stalePatchSnapshots.map((entry) => entry.id)))
+  }
+
+  if (stalePatchOperations.length > 0) {
+    await db.delete(patchOperations).where(inArray(patchOperations.id, stalePatchOperations.map((entry) => entry.id)))
+  }
+
   if (staleIdempotencyKeys.length > 0) {
     await db.delete(idempotencyKeys).where(lte(idempotencyKeys.expiresAt, now))
   }
 
   return {
-    deletedOperations: staleOperations.length,
-    deletedSnapshots: staleSnapshots.length,
+    deletedOperations: staleOperations.length + stalePatchOperations.length,
+    deletedSnapshots: staleSnapshots.length + stalePatchSnapshots.length,
     deletedIdempotencyKeys: staleIdempotencyKeys.length,
   }
 }

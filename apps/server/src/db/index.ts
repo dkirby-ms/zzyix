@@ -1,4 +1,5 @@
 export * from './client.js'
+export * from './quiltParity.js'
 export * from './repository.js'
 export * from './snapshots.js'
 export * from './schema.js'
