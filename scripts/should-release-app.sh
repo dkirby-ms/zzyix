@@ -13,6 +13,8 @@ if [[ "$app" != "client" && "$app" != "server" ]]; then
   exit 2
 fi
 
+app_path="apps/${app}"
+
 if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
   echo "release=false"
   exit 0
@@ -26,39 +28,18 @@ else
 fi
 
 if [[ -z "$last_tag" ]]; then
-  if [[ "$app" == "client" ]]; then
-    if git log --pretty=format: --name-only -- apps/client | grep -qE '^apps/client/'; then
-      echo "release=true"
-      exit 0
-    fi
-  else
-    if git log --pretty=format: --name-only -- apps/server | grep -qE '^apps/server/'; then
-      echo "release=true"
-      exit 0
-    fi
+  if [[ -n "$(git rev-list -1 HEAD -- "$app_path" || true)" ]]; then
+    echo "release=true"
+    exit 0
   fi
 
   echo "release=false"
   exit 0
 fi
 
-range="$last_tag..HEAD"
-changed_files="$(git diff --name-only "$range" || true)"
-if [[ -z "$changed_files" ]]; then
-  echo "release=false"
+if [[ -n "$(git rev-list -1 "$last_tag..HEAD" -- "$app_path" || true)" ]]; then
+  echo "release=true"
   exit 0
-fi
-
-if [[ "$app" == "client" ]]; then
-  if echo "$changed_files" | grep -Eq '^apps/client/'; then
-    echo "release=true"
-    exit 0
-  fi
-else
-  if echo "$changed_files" | grep -Eq '^apps/server/'; then
-    echo "release=true"
-    exit 0
-  fi
 fi
 
 echo "release=false"
