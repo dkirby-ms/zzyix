@@ -11,6 +11,7 @@
     "db:apply": "node dist/db/migrate.js",
     "db:backfill:quilts": "node dist/db/quiltBackfill.js",
     "db:parity:quilts": "node dist/db/quiltParityCli.js",
+    "jobs:principal-deletion": "node dist/jobs/principalDeletionCli.js",
     "operations:principal-recovery": "node dist/operations/principalRecoveryCli.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

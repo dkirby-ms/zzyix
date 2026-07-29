@@ -122,6 +122,30 @@ Gaps and differences identified between research findings and the implementation
 
 Items identified during planning that fall outside current implementation scope.
 
+* WI-15: Correct staging same-origin configuration — Set `SERVER_CORS_ORIGIN` to the exact absolute HTTPS client origin and rerun release validation (blocking priority, small effort)
+  * Source: Phase 12 external evidence reconciliation
+  * Dependency: Staging environment administration access
+* WI-16: Configure staging release protections — Add required reviewers and approval variables for retention, telemetry, rollback, deletion completion, migration rehearsal, owner E2E, mutation rollback, and benchmark approval (blocking priority, medium effort)
+  * Source: Phase 12 external evidence reconciliation
+  * Dependency: Repository and environment administration access
+* WI-17: Reconcile issues 14 and 98 — Separate owner-only release acceptance from delegated and broader protocol-v2 scope without closing unmet criteria (blocking priority, small effort)
+  * Source: Phase 12 external evidence reconciliation
+  * Dependency: Issue owner access
+
+* WI-13: Apply operational recovery infrastructure in staging — Deploy the declared recovery job and custom invocation role, then verify the workflow identity can invoke only that job (blocking priority, small effort)
+  * Source: Phase 11, Step 11.2
+  * Dependency: Staging Azure access and secret-backed deployment parameters
+* WI-14: Require authenticated multi-replica branch check — Add the named CI check to repository branch protection (blocking priority, small effort)
+  * Source: Phase 11, Step 11.3
+  * Dependency: Repository administration access
+
+### Review Remediation Intake
+
+* DD-14: Fresh full review supersedes the all-phases-complete release claim
+  * Plan specifies: The original eight implementation phases are complete
+  * Implementation differs: Phases 9 through 12 now track critical and major remediation from the 2026-07-29 review
+  * Rationale: Fresh validators found authorization replay, deletion operations, boundary, rollout, and coverage defects that require explicit implementation and validation
+
 * WI-01: Delegated mutation grants and moderator commands — Add scoped grants, audited moderator assignment, dispute handling, and delegated E2E after policy approval (high priority, large effort)
   * Source: Research potential next work and confirmed initial-release deferral
   * Dependency: Stable production identity and owner-only mutation rollout

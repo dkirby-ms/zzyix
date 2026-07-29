@@ -9,6 +9,16 @@ param postgresAdminLogin string = 'pgadmin'
 @minLength(8)
 param postgresAdminPassword string
 
+@description('The immutable server container image reference used by operational jobs.')
+param serverImage string
+
+@description('The PostgreSQL connection string used only by operational jobs.')
+@secure()
+param operationalDatabaseUrl string
+
+@description('The Microsoft Entra object ID of the deployment workflow service principal.')
+param deploymentPrincipalId string
+
 var namePrefix = 'zzyix-${environmentName}'
 var deploymentLocation = resourceGroup().location
 
@@ -63,8 +73,20 @@ module postgresql 'modules/postgresql.bicep' = {
   }
 }
 
+module recoveryJob 'modules/recovery-job.bicep' = {
+  params: {
+    databaseUrl: operationalDatabaseUrl
+    environmentId: containerAppsEnvironment.outputs.environmentId
+    invocationPrincipalId: deploymentPrincipalId
+    location: deploymentLocation
+    namePrefix: namePrefix
+    serverImage: serverImage
+  }
+}
+
 // ── Outputs ───────────────────────────────────────────────────────────────────
 output acaEnvironmentName string = containerAppsEnvironment.outputs.environmentName
 output acaDefaultDomain string = containerAppsEnvironment.outputs.defaultDomain
 output postgresServerName string = postgresql.outputs.postgresServerName
 output postgresServerFqdn string = postgresql.outputs.postgresServerFqdn
+output recoveryJobName string = recoveryJob.outputs.jobName

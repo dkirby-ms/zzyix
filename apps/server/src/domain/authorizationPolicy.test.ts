@@ -32,6 +32,30 @@ describe('persisted visibility policy', () => {
     })
   })
 
+  it('denies every quilt surface to anonymous subjects, including public aggregates', () => {
+    const publicPolicy: PersistedVisibilityPolicy = {
+      ...authenticatedPolicy,
+      existence: 'public',
+      fineData: 'public',
+      aggregateData: 'public',
+      search: 'public',
+      durableEvents: 'public',
+    }
+
+    expect(evaluatePatchVisibility({
+      state: 'active',
+      policy: publicPolicy,
+      subject: { authenticated: false, isMember: false },
+    })).toEqual({
+      existence: false,
+      fineData: false,
+      aggregateData: false,
+      presence: false,
+      search: false,
+      durableEvents: false,
+    })
+  })
+
   it('fails closed for missing or invalid persisted policy', () => {
     const subject = { authenticated: true, isMember: true }
     expect(evaluatePatchVisibility({ state: 'active', policy: null, subject })).toEqual({

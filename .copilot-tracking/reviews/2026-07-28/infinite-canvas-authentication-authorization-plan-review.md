@@ -3,11 +3,11 @@
 
 ## Review Metadata
 
-* Review date: 2026-07-28
+* Review date: 2026-07-29
 * Related plan: `.copilot-tracking/plans/2026-07-28/infinite-canvas-authentication-authorization-plan.instructions.md`
 * Changes log: `.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md`
 * Research: `.copilot-tracking/research/2026-07-28/infinite-canvas-authentication-authorization-research.md`
-* Review scope: Phase 1 repository-controlled provider and release prerequisites
+* Review scope: Full eight-phase implementation
 * Branch: `infinite-canvas`
 
 ## Review Status
@@ -15,94 +15,107 @@
 Overall status: Needs Rework
 
 | Severity | Count |
-|---|---:|
-| Critical | 1 |
-| Major | 3 |
-| Minor | 3 |
+|----------|------:|
+| Critical |     4 |
+| Major    |    10 |
+| Minor    |     3 |
+
+Counts are deduplicated across phase and quality validators. Findings that describe the same root defect are counted once at the highest assigned severity.
 
 ## Scope Notes
 
-The changes log claims only Phase 1 implementation. Step 1.1 remains administratively blocked on target External ID tenant access and approved registration values. Phases 2 through 8 are planned but not claimed as implemented. Unrelated finite-quilt changes on the same branch are excluded unless a Phase 1 authentication prerequisite directly modified them.
+The changes log claims all eight phases complete. Fresh validators replaced eight stale artifacts that had been created while only Phase 1 existed. Phase 2 passes. The remaining phases are Failed or Partial because implementation, security coverage, operational provisioning, and external rollout evidence remain incomplete.
+
+Production mutation remains disabled. This contains the highest-risk protocol-v2 replay defect but does not make the implementation eligible for production mutation rollout.
 
 ## RPI Validation
 
 | Phase | Status | Evidence |
-|---|---|---|
-| 1. Provider and release prerequisites | Partial | Repository-owned work exists and focused validation passes, but External ID administration is incomplete and quality findings require rework. See `.copilot-tracking/reviews/rpi/2026-07-28/infinite-canvas-authentication-authorization-plan-001-validation.md`. |
-| 2. Identity persistence and verification | Blocked, unstarted | Correctly not claimed; no identity schema, token verification, or principal resolution implementation exists. |
-| 3. Protected HTTP, socket, and visibility | Blocked, unstarted | Correctly not claimed; current anonymous behavior remains until Phase 2 is implemented. Deployment identity variables do not constitute authentication enforcement. |
-| 4. Client authentication lifecycle | Blocked, unstarted | Correctly not claimed; no MSAL provider, authenticated fetch boundary, renewal, or protected-state clearing exists. |
-| 5. Claims and ownership lifecycle | Blocked, unstarted | Correctly not claimed; missing claim, transfer, abandonment, deletion, and audit behavior is planned later work, not a Phase 1 defect. |
-| 6. Authenticated protocol-v2 mutations | Blocked, unstarted | Correctly not claimed. Mutation remains fail closed and focused tests pass. |
-| 7. Deployment, authenticated E2E, and rollout | Blocked, unstarted | Phase 1 adds deployment plumbing only. Local OIDC, production verification, and authenticated E2E remain planned work. |
-| 8. Final validation | Blocked, unstarted | Phase 1 checks do not satisfy final rollout validation. Full security, benchmark, and authenticated multi-replica evidence depends on Phases 2 through 7. |
+|-------|--------|----------|
+| 1. Provider and release prerequisites | Failed | Issue scope and staging origin claims do not match observed external state; migration reconciliation lacks staging execution evidence. |
+| 2. Identity persistence and verification | Passed | Identity schema, token verification, principal resolution, tests, lint, and build pass. The plan's literal focused command has a minor workspace-scoping defect. |
+| 3. Protected HTTP, socket, and visibility | Partial | Protected boundaries exist, but anonymous public aggregate policy, exact WebSocket origin enforcement, and transport integration coverage diverge from the authenticated-only baseline. |
+| 4. Client authentication lifecycle | Partial | MSAL, session lifecycle, and auth-loss teardown exist, but body-bearing requests cannot perform the promised refreshed-token retry. |
+| 5. Claims and ownership lifecycle | Partial | Core commands exist, but deletion completion is not operationally runnable, idempotency is not actor and payload bound, recovery is not provisioned, and required scenarios are absent. |
+| 6. Authenticated protocol-v2 mutations | Failed | Normal owner transactions exist, but replay precedes authorization and returns mutable current revisions. Cross-context, mixed-authority, alias, and delayed replay coverage is absent. |
+| 7. Deployment, authenticated E2E, and rollout | Partial | Local OIDC and both browser gates pass, but multi-replica is not required by CI and key lifecycle and failed-renewal cases are missing. |
+| 8. Final validation | Partial | The command matrix passes in this review, but production benchmark approval, mixed-authority evidence, staging controls, and rollout approvals remain incomplete. |
 
-Independent RPI artifacts are stored under `.copilot-tracking/reviews/rpi/2026-07-28/`. Severity labels assigned solely to expected unimplemented later-phase work were normalized out of this review's defect totals.
+Detailed phase validations are stored under `.copilot-tracking/reviews/rpi/2026-07-28/`.
 
 ## Implementation Quality
 
-Detailed findings: `.copilot-tracking/reviews/quality/2026-07-28/infinite-canvas-authentication-authorization-plan-quality.md`.
+Detailed findings: `.copilot-tracking/reviews/quality/2026-07-29/infinite-canvas-authentication-authorization-plan-quality.md`.
 
 ### Critical
 
-* CD cancellation can abandon polling while an Azure migration execution continues. A replacement release can update and start the same job again, violating the exactly-one migration-owner requirement.
+* Protocol-v2 placement and removal replay a client-supplied operation ID before validating quilt, actor, lifecycle, ownership, or policy. A different principal can obtain an accepted response and event data.
+* Due account deletion cannot complete operationally. The job handles one supplied principal, always denies retention approval, cannot enumerate due accounts, and has no runnable package command.
+* Live issue state does not match the claimed release-scope narrowing for issues 14 and 98, leaving delegated authority mixed into the owner-only release contract.
+* The observed staging CORS value is not an absolute HTTPS origin and does not match the same-origin API contract claimed by the changes log.
 
 ### Major
 
-* Existing migration jobs do not have manual trigger, parallelism, completion count, timeout, and retry settings reconciled on update.
-* Raw `envsubst` can generate invalid runtime JSON, and the container does not parse the document before starting nginx.
-* Runtime parsing removes trailing slashes from exact redirect and logout URIs, potentially diverging from External ID registration.
+* Ownership lifecycle operation replay is not bound to the original actor and canonical payload.
+* Replayed protocol-v2 acknowledgements use current patch revisions instead of immutable committed revisions.
+* Body-bearing authenticated requests fail before the one-time refreshed-token retry can be sent.
+* Socket.IO lacks explicit exact-origin enforcement for WebSocket handshakes.
+* Central policy retains anonymous public aggregate access despite the authenticated-only baseline.
+* Restricted recovery is invoked by CD but not provisioned with its job and least-privilege role in repository infrastructure.
+* Authenticated multi-replica validation passes locally but is not a required CI gate.
+* Security and lifecycle coverage omits cross-principal replay, mixed-patch authority, ownership HTTP routes, failed-renewal clearing, and claim, transfer, and abandonment browser scenarios.
+* Production benchmark approval is absent from startup and CD mutation rollout gates.
+* Migration-job reconciliation passes local contracts but lacks staging execution, active-migration refusal, and rollout-order evidence.
 
 ### Minor
 
-* The browser-reachable API routing model is ambiguous between internal server ingress, selective nginx proxying, and `AUTH_API_ORIGIN` documentation.
-* Focused automated tests do not cover runtime JSON generation, exact URI preservation, nginx routing, workflow cancellation, or migration-job drift.
-* Migration rehearsal temporary directories can survive failure, and `--help` unnecessarily depends on database tooling.
+* The literal Phase 2 focused test command can select client tests under the server environment; explicit workspace scoping is required.
+* Four moderate `esbuild` advisories remain in the pinned Drizzle toolchain. The configured high-severity audit gate passes.
+* Production client chunks exceed Vite's 500 kB warning threshold.
 
 ## Validation Commands
 
 | Command | Status | Result |
-|---|---|---|
-| `npm run lint:client` | Passed | Oxlint reported no client errors. |
-| `npm run build:client` | Passed with warning | TypeScript and Vite completed; existing large-chunk warnings remain. |
-| `npm run lint:server` | Passed | Oxlint reported no server errors. |
-| `npm run build:server` | Passed | TypeScript compilation completed. |
-| `bash -n scripts/verify-quilt-migration.sh scripts/bootstrap-cd-environment.sh` | Passed | Bash syntax is valid. |
-| `./scripts/verify-quilt-migration.sh rehearse` | Passed | Fresh/upgrade schema parity, idempotent backfill, rollback, recovery, and six retention tests passed. |
-| Focused server Vitest | Passed | 2 files and 40 tests passed. |
-| Focused client Vitest | Passed | 1 file and 29 tests passed. |
-| Scoped `git diff --check` | Passed | No whitespace errors in claimed files, helper edits, or review artifacts. |
-| VS Code diagnostics | Passed | No diagnostics in the reviewed workflow, Docker, nginx, TypeScript, or Bash files. |
-| `shellcheck` | Not run | ShellCheck is unavailable in the environment. |
-
-No development servers were started. Ports 3001 and 5173 were free at review completion.
+|---------|--------|--------|
+| `npm run audit` | Passed with advisories | No high-severity finding; four moderate advisories reported. |
+| `npm run lint` | Passed | Client and server Oxlint checks pass. |
+| `npm run build` | Passed with warning | Client and server builds pass; Vite reports large chunks. |
+| `npm run test` | Passed | 153 client tests and 208 server tests pass; one server test is skipped. |
+| `npm run test:release-contract` | Passed | Six release-contract tests pass. |
+| `./scripts/verify-quilt-migration.sh rehearse` | Passed | Fresh and upgrade migration, parity, rollback, recovery, and nine retention tests pass. |
+| `npm run test:authorization-benchmark` | Passed locally | All 10,000-row local ceilings pass; output records `productionThresholdApproved: false`. |
+| `npm run test:e2e:owner-only` | Passed | Six authenticated owner-only browser tests pass. |
+| `npm run test:e2e:multi-replica` | Passed | One authenticated multi-replica convergence test passes. |
 
 ## Missing Work and Deviations
 
-* External ID subscription capability, tenant branding, domain, sign-in methods, and exact SPA/API registration values remain externally blocked.
-* Identity persistence, protected boundaries, client authentication, ownership lifecycle, authenticated mutation, authenticated E2E, and final rollout validation remain unstarted by design.
-* `scripts/bootstrap-cd-environment.sh` and `scripts/gh-vars.env.template` contain uncommitted Phase 1-related edits but are absent from the changes log. Their syntax and diff checks pass; release traceability must be reconciled before completion.
-* The branch contains extensive finite-quilt work from the preceding task. That work was excluded from this authentication review except where Phase 1 directly depends on its migration and mutation-disable behavior.
+* Operation replay must be authorization-safe, immutable, actor-bound, and payload-bound across mutation and ownership commands.
+* Deletion completion needs due-account enumeration, approved retention input, executable job wiring, and successful completion tests.
+* Anonymous policy behavior and WebSocket origin enforcement must match the authenticated-only architecture.
+* Client refreshed-token retries must preserve request bodies.
+* Recovery infrastructure, multi-replica CI enforcement, production benchmark approval, and missing security scenarios remain incomplete.
+* External issue state, staging origins, migration execution, RBAC, retention, telemetry, rollback, and benchmark approvals do not yet support the completion claim.
 
 ## Follow-Up Work
 
 ### Deferred From Scope
 
-* Phases 2 through 8, including token verification, durable principal mapping, protected resources, client authentication, ownership lifecycle, authenticated mutations, local OIDC, authenticated E2E, and rollout approval
-* Delegated mutation and moderator commands
-* Provider-side External ID tenant and registration administration, which requires an authorized administrator
+* Delegated mutation and moderator commands remain deferred under their separate backlog scope.
+* Production threshold definition and organizational staging, privacy, telemetry, rollback, and retention approvals remain external work.
 
 ### Discovered During Review
 
-* Prevent overlapping migration executions before relying on the release-owned migration path.
-* Reconcile migration-job safety settings on both create and update paths.
-* Generate and validate runtime auth JSON with a JSON-aware mechanism.
-* Preserve exact redirect and logout URI strings after validation.
-* Resolve and test the public API routing contract before protected `/me` and domain routes are introduced.
-* Add focused release-contract tests and reconcile the two uncommitted bootstrap-helper changes.
+* Correct replay ordering and bind immutable command fingerprints before enabling protocol-v2 mutation.
+* Build and provision the due-account deletion and restricted recovery operations end to end.
+* Preserve POST bodies across the forced-refresh retry.
+* Remove anonymous aggregate authorization or explicitly revise and approve the architecture.
+* Enforce exact WebSocket origins and add polling and WebSocket rejection coverage.
+* Add cross-principal replay, immutable delayed replay, mixed-patch authority, ownership lifecycle HTTP and E2E, and failed-renewal browser tests.
+* Make authenticated multi-replica E2E a required CI check and add benchmark approval to rollout gates.
+* Reconcile GitHub issue scope and staging identity origin values with the release contract.
 
 ## Reviewer Notes
 
-Phase 1 has substantial, validated repository work: migration metadata is restored, migration rehearsal passes, deployment rejects missing settings, runtime configuration is served without caching, documentation and issue decomposition exist, and protocol-v2 mutation remains disabled. It is not ready to close. The migration concurrency defect can violate the phase's central release-ownership guarantee, and the runtime configuration path does not yet preserve approved identity values reliably.
+The implementation has substantial verified functionality: pinned token verification, exact issuer-subject mapping, lifecycle enforcement, protected HTTP middleware, local test-issuer isolation, client state teardown, normal owner mutation transactions, migration rehearsal, and authenticated single- and multi-replica convergence all execute successfully.
 
-Rework the critical and major findings first. Then obtain External ID administrator evidence, run a staging deployment with exact approved values, and repeat Phase 1 validation before beginning Phase 2.
+The release summary overstates completion. The replay authorization defect and non-runnable deletion path are release-blocking, and production approvals remain intentionally absent. Keep mutation disabled until Critical and Major findings are corrected and fresh phase, quality, CI, and staging validation passes.

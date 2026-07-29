@@ -8,6 +8,9 @@ import { promisify } from 'node:util'
 import test from 'node:test'
 
 const workflowPath = new URL('../.github/workflows/cd.yml', import.meta.url)
+const ciWorkflowPath = new URL('../.github/workflows/ci.yml', import.meta.url)
+const infrastructurePath = new URL('../infra/bicep/main.bicep', import.meta.url)
+const recoveryJobModulePath = new URL('../infra/bicep/modules/recovery-job.bicep', import.meta.url)
 const dockerfilePath = new URL('../apps/client/Dockerfile', import.meta.url)
 const nginxPath = new URL('../apps/client/nginx.conf', import.meta.url)
 const migrationScriptPath = new URL('./verify-quilt-migration.sh', import.meta.url)
@@ -42,8 +45,50 @@ test('production rollout requires operational approvals and keeps mutation disab
     assert.match(workflow, new RegExp(`${approval}: \\$\\{\\{ vars\\.${approval} \\}\\}`))
   }
   assert.match(workflow, /Release approval is not granted: \$\{approval_name\}/)
-  assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false/)
-  assert.doesNotMatch(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true/)
+  assert.doesNotMatch(workflow, /"FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true"/)
+  assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'false'/)
+  assert.match(workflow, /AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED/)
+  assert.match(workflow, /Mutation approval is not granted: \$\{approval_name\}/)
+})
+
+test('CI requires authenticated multi-replica E2E', async () => {
+  const workflow = await readFile(ciWorkflowPath, 'utf8')
+
+  assert.match(workflow, /authenticated-multi-replica-e2e:/)
+  assert.match(workflow, /name: Authenticated multi-replica E2E/)
+  assert.match(workflow, /needs: authenticated-e2e/)
+  assert.match(workflow, /run: npm run test:e2e:multi-replica/)
+})
+
+test('restricted recovery job is provisioned and resolved from infrastructure output', async () => {
+  const workflow = await readWorkflow()
+  const infrastructure = await readFile(infrastructurePath, 'utf8')
+  const recoveryModule = await readFile(recoveryJobModulePath, 'utf8')
+
+  assert.match(infrastructure, /output recoveryJobName string = recoveryJob\.outputs\.jobName/)
+  assert.match(workflow, /properties\.outputs\.recoveryJobName\.value/)
+  assert.doesNotMatch(workflow, /RECOVERY_JOB_NAME: \$\{\{ vars\.RECOVERY_JOB_NAME \}\}/)
+  assert.match(recoveryModule, /scope: recoveryJob/)
+  assert.match(recoveryModule, /'Microsoft\.App\/jobs\/read'/)
+  assert.match(recoveryModule, /'Microsoft\.App\/jobs\/start\/action'/)
+  assert.match(recoveryModule, /'Microsoft\.App\/jobs\/executions\/read'/)
+  assert.doesNotMatch(recoveryModule, /Microsoft\.Authorization\/roleAssignments\/write/)
+})
+
+test('deployment accepts only exact same-origin HTTPS client and CORS values', async () => {
+  const workflow = await readWorkflow()
+
+  assert.match(workflow, /const parseExactHttpsOrigin = \(name, value\) =>/)
+  assert.match(workflow, /value\.includes\("\*"\)/)
+  assert.match(workflow, /parsed\.protocol !== "https:"/)
+  assert.match(workflow, /parsed\.username !== ""/)
+  assert.match(workflow, /parsed\.password !== ""/)
+  assert.match(workflow, /parsed\.pathname !== "\/"/)
+  assert.match(workflow, /parsed\.search !== ""/)
+  assert.match(workflow, /parsed\.hash !== ""/)
+  assert.match(workflow, /parseExactHttpsOrigin\("AUTH_API_ORIGIN", process\.env\.AUTH_API_ORIGIN\)/)
+  assert.match(workflow, /parseExactHttpsOrigin\("SERVER_CORS_ORIGIN", process\.env\.CONFIGURED_CORS_ORIGIN\)/)
+  assert.match(workflow, /SERVER_CORS_ORIGIN must match AUTH_API_ORIGIN for same-origin deployment/)
 })
 
 test('migration job create and update reassert single-owner execution settings', async () => {

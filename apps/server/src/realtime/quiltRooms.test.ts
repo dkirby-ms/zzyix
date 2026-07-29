@@ -25,8 +25,6 @@ const access = (overrides: Partial<PatchRoomAccess> = {}): PatchRoomAccess => ({
   patchId: 'patch-0-0',
   state: 'active',
   publishesExistence: true,
-  publicFine: false,
-  publicAggregate: true,
   principalFine: true,
   principalAggregate: true,
   principalPresence: true,
@@ -69,7 +67,7 @@ describe('resolveQuiltRooms', () => {
 
     expect(anonymous.outcomes.map((outcome) => outcome.status)).toEqual([
       'forbidden',
-      'accepted',
+      'forbidden',
       'forbidden',
       'forbidden',
     ])

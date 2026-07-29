@@ -39,6 +39,34 @@ describe('createAuthenticatedFetch', () => {
     expect(acquireAccessToken).toHaveBeenNthCalledWith(2, { forceRefresh: true })
   })
 
+  it('resends a POST body exactly once after forced token refresh', async () => {
+    const bodies: string[] = []
+    const authorizations: Array<string | null> = []
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (!(input instanceof Request)) throw new Error('Expected authenticated request')
+      bodies.push(await input.text())
+      authorizations.push(input.headers.get('Authorization'))
+      return new Response(null, { status: bodies.length === 1 ? 401 : 200 })
+    })
+    const acquireAccessToken = vi.fn(async ({ forceRefresh } = {}) => forceRefresh ? 'renewed' : 'initial')
+    const authenticatedFetch = createAuthenticatedFetch({
+      acquireAccessToken,
+      onAuthLoss: vi.fn(),
+      fetch: fetchMock,
+    })
+
+    const response = await authenticatedFetch('https://api.example.test/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'private quilt' }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(bodies).toEqual(['{"name":"private quilt"}', '{"name":"private quilt"}'])
+    expect(authorizations).toEqual(['Bearer initial', 'Bearer renewed'])
+  })
+
   it('returns a second 401 without entering another renewal loop', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 401 }))
     const acquireAccessToken = vi.fn(async () => 'token')

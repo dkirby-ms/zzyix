@@ -13,8 +13,6 @@ export type PatchRoomAccess = {
   patchId: string
   state: PatchStateValue
   publishesExistence: boolean
-  publicFine: boolean
-  publicAggregate: boolean
   principalFine: boolean
   principalAggregate: boolean
   principalPresence: boolean
@@ -27,11 +25,6 @@ export const buildPatchRoomAccess = (patch: {
   isMember: boolean
   policy: PersistedVisibilityPolicy | null
 }): PatchRoomAccess => {
-  const publicAccess = evaluatePatchVisibility({
-    state: patch.state,
-    policy: patch.policy,
-    subject: { authenticated: false, isMember: false },
-  })
   const principalAccess = evaluatePatchVisibility({
     state: patch.state,
     policy: patch.policy,
@@ -42,8 +35,6 @@ export const buildPatchRoomAccess = (patch: {
     patchId: patch.id,
     state: patch.state,
     publishesExistence: principalAccess.existence,
-    publicFine: publicAccess.fineData,
-    publicAggregate: publicAccess.aggregateData,
     principalFine: principalAccess.fineData,
     principalAggregate: principalAccess.aggregateData,
     principalPresence: principalAccess.presence,
@@ -89,10 +80,11 @@ const hasAccess = (
     return false
   }
 
-  if (kind === 'fine') return hasPrincipal ? access.principalFine : access.publicFine
-  if (kind === 'aggregate') return hasPrincipal ? access.principalAggregate : access.publicAggregate
+  if (!hasPrincipal) return false
+  if (kind === 'fine') return access.principalFine
+  if (kind === 'aggregate') return access.principalAggregate
   if (kind === 'presence') return hasPrincipal && access.principalPresence
-  return hasPrincipal ? access.principalEvents : access.publicFine
+  return access.principalEvents
 }
 
 const invalidOutcome = (requestId: string, reason: string): QuiltRoomOutcome => ({

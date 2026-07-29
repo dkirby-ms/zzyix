@@ -13,6 +13,7 @@
     "db:apply": "npm run build:server && node --env-file=.env apps/server/dist/db/migrate.js",
     "db:backfill:quilts": "npm run build:server && node --env-file=.env apps/server/dist/db/quiltBackfill.js",
     "db:parity:quilts": "npm run build:server && node --env-file=.env apps/server/dist/db/quiltParityCli.js",
+    "jobs:principal-deletion": "npm run build:server && node --env-file=.env apps/server/dist/jobs/principalDeletionCli.js",
     "db:seed": "npm run build:server && node --env-file=.env apps/server/dist/db/seed.js",
     "db:purge": "./scripts/database-purge.sh",
     "audit": "npm audit --audit-level=high --workspaces --if-present",

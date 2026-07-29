@@ -57,7 +57,7 @@ export const canAccessPatchSurface = (
   }
 
   const visibility = context.policy[surface]
-  if (visibility === 'public') return surface !== 'presence'
+  if (visibility === 'public') return context.subject.authenticated
   if (visibility === 'authenticated') return context.subject.authenticated
   return context.subject.isMember
 }

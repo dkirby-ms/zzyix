@@ -578,3 +578,48 @@ Apply isolated lint, type, test, and configuration corrections. Record failures 
 * Owner-only protocol-v2 placement and removal are idempotent, all-or-nothing, and replica-convergent
 * Provider outage and token expiry clear protected client state and fail closed
 * Protocol-v2 mutation remains disabled until migration, security, E2E, telemetry, retention, rollback, and backlog gates pass
+
+## Implementation Phase 9: Review Remediation for Replay and Client Retry
+
+Correct review findings IV-001, IV-003, and IV-004. Mutation commands must authorize the current actor and validate a canonical fingerprint before returning replay. Persist immutable committed acknowledgement data, including committed patch revisions, rather than rebuilding replay responses from mutable current state. Apply the same actor and canonical-payload binding to claim, transfer, acceptance, cancellation, abandonment, deletion, and recovery operation IDs. Clone or buffer authenticated request bodies before the first send so one forced-refresh retry can reconstruct body-bearing requests.
+
+Validation commands:
+* `npm exec --workspace=apps/server -- vitest run src/db/repository.postgres.integration.test.ts src/db/ownership.postgres.integration.test.ts`
+* `npm exec --workspace=apps/client -- vitest run src/network/authenticatedFetch.test.ts`
+* `npm run lint`
+* `npm run build`
+
+## Implementation Phase 10: Review Remediation for Authenticated Boundaries
+
+Correct review findings IV-005, IV-006, and IV-007. Remove anonymous aggregate decisions from the central policy and its repository callers. Add an explicit Socket.IO handshake origin predicate that accepts only the configured exact origin and rejects missing or mismatched browser origins as appropriate for the transport contract. Validate deployment CORS and client origins as absolute HTTPS origins with no path, query, fragment, credentials, or wildcard before deployment.
+
+Validation commands:
+* `npm exec --workspace=apps/server -- vitest run src/domain/authorizationPolicy.test.ts src/index.integration.test.ts`
+* `npm run test:release-contract`
+* `npm run lint`
+* `npm run build`
+
+## Implementation Phase 11: Review Remediation for Operations and Rollout
+
+Correct review findings IV-002, IV-008, IV-009, and IV-011. Add due-principal enumeration and an approval-aware deletion job entry point, preserving fail-closed ownership and retention checks. Provision the restricted recovery job and least-privilege invocation role through repository Bicep and connect CD to the provisioned resource. Require authenticated multi-replica E2E in CI. Add production benchmark approval to startup and CD mutation gates while retaining mutation disabled by default.
+
+Validation commands:
+* `npm exec --workspace=apps/server -- vitest run src/jobs/principalDeletion.test.ts src/startup/rolloutGates.test.ts`
+* `npm run test:release-contract`
+* `npm run lint`
+* `npm run build`
+
+## Implementation Phase 12: Review Remediation Coverage and Final Validation
+
+Correct review finding IV-010 and reconcile the remaining review evidence. Add tests for cross-principal and payload-mismatched replay, immutable delayed replay, mixed-patch authority, ownership HTTP routes, failed-renewal clearing, claim, transfer, abandonment, polling rejection, and WebSocket origin rejection. Recheck GitHub issue scope, staging identity origins, migration execution, RBAC, retention, telemetry, rollback, and production benchmark approvals without claiming externally controlled evidence that is unavailable.
+
+Validation commands:
+* `npm run audit`
+* `npm run lint`
+* `npm run build`
+* `npm run test`
+* `npm run test:release-contract`
+* `./scripts/verify-quilt-migration.sh rehearse`
+* `npm run test:authorization-benchmark`
+* `npm run test:e2e:owner-only`
+* `npm run test:e2e:multi-replica`

@@ -6,11 +6,14 @@
 
 ## Summary
 
-All eight implementation phases are complete. Owner-only protocol-v2 placement and removal converge across authenticated replicas, the full security and failure matrix passes, and production startup/CD gates keep mutation disabled pending external rollout approvals.
+The original eight phases and review-remediation Phases 9 through 11 are implemented. Phase 12 local coverage and validation pass, while production release readiness remains blocked on externally controlled staging configuration, deployed jobs and RBAC, repository controls, issue scope, and operational approvals. Production mutation remains disabled.
 
 ## Changes
 
 ### Added
+
+* `apps/server/src/jobs/principalDeletionCli.ts` - Runs bounded due-account deletion with explicit retention approval and safe outcome reporting
+* `infra/bicep/modules/recovery-job.bicep` - Provisions a manual no-ingress recovery job and job-scoped invocation role
 
 * `apps/client/public/auth-config.template.json` - Public runtime identity configuration template without secrets
 * `apps/client/src/config/runtimeConfig.ts` - Validated no-cache runtime identity configuration loader
@@ -56,6 +59,41 @@ All eight implementation phases are complete. Owner-only protocol-v2 placement a
 * `apps/server/src/db/authorization.benchmark.test.ts` - Opt-in production-cardinality authorization regression benchmark
 
 ### Modified
+
+* `apps/server/src/index.ts` - Exposes testable exact-origin Engine.IO admission used by live polling and WebSocket rejection coverage
+* `apps/server/src/db/repository.postgres.integration.test.ts` - Covers mixed-patch mutation authority without partial persistence
+* `e2e/authentication.spec.ts` - Covers authenticated ownership routes, failed-renewal clearing, lifecycle browser requests, and live transport origin rejection
+
+* `.github/workflows/ci.yml` - Adds a separately named authenticated multi-replica E2E check
+* `.github/workflows/cd.yml` - Resolves the recovery job from deployment output and gates mutation on production benchmark approval
+* `apps/server/README.md` - Documents deletion processing and restricted recovery operation
+* `apps/server/package.json` - Adds the runnable principal deletion command
+* `apps/server/src/db/repository.ts` - Enumerates due deletion-pending principals in bounded batches
+* `apps/server/src/jobs/principalDeletion.ts` - Processes due principals with explicit retention approval and per-record results
+* `apps/server/src/jobs/principalDeletion.test.ts` - Covers successful, blocked, and bounded deletion processing
+* `apps/server/src/startup/rolloutGates.ts` - Requires explicit production authorization benchmark approval
+* `apps/server/src/startup/rolloutGates.test.ts` - Covers the benchmark rollout gate
+* `infra/bicep/main.bicep` - Composes restricted recovery infrastructure and exports its job name
+* `infra/bicep/main.bicepparam` - Supplies recovery job deployment parameters
+* `infra/bicep/host.main.bicepparam` - Supplies hosted recovery job deployment parameters
+* `package.json` - Exposes repository-level deletion processing
+* `scripts/release-contract.test.mjs` - Verifies recovery provisioning, output resolution, CI, and benchmark gates
+
+* `.github/workflows/cd.yml` - Rejects malformed, non-HTTPS, and cross-origin client or CORS deployment values
+* `scripts/release-contract.test.mjs` - Covers exact HTTPS same-origin deployment validation
+* `apps/server/src/domain/authorizationPolicy.ts` - Removes anonymous public aggregate authorization
+* `apps/server/src/domain/authorizationPolicy.test.ts` - Verifies authenticated-only aggregate policy
+* `apps/server/src/realtime/quiltRooms.ts` - Requires an authenticated principal for quilt room policy decisions
+* `apps/server/src/realtime/quiltRooms.test.ts` - Removes anonymous room and aggregate expectations
+* `apps/server/src/db/repository.ts` - Requires principal context for protected catalog and delivery surfaces
+* `apps/server/src/index.ts` - Enforces exact configured origins through the Engine.IO handshake predicate
+* `apps/server/src/index.integration.test.ts` - Covers exact, missing, partial, null, and mismatched origin admission
+
+* `apps/server/src/db/repository.ts` - Binds mutation and ownership replay to the authenticated actor and canonical command fingerprint, authorizes before replay, and returns immutable committed acknowledgements
+* `apps/server/src/db/repository.postgres.integration.test.ts` - Covers cross-principal, payload-mismatched, and delayed immutable mutation replay
+* `apps/server/src/db/ownership.postgres.integration.test.ts` - Covers actor-bound and payload-bound ownership lifecycle replay
+* `apps/client/src/network/authenticatedFetch.ts` - Clones authenticated requests so body-bearing calls can perform one forced-refresh retry
+* `apps/client/src/network/authenticatedFetch.test.ts` - Covers exact POST-body preservation across refreshed-token retry
 
 * `.github/workflows/cd.yml` - Validates identity configuration, queues releases, rejects active migration executions, and reconciles single-owner job settings
 * `apps/client/Dockerfile` - Generates JSON-safe public auth configuration, validates nginx before startup, and includes the shared quilt topology build input
@@ -124,6 +162,21 @@ All eight implementation phases are complete. Owner-only protocol-v2 placement a
 
 ## Additional or Deviating Changes
 
+* Phase 12 local implementation and validation are complete, but the phase remains externally blocked.
+  * Issues 14 and 98 retain broader scope, the staging environment has no protection rules, required approval variables are absent, and `SERVER_CORS_ORIGIN` is not an absolute HTTPS origin.
+  * No staging Container App jobs were observed, so migration execution, recovery deployment, and job-scoped RBAC are not evidenced.
+  * Retention, telemetry, rollback, deletion completion, mutation rollback, and production benchmark approvals remain unavailable; no external resources were changed.
+
+* Phase 11 remediates review findings IV-002, IV-008, IV-009, and IV-011 at repository level.
+  * Focused tests, release contracts, lint, build, Bicep compilation, and diff validation pass.
+  * Staging deployment, role assignment execution, environment reviewers, branch protection, and production benchmark approval remain externally controlled evidence.
+
+* Phase 10 remediates review findings IV-005, IV-006, and IV-007.
+  * Policy, integration, release-contract, lint, build, and diff validation pass; live transport scenarios remain scheduled for Phase 12.
+
+* Phase 9 remediates review findings IV-001, IV-003, and IV-004.
+  * Focused replay and retry tests, lint, build, and diff validation pass; mutation remains disabled.
+
 * External ID tenant capability, branding, domain, sign-in methods, and application registration were confirmed by the authorized administrator.
   * Staging contains the required non-secret identity variables and database secret; automated checks validate HTTPS URLs, exact same-origin routing, scope-to-audience consistency, and RS256.
 * GitHub issues 14 and 98 were narrowed to runtime and owner-only release criteria, and issue 94 children 102 through 108 were created and linked.
@@ -165,4 +218,4 @@ All eight implementation phases are complete. Owner-only protocol-v2 placement a
 
 ## Release Summary
 
-All eight implementation phases are complete. Full suites passed 208 server tests and 153 client tests; six owner-only browser tests, all 10 authenticated browser tests, and the authenticated multi-replica mutation gate pass. Token and JWKS failures, lifecycle disablement, hidden resources, claim races, stale revisions, mixed authority, migration rollback, recovery, and production rejection of test settings are covered. The 10,000-row authorization benchmark passes local regression ceilings. Migration rehearsal, the high-severity audit gate, release contracts, builds, lint, diagnostics, and diff validation pass. Production mutation remains disabled pending WI-08, WI-10, DR-03, DR-04, telemetry, rollback, and benchmark approvals.
+Review remediation corrected actor and payload-bound replay, immutable committed acknowledgements, body-preserving token refresh, authenticated-only policy, exact Socket.IO and deployment origins, runnable due-account deletion, recovery infrastructure declarations, multi-replica CI, and benchmark rollout gates. Full suites pass with 219 server tests, 154 client tests, one skipped server test, 10 owner-only browser tests, and one authenticated multi-replica test. Nine release-contract tests, migration rehearsal, local authorization benchmarks, lint, builds, Bicep compilation, and diff validation pass. Four moderate audit advisories and the existing client chunk warning remain. Production mutation stays disabled because staging configuration, deployed operational jobs, RBAC, repository protections, issue scope, retention, telemetry, rollback, and production benchmark approvals are not complete.

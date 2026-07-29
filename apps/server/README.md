@@ -59,6 +59,9 @@ Configure these GitHub environment variables for each deployment environment:
 	authorization audit and pseudonymous attribution retention
 * `AUTH_DELETION_COMPLETION_POLICY_APPROVED`: Confirms approved deletion
 	completion behavior when ownership remains blocked
+* `AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED`: Confirms production-like
+	authorization benchmark thresholds and rollback criteria are approved before
+	mutation enablement
 
 The corresponding client values are `AUTH_AUTHORITY`, `AUTH_CLIENT_ID`,
 `AUTH_API_SCOPE`, `AUTH_API_ORIGIN`, `AUTH_REDIRECT_URI`, and
@@ -144,7 +147,9 @@ Changing that default requires separate reviewed workflow work after the
 owner-only gate, migration rehearsal, telemetry, retention, deletion, and
 rollback approvals are recorded. Runtime startup additionally requires
 `AUTH_OWNER_E2E_GATE_APPROVED`, `AUTH_MIGRATION_REHEARSAL_APPROVED`, and
-`AUTH_MUTATION_ROLLBACK_APPROVED` whenever mutation is requested.
+`AUTH_MUTATION_ROLLBACK_APPROVED`, and
+`AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED` whenever mutation is
+requested.
 
 Rollout notes:
 - Keep `FEATURE_CHUNK_STREAMING_ENABLED=false` to hard-disable chunk streaming and preserve legacy session snapshot + tile events.

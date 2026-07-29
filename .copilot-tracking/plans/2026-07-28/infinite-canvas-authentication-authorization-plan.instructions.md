@@ -210,6 +210,57 @@ playwright*.config.ts
 * [x] Step 8.3: Fix minor issues and report blockers
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 532-536)
 
+### [x] Implementation Phase 9: Review Remediation for Replay and Client Retry
+
+<!-- parallelizable: false -->
+
+* [x] Step 9.1: Bind mutation replay to actor, command, and immutable committed response
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+* [x] Step 9.2: Bind ownership lifecycle replay to actor and canonical payload
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+* [x] Step 9.3: Preserve request bodies across the forced-refresh retry
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+* [x] Step 9.4: Validate replay and retry remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+
+### [x] Implementation Phase 10: Review Remediation for Authenticated Boundaries
+
+<!-- parallelizable: false -->
+
+* [x] Step 10.1: Remove anonymous aggregate authorization
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+* [x] Step 10.2: Enforce exact Socket.IO handshake origins
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+* [x] Step 10.3: Validate exact HTTPS deployment origins
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+* [x] Step 10.4: Validate authenticated boundary remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+
+### [x] Implementation Phase 11: Review Remediation for Operations and Rollout
+
+<!-- parallelizable: false -->
+
+* [x] Step 11.1: Make due-account deletion approval-aware and runnable
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+* [x] Step 11.2: Provision restricted recovery infrastructure and role
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+* [x] Step 11.3: Require benchmark approval and multi-replica CI
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+* [x] Step 11.4: Validate operational and rollout remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+
+### [ ] Implementation Phase 12: Review Remediation Coverage and Final Validation
+
+<!-- parallelizable: false -->
+<!-- blocked: external staging configuration, deployment, repository controls, issue ownership, and approvals -->
+
+* [x] Step 12.1: Add missing cross-principal, lifecycle, and transport scenarios
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 12)
+* [x] Step 12.2: Reconcile externally controlled release evidence
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 12)
+* [x] Step 12.3: Run the complete validation matrix and report remaining blockers
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 12)
+
 ## Planning Log
 
 See `.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md` for discrepancy tracking, implementation paths considered, and suggested follow-on work.

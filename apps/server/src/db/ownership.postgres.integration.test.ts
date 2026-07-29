@@ -7,8 +7,11 @@ import {
   acceptOwnershipTransfer,
   cancelOwnershipTransfer,
   claimPatch,
+  completePrincipalDeletion,
   createOwnershipTransfer,
   expireOwnershipTransfers,
+  recoverPrincipalDeletion,
+  requestPrincipalDeletion,
 } from './repository.js'
 import {
   authorizationAuditEvents,
@@ -221,5 +224,130 @@ describe('patch ownership claims', () => {
     const [abandoned] = await database.db.select().from(patches).where(eq(patches.id, abandonPatchId))
     expect(abandoned).toMatchObject({ ownerPrincipalId: null, state: 'unclaimed', revision: 1 })
     expect(await database.db.select().from(patchMemberships).where(eq(patchMemberships.patchId, abandonPatchId))).toEqual([])
+  })
+
+  it('binds ownership and deletion operation replay to the actor and canonical payload', async () => {
+    const ownerId = 'a3000000-0000-4000-8000-000000000010'
+    const recipientId = 'a3000000-0000-4000-8000-000000000011'
+    const otherId = 'a3000000-0000-4000-8000-000000000012'
+    const deletionId = 'a3000000-0000-4000-8000-000000000013'
+    const lifecycleQuiltId = 'a1000000-0000-4000-8000-000000000006'
+    const claimPatchId = 'a2000000-0000-4000-8000-000000000006'
+    const transferPatchId = 'a2000000-0000-4000-8000-000000000007'
+    const abandonPatchId = 'a2000000-0000-4000-8000-000000000008'
+    await database.db.insert(principals).values([
+      { id: ownerId, kind: 'human' },
+      { id: recipientId, kind: 'human' },
+      { id: otherId, kind: 'human' },
+      { id: deletionId, kind: 'human' },
+    ])
+    await database.db.insert(quilts).values({
+      id: lifecycleQuiltId, patchRows: 1, patchColumns: 3,
+      patchWidth: 10, patchHeight: 10, topology: 'toroidal', protocolVersion: 2,
+    })
+    await database.db.insert(patches).values([
+      { id: claimPatchId, quiltId: lifecycleQuiltId, row: 0, column: 0 },
+      { id: transferPatchId, quiltId: lifecycleQuiltId, row: 0, column: 1, ownerPrincipalId: ownerId, state: 'active' },
+      { id: abandonPatchId, quiltId: lifecycleQuiltId, row: 0, column: 2, ownerPrincipalId: ownerId, state: 'active' },
+    ])
+    await database.db.insert(patchVisibilityPolicies).values({ patchId: claimPatchId, claimEnabled: true })
+    await database.db.insert(patchMemberships).values([
+      { patchId: transferPatchId, principalId: ownerId, role: 'owner' },
+      { patchId: abandonPatchId, principalId: ownerId, role: 'owner' },
+    ])
+
+    const claimOperationId = randomUUID()
+    await expect(claimPatch({ operationId: claimOperationId, principalId: otherId, patchId: claimPatchId }))
+      .resolves.toMatchObject({ claimed: true })
+    await expect(claimPatch({ operationId: claimOperationId, principalId: recipientId, patchId: claimPatchId }))
+      .resolves.toMatchObject({ claimed: false, reason: 'PATCH_UNAVAILABLE' })
+
+    const createOperationId = randomUUID()
+    const offer = await createOwnershipTransfer({
+      operationId: createOperationId,
+      patchId: transferPatchId,
+      senderPrincipalId: ownerId,
+      recipientPrincipalId: recipientId,
+    })
+    await expect(createOwnershipTransfer({
+      operationId: createOperationId,
+      patchId: transferPatchId,
+      senderPrincipalId: ownerId,
+      recipientPrincipalId: otherId,
+    })).resolves.toMatchObject({ succeeded: false, reason: 'TRANSFER_UNAVAILABLE' })
+
+    const acceptOperationId = randomUUID()
+    await expect(acceptOwnershipTransfer({
+      operationId: acceptOperationId,
+      transferId: offer.transferId!,
+      recipientPrincipalId: recipientId,
+    })).resolves.toMatchObject({ succeeded: true })
+    await expect(acceptOwnershipTransfer({
+      operationId: acceptOperationId,
+      transferId: offer.transferId!,
+      recipientPrincipalId: otherId,
+    })).resolves.toMatchObject({ succeeded: false, reason: 'TRANSFER_UNAVAILABLE' })
+
+    const cancellable = await createOwnershipTransfer({
+      operationId: randomUUID(),
+      patchId: transferPatchId,
+      senderPrincipalId: recipientId,
+      recipientPrincipalId: ownerId,
+    })
+    const cancelOperationId = randomUUID()
+    await expect(cancelOwnershipTransfer({
+      operationId: cancelOperationId,
+      transferId: cancellable.transferId!,
+      actorPrincipalId: recipientId,
+    })).resolves.toMatchObject({ succeeded: true })
+    await expect(cancelOwnershipTransfer({
+      operationId: cancelOperationId,
+      transferId: cancellable.transferId!,
+      actorPrincipalId: ownerId,
+    })).resolves.toMatchObject({ succeeded: false, reason: 'TRANSFER_UNAVAILABLE' })
+
+    const abandonOperationId = randomUUID()
+    await expect(abandonPatch({ operationId: abandonOperationId, patchId: abandonPatchId, principalId: ownerId }))
+      .resolves.toMatchObject({ succeeded: true })
+    await expect(abandonPatch({ operationId: abandonOperationId, patchId: abandonPatchId, principalId: otherId }))
+      .resolves.toMatchObject({ succeeded: false, reason: 'NOT_OWNER' })
+
+    const deletionOperationId = randomUUID()
+    await expect(requestPrincipalDeletion({ operationId: deletionOperationId, principalId: deletionId }))
+      .resolves.toMatchObject({ succeeded: true })
+    await expect(requestPrincipalDeletion({ operationId: deletionOperationId, principalId: ownerId }))
+      .resolves.toMatchObject({ succeeded: false, reason: 'PRINCIPAL_UNAVAILABLE' })
+
+    const recoveryOperationId = randomUUID()
+    await expect(recoverPrincipalDeletion({
+      operationId: recoveryOperationId,
+      principalId: deletionId,
+      actorPrincipalId: deletionId,
+    })).resolves.toMatchObject({ succeeded: true })
+    await expect(recoverPrincipalDeletion({
+      operationId: recoveryOperationId,
+      principalId: deletionId,
+      actorPrincipalId: ownerId,
+    })).resolves.toMatchObject({ succeeded: false, reason: 'PRINCIPAL_UNAVAILABLE' })
+
+    const completedAt = new Date('2026-09-01T00:00:00Z')
+    await database.db.update(principals).set({
+      status: 'deletion_pending',
+      deletionRequestedAt: new Date('2026-07-01T00:00:00Z'),
+      deletionRecoveryDeadline: new Date('2026-08-01T00:00:00Z'),
+    }).where(eq(principals.id, deletionId))
+    const completionOperationId = randomUUID()
+    await expect(completePrincipalDeletion({
+      operationId: completionOperationId,
+      principalId: deletionId,
+      retentionApproved: true,
+      completedAt,
+    })).resolves.toMatchObject({ succeeded: true })
+    await expect(completePrincipalDeletion({
+      operationId: completionOperationId,
+      principalId: deletionId,
+      retentionApproved: false,
+      completedAt,
+    })).resolves.toMatchObject({ succeeded: false, reason: 'PRINCIPAL_UNAVAILABLE' })
   })
 })

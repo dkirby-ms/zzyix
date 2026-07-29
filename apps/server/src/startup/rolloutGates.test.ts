@@ -35,7 +35,19 @@ describe('production rollout gates', () => {
       AUTH_OWNER_E2E_GATE_APPROVED: 'true',
       AUTH_MIGRATION_REHEARSAL_APPROVED: 'true',
       AUTH_MUTATION_ROLLBACK_APPROVED: 'true',
+      AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: 'true',
     })).not.toThrow()
+  })
+
+  it('rejects mutation when the production authorization benchmark is unapproved', () => {
+    expect(() => validateProductionRolloutGates({
+      ...approvedProduction,
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
+      AUTH_OWNER_E2E_GATE_APPROVED: 'true',
+      AUTH_MIGRATION_REHEARSAL_APPROVED: 'true',
+      AUTH_MUTATION_ROLLBACK_APPROVED: 'true',
+      AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: 'false',
+    })).toThrow('AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED')
   })
 
   it('does not impose production approvals in test mode', () => {

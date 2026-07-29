@@ -11,6 +11,7 @@ import {
   isQuiltPlaceTileRequest,
   isQuiltRemoveTileRequest,
   isQuiltRoomRequest,
+  isSocketHandshakeOriginAllowed,
   isPlaceTilePayload,
   ownershipRequest,
   isSelectionUpdatePayload,
@@ -34,6 +35,24 @@ const nextSessionId = (): string => {
   sessionCounter += 1
   return `integration-session-${sessionCounter}`
 }
+
+describe('Socket.IO handshake origin boundary', () => {
+  const allowedOrigin = 'https://app.example.com'
+
+  it('accepts only the exact configured browser origin', () => {
+    expect(isSocketHandshakeOriginAllowed(allowedOrigin, allowedOrigin, 'production')).toBe(true)
+    expect(isSocketHandshakeOriginAllowed('https://app.example.com.evil.net', allowedOrigin, 'production')).toBe(false)
+    expect(isSocketHandshakeOriginAllowed('https://example.com', allowedOrigin, 'production')).toBe(false)
+    expect(isSocketHandshakeOriginAllowed(['https://app.example.com'], allowedOrigin, 'production')).toBe(false)
+  })
+
+  it('rejects missing browser origins in production but permits deliberate test and server clients', () => {
+    expect(isSocketHandshakeOriginAllowed(undefined, allowedOrigin, 'production')).toBe(false)
+    expect(isSocketHandshakeOriginAllowed(undefined, allowedOrigin, 'test')).toBe(true)
+    expect(isSocketHandshakeOriginAllowed(undefined, allowedOrigin, 'development')).toBe(true)
+    expect(isSocketHandshakeOriginAllowed('null', allowedOrigin, 'test')).toBe(false)
+  })
+})
 
 describe('ownership HTTP contracts', () => {
   it('requires UUID operation and resource identifiers', () => {
@@ -935,18 +954,17 @@ describe('protocol-v2 authorization boundary', () => {
     policyVersion: 1,
   }
 
-  it('does not infer fine, presence, or event visibility from transport identity', () => {
-    const anonymousPatch = buildPatchRoomAccess({
+  it('derives only authenticated principal capabilities for room access', () => {
+    const patchAccess = buildPatchRoomAccess({
       id: 'patch-1',
       state: 'active',
       isMember: false,
       policy: authenticatedPolicy,
     })
 
-    expect(anonymousPatch).toMatchObject({
-      publicFine: false,
-      publicAggregate: false,
+    expect(patchAccess).toMatchObject({
       principalFine: true,
+      principalAggregate: true,
       principalPresence: true,
       principalEvents: true,
     })

@@ -93,7 +93,7 @@ describe('patch-scoped PostgreSQL placement', () => {
 
   beforeEach(async () => {
     await queryWithConnection(database,
-      'TRUNCATE authorization_audit_events, patch_operations, patch_snapshots, tile_spatial_refs, tiles CASCADE',
+      'TRUNCATE authorization_audit_events, idempotency_keys, patch_operations, patch_snapshots, tile_spatial_refs, tiles CASCADE',
     )
     await queryWithConnection(database, 'TRUNCATE patch_memberships')
     await queryWithConnection(database, 'UPDATE patches SET revision = 0, owner_principal_id = $1', [PRINCIPAL_ID])
@@ -110,6 +110,27 @@ describe('patch-scoped PostgreSQL placement', () => {
       'SELECT (SELECT count(*)::int FROM tiles) AS tiles, (SELECT count(*)::int FROM patch_operations) AS operations',
     )
     expect(counts[0]).toEqual({ tiles: 1, operations: 2 })
+  })
+
+  it('requires ownership of every patch touched by a seam placement', async () => {
+    await database.db.update(patches)
+      .set({ ownerPrincipalId: MEMBER_PRINCIPAL_ID })
+      .where(eq(patches.id, PATCH_IDS[3]))
+
+    const result = await placement(
+      '40000000-0000-4000-8000-000000000018',
+      randomUUID(),
+      0.2,
+      revisions(0, [PATCH_IDS[0], PATCH_IDS[3]]),
+    )
+    const counts = await queryWithConnection<{ tiles: number; refs: number; operations: number }>(database,
+      'SELECT (SELECT count(*)::int FROM tiles) AS tiles, '
+      + '(SELECT count(*)::int FROM tile_spatial_refs) AS refs, '
+      + '(SELECT count(*)::int FROM patch_operations) AS operations',
+    )
+
+    expect(result).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
+    expect(counts[0]).toEqual({ tiles: 0, refs: 0, operations: 0 })
   })
 
   it('does not deadlock when address order is reversed from patch ID lock order', async () => {
@@ -148,6 +169,46 @@ describe('patch-scoped PostgreSQL placement', () => {
     expect(first).toMatchObject({ committed: true, idempotent: false })
     expect(retry).toMatchObject({ committed: true, idempotent: true })
     expect(counts[0]).toEqual({ tiles: 1, refs: 1, operations: 1 })
+  })
+
+  it('binds placement replay to the actor and canonical command payload', async () => {
+    const operationId = randomUUID()
+    const tileId = '40000000-0000-4000-8000-000000000014'
+    const command = {
+      quiltId: QUILT_ID,
+      operationId,
+      principalId: PRINCIPAL_ID,
+      expectedPatchRevisions: { [PATCH_IDS[2]]: 0 },
+      payload: {
+        tileId,
+        shape: 'square' as const,
+        color: '#abc',
+        material: 'ceramic' as const,
+        transform: { position: { x: 25, y: 5 }, rotation: 0 },
+      },
+    }
+
+    await expect(persistQuiltTilePlacement(command)).resolves.toMatchObject({ committed: true, idempotent: false })
+    await expect(persistQuiltTilePlacement({
+      ...command,
+      principalId: MEMBER_PRINCIPAL_ID,
+    })).resolves.toEqual({ committed: false, reason: 'UNAUTHORIZED' })
+    await expect(persistQuiltTilePlacement({
+      ...command,
+      payload: { ...command.payload, color: '#def' },
+    })).resolves.toEqual({ committed: false, reason: 'PLACEMENT_REJECTED' })
+  })
+
+  it('returns immutable committed placement revisions after later writes', async () => {
+    const operationId = randomUUID()
+    const tileId = '40000000-0000-4000-8000-000000000015'
+    const expectedPatchRevisions = { [PATCH_IDS[2]]: 0 }
+    const first = await placement(tileId, operationId, 25, expectedPatchRevisions)
+    await placement('40000000-0000-4000-8000-000000000016', randomUUID(), 28, { [PATCH_IDS[2]]: 1 })
+    const retry = await placement(tileId, operationId, 25, expectedPatchRevisions)
+
+    expect(first).toMatchObject({ committed: true, idempotent: false, patchRevisions: { [PATCH_IDS[2]]: 1 } })
+    expect(retry).toEqual({ ...first, idempotent: true })
   })
 
   it('allows a distant patch write while an unrelated patch row is locked', async () => {
@@ -276,7 +337,12 @@ describe('patch-scoped PostgreSQL placement', () => {
     }
 
     const first = await persistQuiltTileRemoval(removal)
+    await placement('40000000-0000-4000-8000-000000000017', randomUUID(), 15, { [PATCH_IDS[1]]: 2 })
     const retry = await persistQuiltTileRemoval(removal)
+    const crossPrincipalRetry = await persistQuiltTileRemoval({
+      ...removal,
+      principalId: MEMBER_PRINCIPAL_ID,
+    })
     const mismatchedRetry = await persistQuiltTileRemoval({
       ...removal,
       tileId: '40000000-0000-4000-8000-000000000099',
@@ -290,7 +356,8 @@ describe('patch-scoped PostgreSQL placement', () => {
     )
 
     expect(first).toMatchObject({ committed: true, idempotent: false, patchRevisions: { [PATCH_IDS[1]]: 2 } })
-    expect(retry).toMatchObject({ committed: true, idempotent: true, patchRevisions: { [PATCH_IDS[1]]: 2 } })
+    expect(retry).toEqual({ ...first, idempotent: true })
+    expect(crossPrincipalRetry).toEqual({ committed: false, reason: 'RESOURCE_UNAVAILABLE' })
     expect(mismatchedRetry).toEqual({ committed: false, reason: 'RESOURCE_UNAVAILABLE' })
     expect(counts[0]).toEqual({ tiles: 0, refs: 0, removals: 1, audits: 1 })
   })

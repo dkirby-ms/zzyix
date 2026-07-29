@@ -1,143 +1,193 @@
 ---
 title: Infinite Canvas Authentication and Authorization Phase 008 Validation
-description: RPI validation of implementation phase 8 against the plan, changes log, research, and details
-ms.date: 2026-07-28
+description: Current-state RPI validation of phase 8 against the plan, changes, research, repository, and git state
+ms.date: 2026-07-29
 ms.topic: reference
 ---
 
 ## Validation Metadata
 
-* Status: Failed
+* Status: Partial
 * Phase: 8
 * Plan: `.copilot-tracking/plans/2026-07-28/infinite-canvas-authentication-authorization-plan.instructions.md`
 * Planning log: `.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md`
 * Changes log: `.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md`
 * Research: `.copilot-tracking/research/2026-07-28/infinite-canvas-authentication-authorization-research.md`
 * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md`
-* Severity counts: 2 critical, 1 major, 0 minor
+* Validated commit: `4bcefa7` on branch `infinite-canvas`
+* Validation date: 2026-07-29
+* Severity counts: 0 critical, 3 major, 2 minor
 
-## Scope
+## Executive Assessment
 
-This validation covers Implementation Phase 8 only. Phase 8 is the final rollout
-validation after identity, protected boundaries, client authentication, ownership,
-authenticated mutation, deployment, and authenticated E2E work. It requires the
-full command suite, security and rollout failure rehearsals, production-like
-benchmarks, isolated corrections, and a final blocker report.
+The stale validation no longer described the repository. The current plan marks all
+eight phases complete, and the repository now contains token verification, durable
+principal mapping, protected HTTP and Socket.IO boundaries, ownership lifecycle,
+authenticated protocol-v2 mutations, a local OIDC issuer, authenticated browser
+tests, multi-replica configuration, migration rehearsal, and a 10,000-row benchmark.
 
-Phase 1 Step 1.4 is narrower prerequisite validation. Its server and client builds,
-migration rehearsal, Drizzle consistency, runtime image checks, and configuration
-checks establish the release foundation. They do not satisfy Phase 8 authentication,
-authorization, authenticated E2E, multi-replica, security-failure, benchmark, or
-rollout-gate requirements. The changes log explicitly limits its completion claim to
-Phase 1 and states that dependent identity implementation has not started
-(`.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md:8-9,47`).
+Phase 8 is Partial rather than Passed. Most implementation and failure-rehearsal
+surfaces exist, and CD deploys mutation disabled. The available evidence does not
+establish a clean current-checkout pass for every Step 8.1 command, does not directly
+cover mixed cross-patch authority, and does not encode production benchmark approval
+in the rollout gate contract. External production approvals remain unresolved.
+
+No Critical finding is recorded because production protocol-v2 mutation is
+fail-closed in two independent ways. Runtime mutation is test-only at
+`apps/server/src/index.ts:222-224`, and CD deploys
+`FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false` at `.github/workflows/cd.yml:530-553`
+and `.github/workflows/cd.yml:702-706`.
+
+## Phase Requirements
+
+Phase 8 requires the following work at
+`.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md:547-569`:
+
+* Step 8.1 runs audit, lint, build, full tests, single-replica E2E,
+  multi-replica E2E, and migration rehearsal
+* Step 8.2 verifies authentication, authorization, outage, lifecycle, race,
+  revision, migration, rollback, and test-isolation failures and runs
+  production-like benchmarks before threshold approval
+* Step 8.3 applies isolated corrections, reports blockers, and leaves mutation
+  disabled until every release gate is evidenced
+
+The research test matrix is at
+`.copilot-tracking/research/2026-07-28/infinite-canvas-authentication-authorization-research.md:316-327`.
 
 ## Plan Item Comparison
 
-| Plan item | Required evidence | Changes log match | Verified status |
-|-----------|-------------------|-------------------|-----------------|
-| Step 8.1 | `audit`, lint, build, unit tests, single-replica E2E, multi-replica E2E, and migration rehearsal | No Phase 8 command execution is claimed | Missing |
-| Step 8.2 | Authentication, authorization, outage, lifecycle, race, revision, migration, rollback, test-isolation, and production-like benchmark rehearsals | No Phase 8 security rehearsal or benchmark is claimed | Missing |
-| Step 8.3 | Isolated corrections, final blocker report, and disabled mutation until every gate is evidenced | Phase 1 administrative blocker is reported and mutation remains disabled, but no Phase 8 final report exists | Partial |
+| Plan item | Changes claim | Current evidence | Status |
+|-----------|---------------|------------------|--------|
+| Step 8.1 | Full suites, browser gates, migration, audit, build, lint, diagnostics, and diff validation pass at `.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md:168` | All required scripts exist. This session verified audit, lint, build, 208 server tests, diagnostics, and migration rehearsal. Full client and E2E completion was not independently re-established. | Partial |
+| Step 8.2 | Complete security matrix and 10,000-row benchmark pass at `.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md:162-168` | Most named cases and all benchmark operations have code evidence. Mixed cross-patch authority was not found, and production thresholds remain unapproved. | Partial |
+| Step 8.3 | External approvals remain blockers and production mutation remains disabled at `.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md:164-168` | CD and runtime fail closed. Benchmark approval is absent from the executable startup gate. | Partial |
 
-The plan leaves Phase 8 and all three steps unchecked
-(`.copilot-tracking/plans/2026-07-28/infinite-canvas-authentication-authorization-plan.instructions.md:200-209`).
-The same plan leaves Phases 2 through 7 unchecked
-(`.copilot-tracking/plans/2026-07-28/infinite-canvas-authentication-authorization-plan.instructions.md:124-198`),
-so Phase 8's implementation and deployment prerequisites are not available for final
-rollout validation.
+## Command Validation
+
+| Required command | Current-session result | Assessment |
+|------------------|------------------------|------------|
+| `npm run audit` | Exit success with four moderate `esbuild` advisories below the high-severity threshold | Pass with advisory |
+| `npm run lint` | Client and server `oxlint` completed without findings | Pass |
+| `npm run build` | Both workspaces built; Vite emitted chunk-size warnings | Pass with warning |
+| `npm run test` | Interrupted during the client workspace | Not established |
+| `npm run test:server` | 208 tests passed; opt-in benchmark skipped | Pass |
+| `npm run test:client` | Terminal queue contamination prevented an attributable result | Not established |
+| `npm run test:e2e:ci` | Verified statically; not completed in this session | Not established |
+| `npm run test:e2e:multi-replica` | Verified statically; not completed in this session | Not established |
+| `./scripts/verify-quilt-migration.sh rehearse` | Fresh and upgrade migrations, parity, rollback, recovery, and cleanup completed | Pass |
+| `npm run test:authorization-benchmark` | Implementation and prior result verified; not independently rerun | Prior evidence only |
+
+Repository diagnostics reported no errors in `apps/server/src`, `apps/client/src`,
+or `e2e`.
 
 ## Verified Evidence
 
-* The Phase 8 details require seven commands, including
-  `npm run test:e2e:multi-replica`
-  (`.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md:517-526`).
-* The root package scripts define `audit`, lint, build, test, and `test:e2e:ci`, but
-  do not define `test:e2e:multi-replica` (`package.json:9-34`). Running the exact
-  required command returned `Missing script: "test:e2e:multi-replica"`.
-* No files exist under `apps/server/src/auth/` or `apps/client/src/auth/`, no
-  `apps/server/migrations/0006*` authentication migration exists, and
-  `e2e/authentication.spec.ts` does not exist.
-* The server still accepts an internal `testPrincipalId` when `E2E_TEST_MODE=true`
-  rather than validating a local OIDC token (`apps/server/src/index.ts:1743-1749`).
-  Multi-replica E2E still sends that value in the Socket.IO auth payload
-  (`e2e/quilt-reconnect.spec.ts:24-29`). This conflicts with the research test
-  isolation requirement and Phase 7 prerequisite to remove identity bypasses.
-* The protocol-v2 handshake still reports `mutationEnabled: false`
-  (`apps/server/src/index.ts:1796-1807`), and the seam E2E asserts the disabled state
-  (`e2e/quilt-seams.spec.ts:64-68`). This is the correct fail-closed posture while
-  rollout gates remain unmet, but it is not evidence that the final gates passed.
-* The research requires token, JWKS/outage, principal mapping, REST/CORS, socket,
-  claims, ownership, visibility, mutation, browser-security, and test-isolation
-  matrices
-  (`.copilot-tracking/research/2026-07-28/infinite-canvas-authentication-authorization-research.md:316-327`).
-  Searches of application, E2E, workflow, and script paths found no tests for the
-  Phase 8 wrong-issuer, wrong-audience, missing-scope, unknown-key, key-rotation,
-  provider-outage, deletion-pending, claim-race, mixed-authority, or
-  production-cardinality scenarios.
-* The planning log retains high-impact External ID, deletion-resolution, and
-  retention-policy blockers
-  (`.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md:7-27`).
-  The changes log confirms External ID administration blocks Phase 2
-  (`.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md:47`).
-* Working-tree inspection found no unlogged Phase 8 implementation. The only
-  non-review changes were `scripts/bootstrap-cd-environment.sh` and
-  `scripts/gh-vars.env.template`; neither provides the missing Phase 8 auth,
-  authenticated E2E, security-rehearsal, or benchmark surfaces.
+* Token claim, algorithm, signature, unknown-key, and malformed-token cases are at
+  `apps/server/src/auth/tokenVerifier.test.ts:88-128`
+* Key rotation and cached-key outage behavior are at
+  `apps/server/src/auth/tokenVerifier.test.ts:131-183`
+* Inactive principal rejection is at
+  `apps/server/src/auth/principalContext.postgres.integration.test.ts:80-101`
+* Production test-setting and approval rejection is at
+  `apps/server/src/startup/rolloutGates.test.ts:15-42`
+* Unauthorized and stale placement preserves no partial state at
+  `apps/server/src/db/repository.postgres.integration.test.ts:176-205`
+* Member and delegated roles cannot mutate without persisted ownership at
+  `apps/server/src/db/repository.postgres.integration.test.ts:207-269`
+* Durable idempotent removal and denied or stale rollback are at
+  `apps/server/src/db/repository.postgres.integration.test.ts:271-322`
+* Failed migration rollback is at `apps/server/src/db/migrate.test.ts:28-53`
+* Authenticated two-replica owner mutation, denial, stale revision, and replay are at
+  `e2e/quilt-reconnect.spec.ts:45-56`, `e2e/quilt-reconnect.spec.ts:75-175`, and
+  `e2e/quilt-reconnect.spec.ts:193-223`
+* The 10,000-principal and 10,000-policy benchmark covers mapping, catalog, claim,
+  transfer, placement, and removal at
+  `apps/server/src/db/authorization.benchmark.test.ts:15-223`
+* The benchmark emits `productionThresholdApproved: false` at
+  `apps/server/src/db/authorization.benchmark.test.ts:202-210`
+* No `testPrincipalId` reference exists in application, E2E, workflow,
+  infrastructure, or script paths
 
 ## Findings
 
 ### Critical
 
-1. Step 8.1 is not implemented or executable as specified. No final validation run
-   is recorded, and the required `test:e2e:multi-replica` script is absent. The
-   focused Phase 1 checks cannot substitute for the final authenticated rollout
-   suite because they predate and exclude Phases 2 through 7.
-2. Step 8.2 has no implementable authentication or authorization target and no
-   rehearsal evidence. Production token verification, principal lifecycle,
-   protected transports, local OIDC test isolation, ownership commands, and
-   authenticated protocol-v2 mutations are absent. The required failure matrix and
-   production-like benchmarks therefore cannot establish rollout safety.
+None.
 
 ### Major
 
-1. Step 8.3 is only partially represented. The Phase 1 blocker is documented and
-   mutation remains disabled, which is correct, but there is no Phase 8 correction
-   record, consolidated final blocker report, benchmark threshold decision,
-   rollout approval, or evidence ledger for every release gate.
+1. Step 8.1 lacks reproducible current-checkout evidence for every required command.
+   This session established audit, lint, build, server tests, diagnostics, and
+   migration rehearsal, but not clean client and Playwright results.
+2. Mixed cross-patch authority is not directly rehearsed. Existing tests prove
+   member denial, ownership checks, unauthorized rollback, stale revisions, and
+   owner success, but not one footprint spanning patches with mixed authority.
+3. Production benchmark approval is absent from the executable rollout gate.
+   `validateProductionRolloutGates` has no benchmark approval at
+   `apps/server/src/startup/rolloutGates.ts:10-34`, although the benchmark records
+   production approval as false. Current CD remains safe because mutation is forced
+   off, but a future enablement contract would be incomplete.
 
 ### Minor
 
-None recorded.
+1. The audit gate passes but reports four moderate `esbuild` vulnerabilities through
+   the pinned Drizzle toolchain. This is recorded at
+   `.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md:140-142`.
+2. The production client build passes with chunks above Vite's 500 kB warning
+   threshold. This is a performance follow-up, not an authentication failure.
 
 ## Coverage Assessment
 
-Phase 8 coverage is 0 of 3 steps complete. Step 8.3 has partial fail-closed evidence,
-but that does not complete the step or increase completed-step coverage. The phase
-fails because its prerequisite implementation is explicitly blocked after Phase 1,
-one mandated command does not exist, and none of the final security, E2E,
-performance, or rollout rehearsals is evidenced.
+All three steps are Partial. Step 8.1 lacks complete attributable command evidence.
+Step 8.2 covers most named cases and all six benchmark operations but lacks direct
+mixed-authority coverage and approved production thresholds. Step 8.3 documents
+blockers and keeps deployment fail-closed, but benchmark approval is absent from the
+gate model.
 
-Focused Phase 1 prerequisite validation is credited only to Phase 1 Step 1.4. It
-must remain distinct from the final Phase 8 rollout validation.
+The implementation is not failed or unsafe for its current disabled production
+posture. It is not ready for Passed status or production mutation enablement until
+the missing executable evidence, mixed-authority test, and benchmark gate are resolved.
+
+## Current Git State
+
+Validation started at commit `4bcefa7` on branch `infinite-canvas`. Initial status
+contained one unrelated modified plan-review artifact. Concurrent workspace activity
+later modified Phase 2 and Phase 3 validation artifacts. None belongs to Phase 8
+implementation, and this validation did not modify or revert them. No unlogged Phase
+8 implementation file was present when validation began.
+
+## External Blockers
+
+* DR-03 deletion completion policy when ownership remains
+* DR-04 retention periods for pseudonymous attribution and audit
+* WI-08 staging migration-job reconciliation
+* WI-10 restricted recovery provisioning and governance
+* WI-11 representative production authorization budgets
+* WI-12 telemetry and rollback approval
+
+These blockers are recorded at
+`.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md:7-21`
+and `.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md:126-143`.
 
 ## Recommended Next Validations
 
-* Revalidate Phase 8 only after Phases 2 through 7 have implementation and validation
-  evidence and the External ID administrative blocker is resolved
-* Verify all seven Step 8.1 commands, including a defined authenticated
-  `test:e2e:multi-replica` script
-* Execute the complete Step 8.2 security and rollout failure matrix with retained
-  artifacts
-* Benchmark mapping, catalog policy, claim, transfer, placement, and removal at
-  approved production-like cardinality and compare results with approved thresholds
-* Verify production rejection of local issuer keys, `testPrincipalId`, and every
-  E2E bypass
-* Confirm migration failure, rollback, telemetry, retention, ownership resolution,
-  and backlog gates before considering mutation enablement
-* Review the final blocker and correction ledger against every Phase 8 release gate
+* Run `npm run test`, `npm run test:e2e:ci`, and
+  `npm run test:e2e:multi-replica` in isolated terminals or CI and retain
+  commit-bound artifacts
+* Add a test whose canonical footprint spans patches with mixed owner authority and
+  proves no partial state or fanout
+* Add an approved production benchmark gate to startup and CD before introducing a
+  production-capable mutation enablement path
+* Rerun the benchmark on representative production infrastructure and record
+  approved budgets, workload, window, and approver
+* Validate staging migration reconciliation, recovery provisioning, telemetry, and
+  rollback against deployed Azure resources
+* Reassess the moderate dependency advisories without forcing a Drizzle downgrade
 
 ## Clarifying Questions
 
-None. The available artifacts consistently identify Phase 1 as the only implemented
-phase and Phase 8 as pending final rollout work.
+* Where are durable command or CI artifacts for the claimed 153 client tests, 10
+  authenticated browser tests, six owner-only browser tests, and multi-replica gate
+  at commit `4bcefa7`?
+* Which environment and accountable approver will establish the production
+  authorization benchmark thresholds required by WI-11?

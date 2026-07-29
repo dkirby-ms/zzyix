@@ -1061,6 +1061,20 @@ export const isOriginAllowed = (requestOrigin: string, allowedOrigin: string | s
   return allowedOrigin === requestOrigin
 }
 
+export const isSocketHandshakeOriginAllowed = (
+  requestOrigin: string | string[] | undefined,
+  allowedOrigin: string | string[],
+  nodeEnv: string | undefined,
+): boolean => {
+  if (requestOrigin === undefined) {
+    return nodeEnv !== 'production'
+  }
+
+  return typeof requestOrigin === 'string'
+    && requestOrigin !== 'null'
+    && isOriginAllowed(requestOrigin, allowedOrigin)
+}
+
 export const toRejectReason = (reason: string): PlaceTileRejectReason => {
   if (reason.startsWith('out-of-bounds')) {
     return 'OUT_OF_BOUNDS'
@@ -1753,6 +1767,7 @@ if (isTestControlEnabled) {
     const externalSubject = typeof req.body?.externalSubject === 'string'
       ? req.body.externalSubject
       : 'e2e-owner'
+    const claimEnabled = req.body?.claimEnabled === true
     const providerNamespace = process.env.AUTH_TRUSTED_ISSUER
     const tileId = crypto.randomUUID()
     try {
@@ -1784,7 +1799,7 @@ if (isTestControlEnabled) {
           )
           VALUES (
             ${patchId}, 'authenticated', 'authenticated', 'authenticated', 'authenticated',
-            'authenticated', 'authenticated', false, 1
+            'authenticated', 'authenticated', ${claimEnabled}, 1
           )
         `)
         await tx.execute(sql`
@@ -1802,7 +1817,7 @@ if (isTestControlEnabled) {
           VALUES (${tileId}, ${patchId}, 0, 0)
         `)
       })
-      res.status(200).json({ canvasId, quiltId, patchId, externalSubject })
+      res.status(200).json({ canvasId, quiltId, patchId, principalId, externalSubject })
     } catch (error) {
       writeLog('error', 'test_quilt_setup_failed', { error })
       res.status(500).json({ error: 'Failed to seed quilt' })
@@ -1925,6 +1940,13 @@ app.use((error: unknown, req: express.Request, res: express.Response, _next: exp
 const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
   httpServer,
   {
+    allowRequest: (request, callback) => {
+      callback(null, isSocketHandshakeOriginAllowed(
+        request.headers.origin,
+        resolveCorsOrigin(process.env.CORS_ORIGIN),
+        process.env.NODE_ENV,
+      ))
+    },
     cors: {
       origin: resolveCorsOrigin(process.env.CORS_ORIGIN),
       methods: ['GET', 'POST'],

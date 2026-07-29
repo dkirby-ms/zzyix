@@ -40,7 +40,7 @@ export const createAuthenticatedFetch = ({
     const send = async (token: string): Promise<Response> => {
       const headers = new Headers(request.headers)
       headers.set('Authorization', `Bearer ${token}`)
-      return fetchImplementation(new Request(request, { headers }))
+      return fetchImplementation(new Request(request.clone(), { headers }))
     }
 
     try {

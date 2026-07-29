@@ -71,11 +71,37 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Resolve Restricted Recovery Infrastructure
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          INFRA_DEPLOYMENT_NAME: ${{ vars.AZURE_INFRA_DEPLOYMENT_NAME }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${RESOURCE_GROUP}" || -z "${INFRA_DEPLOYMENT_NAME}" ]]; then
+              echo 'Restricted recovery infrastructure deployment is not configured.' >&2
+              exit 1
+            fi
+
+            recovery_job_name="$(az deployment group show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${INFRA_DEPLOYMENT_NAME}" \
+              --query properties.outputs.recoveryJobName.value \
+              --output tsv)"
+
+            if [[ -z "${recovery_job_name}" || "${recovery_job_name}" == 'null' ]]; then
+              echo 'Infrastructure deployment did not expose recoveryJobName.' >&2
+              exit 1
+            fi
+
+            echo "RECOVERY_JOB_NAME=${recovery_job_name}" >> "${GITHUB_ENV}"
+
       - name: Start Restricted Recovery Job
         uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
         env:
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-          RECOVERY_JOB_NAME: ${{ vars.RECOVERY_JOB_NAME }}
           RECOVERY_ACTION: ${{ inputs.recovery_action }}
           RECOVERY_TARGET_ID: ${{ inputs.recovery_target_id }}
           SUPPORT_TICKET: ${{ inputs.support_ticket }}
@@ -241,6 +267,11 @@ jobs:
       AUTH_ROLLBACK_GATE_APPROVED: ${{ vars.AUTH_ROLLBACK_GATE_APPROVED }}
       AUTH_RETENTION_POLICY_APPROVED: ${{ vars.AUTH_RETENTION_POLICY_APPROVED }}
       AUTH_DELETION_COMPLETION_POLICY_APPROVED: ${{ vars.AUTH_DELETION_COMPLETION_POLICY_APPROVED }}
+      AUTH_OWNER_E2E_GATE_APPROVED: ${{ vars.AUTH_OWNER_E2E_GATE_APPROVED }}
+      AUTH_MIGRATION_REHEARSAL_APPROVED: ${{ vars.AUTH_MIGRATION_REHEARSAL_APPROVED }}
+      AUTH_MUTATION_ROLLBACK_APPROVED: ${{ vars.AUTH_MUTATION_ROLLBACK_APPROVED }}
+      AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: ${{ vars.AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED }}
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'false'
 
     steps:
       - name: Check Out
@@ -287,6 +318,10 @@ jobs:
             AUTH_ROLLBACK_GATE_APPROVED
             AUTH_RETENTION_POLICY_APPROVED
             AUTH_DELETION_COMPLETION_POLICY_APPROVED
+            AUTH_OWNER_E2E_GATE_APPROVED
+            AUTH_MIGRATION_REHEARSAL_APPROVED
+            AUTH_MUTATION_ROLLBACK_APPROVED
+            AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED
           )
 
           for variable_name in "${required_variables[@]}"; do
@@ -309,19 +344,55 @@ jobs:
             fi
           done
 
+          if [[ "${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}" == 'true' ]]; then
+            mutation_approvals=(
+              AUTH_OWNER_E2E_GATE_APPROVED
+              AUTH_MIGRATION_REHEARSAL_APPROVED
+              AUTH_MUTATION_ROLLBACK_APPROVED
+              AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED
+            )
+            for approval_name in "${mutation_approvals[@]}"; do
+              if [[ "${!approval_name}" != 'true' ]]; then
+                echo "Mutation approval is not granted: ${approval_name}" >&2
+                exit 1
+              fi
+            done
+          fi
+
           if [[ -z "${{ secrets.SERVER_DATABASE_URL }}" ]]; then
             echo 'Missing required GitHub environment secret: SERVER_DATABASE_URL' >&2
             exit 1
           fi
 
           node --input-type=module --eval '
-            const apiOrigin = new URL(process.env.AUTH_API_ORIGIN);
+            const parseExactHttpsOrigin = (name, value) => {
+              if (value.includes("*")) {
+                throw new Error(`${name} must not contain a wildcard`);
+              }
+              const parsed = new URL(value);
+              if (
+                parsed.protocol !== "https:" ||
+                parsed.username !== "" ||
+                parsed.password !== "" ||
+                parsed.pathname !== "/" ||
+                parsed.search !== "" ||
+                parsed.hash !== ""
+              ) {
+                throw new Error(`${name} must be an absolute HTTPS origin with no credentials, path, query, or fragment`);
+              }
+              return parsed.origin;
+            };
+
+            const apiOrigin = parseExactHttpsOrigin("AUTH_API_ORIGIN", process.env.AUTH_API_ORIGIN);
             const redirectUri = new URL(process.env.AUTH_REDIRECT_URI);
-            if (apiOrigin.toString() !== apiOrigin.origin + "/") {
-              throw new Error("AUTH_API_ORIGIN must contain only the client origin");
-            }
-            if (apiOrigin.origin !== redirectUri.origin) {
+            if (apiOrigin !== redirectUri.origin) {
               throw new Error("AUTH_API_ORIGIN must match the client redirect origin");
+            }
+            if (process.env.CONFIGURED_CORS_ORIGIN) {
+              const corsOrigin = parseExactHttpsOrigin("SERVER_CORS_ORIGIN", process.env.CONFIGURED_CORS_ORIGIN);
+              if (corsOrigin !== apiOrigin) {
+                throw new Error("SERVER_CORS_ORIGIN must match AUTH_API_ORIGIN for same-origin deployment");
+              }
             }
           '
 
@@ -532,7 +603,7 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
                 --image "${SERVER_IMAGE}" \
-                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false"
+                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "AUTH_OWNER_E2E_GATE_APPROVED=${AUTH_OWNER_E2E_GATE_APPROVED}" "AUTH_MIGRATION_REHEARSAL_APPROVED=${AUTH_MIGRATION_REHEARSAL_APPROVED}" "AUTH_MUTATION_ROLLBACK_APPROVED=${AUTH_MUTATION_ROLLBACK_APPROVED}" "AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED=${AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -550,7 +621,7 @@ jobs:
                 --image "${SERVER_IMAGE}" \
                 --target-port "${SERVER_TARGET_PORT}" \
                 --ingress internal \
-                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false" \
+                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "AUTH_OWNER_E2E_GATE_APPROVED=${AUTH_OWNER_E2E_GATE_APPROVED}" "AUTH_MIGRATION_REHEARSAL_APPROVED=${AUTH_MIGRATION_REHEARSAL_APPROVED}" "AUTH_MUTATION_ROLLBACK_APPROVED=${AUTH_MUTATION_ROLLBACK_APPROVED}" "AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED=${AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}" \
                 --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
                 --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
@@ -703,4 +774,4 @@ jobs:
             az containerapp update \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${SERVER_CONTAINER_APP_NAME}" \
-              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false"
+              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "AUTH_OWNER_E2E_GATE_APPROVED=${AUTH_OWNER_E2E_GATE_APPROVED}" "AUTH_MIGRATION_REHEARSAL_APPROVED=${AUTH_MIGRATION_REHEARSAL_APPROVED}" "AUTH_MUTATION_ROLLBACK_APPROVED=${AUTH_MUTATION_ROLLBACK_APPROVED}" "AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED=${AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}"

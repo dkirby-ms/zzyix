@@ -1,138 +1,166 @@
 ---
 title: Infinite Canvas Authentication and Authorization Phase 006 Validation
-description: Validation of implementation phase 6 against the plan, changes log, research, and implementation details
-ms.date: 2026-07-28
+description: Current evidence-based validation of authenticated protocol-v2 mutations
+ms.date: 2026-07-29
 ms.topic: reference
 ---
 
 ## Validation Scope
 
 * Phase: 6, Authenticated Protocol-V2 Mutations
-* Status: Blocked
+* Status: Failed
 * Plan: `.copilot-tracking/plans/2026-07-28/infinite-canvas-authentication-authorization-plan.instructions.md`
 * Planning log: `.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md`
 * Changes log: `.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md`
 * Research: `.copilot-tracking/research/2026-07-28/infinite-canvas-authentication-authorization-research.md`
 * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md`
 
-Phase 6 is unstarted and deferred behind the incomplete External ID prerequisite and
-Phases 2 through 5. This classification agrees with the changes log, which claims
-only Phase 1 repository prerequisites and states that dependent identity
-implementation has not started. No Phase 6 completion claim is present to
-invalidate.
+This validation replaces the stale blocked-state assessment with inspection of the
+current `infinite-canvas` branch and working tree. Phase 6 is implemented, but its
+idempotent replay path does not satisfy owner-only authorization or deterministic
+replay requirements. The changes log's completion claim is not supported.
 
-Protocol-v2 mutation remains safely disabled. A selected v2 connection receives
-`mutationEnabled: false`; the legacy placement and removal handlers reject v2
-connections; and the client refuses v2 placement and undo while mutation is
-disabled.
+At validation start, no implementation files were modified. The working tree had
+pre-existing changes only in the Phase 2 validation and the overall plan review.
+This validation did not modify implementation, plan, changes-log, or research files.
 
 ## Severity Counts
 
 | Severity | Count |
 |----------|------:|
-| Critical |     0 |
-| Major    |     0 |
+| Critical |     1 |
+| Major    |     2 |
 | Minor    |     0 |
-
-Unimplemented Phase 6 work is not graded as a defect because the changes log
-explicitly limits implementation to Phase 1 and records the prerequisite blocker.
-It remains required deferred scope and must not be represented as completed.
 
 ## Phase Requirements
 
 | Plan item | Required outcome | Status |
 |-----------|------------------|--------|
-| Step 6.1 | Dedicated protocol-v2 placement and removal contracts with operation IDs, complete expected patch revisions, safe acknowledgements, and no client principal ID | Unstarted and deferred |
-| Step 6.2 | Authenticated owner-only placement and removal transactions, all-patch authorization, idempotency, audit, and post-commit scoped fanout | Unstarted and deferred |
-| Step 6.3 | Client optimistic placement, removal, undo, alias, and reconnect reconciliation using per-patch revisions and durable event IDs | Unstarted and deferred |
-| Step 6.4 | Focused server and client validation while retaining `mutationEnabled=false` until Phase 7 gates pass | Implementation validation deferred; disabled-state verification passed |
-
-The research requires owner-only mutation for the initial release and explicitly
-defers delegated mutation and moderator commands. The planning log also keeps the
-owner-only mutation rollout dependent on identity, policy, ownership, authenticated
-end-to-end evidence, migration rehearsal, telemetry, retention, and rollback gates.
+| Step 6.1 | Dedicated protocol-v2 placement and removal contracts with operation IDs, complete expected patch revisions, safe acknowledgements, and no client principal ID | Complete |
+| Step 6.2 | Authenticated owner-only placement and removal transactions, all-patch authorization, idempotency, audit, and post-commit scoped fanout | Partial; replay authorization and determinism fail |
+| Step 6.3 | Client optimistic placement, removal, undo, alias, and reconnect reconciliation using per-patch revisions and durable event IDs | Substantially implemented, incompletely validated |
+| Step 6.4 | Focused server and client validation while retaining the rollout gate | Partial; server suite passed and production remains disabled |
 
 ## Plan-to-Change Comparison
 
 | Plan item | Changes-log claim | Verified classification |
 |-----------|-------------------|-------------------------|
-| Step 6.1 | None | Unstarted and deferred |
-| Step 6.2 | None | Unstarted and deferred |
-| Step 6.3 | None | Unstarted and deferred |
-| Step 6.4 | None | Rollout remains disabled as required |
-
-The changes log lists only Phase 1 configuration, migration, documentation, and
-backlog-decomposition changes. It states that External ID administration remains a
-blocker and dependent identity implementation has not started. No application file
-is claimed as a Phase 6 change.
+| Step 6.1 | Dedicated authenticated placement and removal contracts | Verified in contracts, guards, and Socket.IO event maps |
+| Step 6.2 | Owner-only revisioned placement and durable removal with scoped fanout | Normal transaction path verified; replay is incorrect |
+| Step 6.3 | Rollout-gated optimistic mutation and monotonic cache reconciliation | Core client code verified; App tests do not exercise dedicated v2 events |
+| Step 6.4 | Full mutation and security matrix passes | Overstated; required replay, mixed-authority, alias-mutation, and client cases are absent |
 
 ## Verified File Evidence
 
-* `apps/server/src/contracts.ts:566-587` exposes only legacy `place_tile` and
-	`remove_tile` client events plus the protocol-v2 read subscription. There are no
-	dedicated v2 placement or removal request and acknowledgement contracts.
-* `apps/server/src/index.ts:1792-1806` selects protocol v2 but always advertises
-	`mutationEnabled: false`.
-* `apps/server/src/index.ts:1861-1879` rejects legacy `place_tile` whenever protocol
-	v2 is selected or legacy mutation compatibility is disabled.
-* `apps/server/src/index.ts:1977-1990` rejects legacy `remove_tile` whenever protocol
-	v2 is selected.
-* `apps/client/src/App.tsx:1150-1163` prevents v2 undo when mutation is disabled.
-* `apps/client/src/App.tsx:1284-1301` prevents v2 placement when mutation is disabled.
-* `apps/server/src/db/repository.ts:703-900` contains pre-existing quilt placement
-	groundwork with operation idempotency, sorted locks, expected patch revisions,
-	and owner checks. It is not wired to an authenticated v2 handler and does not
-	establish Phase 6 completion.
-* No `apps/server/src/auth/` implementation exists, so the Phase 3 authenticated
-	principal dependency needed by Phase 6 is absent.
-* No quilt removal transaction corresponding to `persistQuiltTilePlacement` exists.
-* No implementation files are listed as changed by the current unstaged diff. The
-	unrelated modified shell files are outside this validation phase, and the changes
-	log does not claim them.
+* `apps/server/src/contracts.ts:377-422` defines dedicated placement/removal requests
+  and typed accepted/rejected acknowledgements without a client principal ID.
+* `apps/server/src/contracts.ts:676-680` exposes separate `quilt_place_tile` and
+  `quilt_remove_tile` events.
+* `apps/server/src/index.ts:968-993` validates UUIDs, revision maps, and absence of a
+  client-controlled principal.
+* `apps/server/src/index.ts:2360-2489` derives the authenticated principal, invokes
+  repository transactions, acknowledges outcomes, and publishes afterward to
+  scoped fine and durable-event chunk rooms.
+* `apps/server/src/db/repository.ts:1435-1682` implements placement with canonical
+  footprints, sorted locks, owner and principal checks, revision checks, collision
+  validation, durable operations, audit, and patch revision updates.
+* `apps/server/src/db/repository.ts:1684-1837` implements equivalent durable removal.
+* `apps/client/src/App.tsx:1208-1233` and `apps/client/src/App.tsx:1371-1421` implement
+  dedicated removal/undo, optimistic placement, rejection rollback, and per-patch
+  acknowledgement reconciliation.
+* `apps/client/src/domain/quiltCache.ts:188-207` advances patch cursors monotonically.
+* `apps/server/src/index.ts:222-225` permits mutation only when `NODE_ENV=test`,
+  `E2E_TEST_MODE=true`, and the feature flag is enabled. Production stays disabled.
 
 ## Findings
 
-No severity-graded implementation discrepancy was found for the claimed scope.
+### Critical
 
-The following blocker is a scope state, not a defect finding:
+#### C-001: Replay bypasses current quilt and principal authorization
 
-* Owner-only protocol-v2 placement and removal are unstarted and deferred. They
-	remain blocked by the external identity prerequisite and Phases 2 through 5.
-	Enabling protocol-v2 mutation before those dependencies and Phase 7 rollout gates
-	pass would violate the plan and research contract.
+`apps/server/src/db/repository.ts:1448-1485` and
+`apps/server/src/db/repository.ts:1696-1730` query all patch operations by the
+client-supplied operation ID before loading the requested quilt or checking the
+authenticated principal, ownership, lifecycle, or policy. A matching operation type
+and tile ID returns `committed: true`. `apps/server/src/db/schema.ts:442-462` also
+does not enforce one unique operation ID or bind it to one actor, quilt, canonical
+request, and committed response.
+
+The socket handlers convert this result into an accepted acknowledgement containing
+stored event IDs, patch revisions, and, for placement, tile data. An operation ID is
+a client-generated correlation value, not authority. A cross-principal or cross-quilt
+replay can therefore disclose and accept another operation's result. This violates
+owner-only authorization and safe hidden-resource behavior.
+
+Required correction: persist or enforce one immutable operation identity bound to
+actor, quilt, mutation type, canonical request fingerprint, and committed response.
+Reject mismatches with one safe response. Add cross-principal, cross-quilt,
+payload-mismatch, and concurrent duplicate-operation tests.
+
+### Major
+
+#### M-001: Replay returns mutable current revisions, not committed revisions
+
+`apps/server/src/db/repository.ts:1470-1484` and
+`apps/server/src/db/repository.ts:1714-1729` reconstruct retry acknowledgements from
+current `patches.revision` values. They do not select the immutable original
+`patch_operations.op_seq`. After a later mutation, a retry pairs an old event ID with
+a newer unrelated revision and can cause clients to skip intervening events.
+
+Required correction: reconstruct replay results from immutable operation rows and
+test placement and removal retries after later patch mutations.
+
+#### M-002: The claimed Phase 6 validation matrix has material gaps
+
+The focused repository tests retry only immediately, do not replay across principals
+or quilts, and do not create one canonical footprint spanning mixed ownership.
+Existing alias tests cover room subscriptions, not alias mutation. A search of
+`apps/client/src/App.test.tsx` finds no `quilt_place_tile` or `quilt_remove_tile`
+assertion. These gaps allowed C-001 and M-001 to pass unnoticed and do not support
+the changes log's full-matrix claim.
+
+Required correction: add mixed-owner cross-patch, canonical alias mutation, delayed
+retry, cross-context replay, optimistic rollback, removal/undo, and out-of-order
+event integration tests.
+
+## Validation Results
+
+| Validation | Result | Evidence |
+|------------|--------|----------|
+| Focused server Phase 6 suite | Passed | 3 files and 52 tests passed |
+| Focused client quilt-cache and App suite | Not completed | Terminal execution was interrupted before Vitest reported a result |
+| VS Code static diagnostics | Passed | No diagnostics in five inspected Phase 6 implementation files |
+| Current git-state inspection | Passed | Branch `infinite-canvas`; no implementation changes present at validation start |
+| Production-disabled invariant | Passed | Source requires test environment, E2E mode, and explicit feature flag |
+
+The server test pass confirms only represented behavior. It does not disprove C-001
+or M-001 because the required replay sequences are absent.
 
 ## Coverage Assessment
 
-Phase implementation coverage is **0 of 4 plan steps complete (0%)**. Step 6.4 has
-only its required disabled-state invariant verified; its mutation correctness suites
-cannot run because Steps 6.1 through 6.3 are unimplemented.
+Phase 6 coverage is assessed at **65%**. Step 6.1 is complete. Step 6.2 is partial
+because normal first commits are transactional and audited while replay is neither
+authorization-bound nor deterministic. Step 6.3 is substantially present in source
+but lacks required alias and App integration evidence. Step 6.4 is partial because
+the rollout remains disabled and the server suite passes, but the client result and
+required matrix cases are incomplete.
 
-Protocol-v2 mutation safety coverage is sufficient for the present deferred state:
-
-* Server contract and integration tests passed: 2 files, 40 tests
-* Client application tests passed: 1 file, 29 tests
-* Static source verification confirms that v2 receives a disabled flag, legacy
-	mutation handlers reject v2, and client mutation entry points honor the flag
-
-These checks do not validate owner-only mutation behavior. They validate only that
-the unimplemented surface remains unavailable.
+The status is **Failed** because C-001 violates the initial-release owner-only
+authorization boundary. Production disablement contains exposure but does not make
+the phase complete.
 
 ## Clarifying Questions
 
-None. The available plan, changes log, research, details, and source evidence
-consistently classify Phase 6 as deferred.
+None. The available artifacts and current implementation are sufficient to classify
+the phase.
 
 ## Recommended Next Validations
 
-* Revalidate Phase 1 Step 1.1 after an authorized administrator supplies and
-	approves the External ID tenant and application settings
-* Validate Phases 2 through 5 before accepting any Phase 6 implementation claim
-* Add a focused server test asserting that every selected protocol-v2 handshake
-	reports `mutationEnabled: false` until the rollout gate changes deliberately
-* Add focused client tests asserting that v2 placement and removal emit no legacy
-	mutation event while `mutationEnabled` is false
-* After implementation, run the complete Phase 6 server and client command matrix,
-	including PostgreSQL owner, member, mixed-authority, removal, revision,
-	idempotency, audit, and post-commit fanout cases
-* Validate authenticated owner-only, denied-member, mixed-patch, expiry reconnect,
-	and two-replica convergence in Phase 7 before changing the rollout flag
+* Validate replay isolation across principals, quilts, mutation types, canonical
+  payloads, and concurrent duplicate operation IDs after C-001 is corrected
+* Validate immutable replay acknowledgements after later patch revisions
+* Validate a mixed-owner cross-patch mutation persists no partial state
+* Validate toroidal alias placement and removal produce one canonical operation
+* Rerun the focused client quilt-cache and App suites to obtain a complete result
+* Rerun the authenticated multi-replica gate after replay corrections
+* Revalidate production rollout gates before changing the disabled invariant

@@ -25,6 +25,7 @@ export const validateProductionRolloutGates = (environment: RolloutEnvironment =
       'AUTH_OWNER_E2E_GATE_APPROVED',
       'AUTH_MIGRATION_REHEARSAL_APPROVED',
       'AUTH_MUTATION_ROLLBACK_APPROVED',
+      'AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED',
     ]
     const missingMutationApprovals = mutationApprovals.filter((name) => !enabled(environment, name))
     if (missingMutationApprovals.length > 0) {
