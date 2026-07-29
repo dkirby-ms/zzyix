@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # database-purge.sh
-# Purge canvas and tile rows from the Postgres database.
+# Purge canvas, quilt, and tile rows from the Postgres database.
 
 set -euo pipefail
 
@@ -11,13 +11,15 @@ usage() {
 	cat <<'USAGE'
 Usage: database-purge.sh [OPTIONS]
 
-Purge canvas and tile data from the Postgres database.
+Purge canvas, quilt, and tile data from the Postgres database.
 
 By default, this script purges all rows from:
+	- quilt-scoped authorization audit events
 	- tiles
+	- quilts
 	- canvases
 
-Use --canvas-id to purge a single canvas and its tiles.
+Use --canvas-id to purge a single canvas and its associated quilt and tiles.
 
 Options:
 	--canvas-id <uuid>       Purge only a specific canvas and its tiles
@@ -97,15 +99,18 @@ purge_all() {
 	local db_url="$1"
 
 	local sql=''
-	sql+="WITH deleted_tiles AS ("
-	sql+=" DELETE FROM tiles RETURNING 1"
-	sql+=")"
-	sql+=", deleted_canvases AS ("
-	sql+=" DELETE FROM canvases RETURNING 1"
-	sql+=")"
-	sql+=" SELECT"
-	sql+="  (SELECT count(*) FROM deleted_tiles) AS deleted_tiles,"
-	sql+="  (SELECT count(*) FROM deleted_canvases) AS deleted_canvases;"
+	sql+="BEGIN;"
+	sql+=" WITH deleted AS ("
+	sql+="  DELETE FROM authorization_audit_events"
+	sql+="  WHERE quilt_id IS NOT NULL OR patch_id IS NOT NULL RETURNING 1"
+	sql+=") SELECT count(*) AS deleted_audit_events FROM deleted;"
+	sql+=" WITH deleted AS (DELETE FROM tiles RETURNING 1)"
+	sql+=" SELECT count(*) AS deleted_tiles FROM deleted;"
+	sql+=" WITH deleted AS (DELETE FROM quilts RETURNING 1)"
+	sql+=" SELECT count(*) AS deleted_quilts FROM deleted;"
+	sql+=" WITH deleted AS (DELETE FROM canvases RETURNING 1)"
+	sql+=" SELECT count(*) AS deleted_canvases FROM deleted;"
+	sql+=" COMMIT;"
 
 	psql "${db_url}" --set ON_ERROR_STOP=1 --command "${sql}"
 }
@@ -115,15 +120,33 @@ purge_canvas() {
 	local canvas_id="$2"
 
 	local sql=''
-	sql+="WITH deleted_tiles AS ("
-	sql+=" DELETE FROM tiles WHERE canvas_id = :'canvas_id' RETURNING 1"
-	sql+=")"
-	sql+=", deleted_canvases AS ("
-	sql+=" DELETE FROM canvases WHERE id = :'canvas_id' RETURNING 1"
-	sql+=")"
-	sql+=" SELECT"
-	sql+="  (SELECT count(*) FROM deleted_tiles) AS deleted_tiles,"
-	sql+="  (SELECT count(*) FROM deleted_canvases) AS deleted_canvases;"
+	sql+="BEGIN;"
+	sql+=" WITH target_quilt AS ("
+	sql+="  SELECT id FROM quilts WHERE legacy_canvas_id = :'canvas_id'"
+	sql+="), deleted AS ("
+	sql+="  DELETE FROM authorization_audit_events"
+	sql+="  WHERE quilt_id IN (SELECT id FROM target_quilt)"
+	sql+="     OR patch_id IN ("
+	sql+="      SELECT id FROM patches"
+	sql+="      WHERE quilt_id IN (SELECT id FROM target_quilt)"
+	sql+="     )"
+	sql+="  RETURNING 1"
+	sql+=") SELECT count(*) AS deleted_audit_events FROM deleted;"
+	sql+=" WITH deleted AS ("
+	sql+="  DELETE FROM tiles"
+	sql+="  WHERE canvas_id = :'canvas_id'"
+	sql+="     OR quilt_id IN ("
+	sql+="      SELECT id FROM quilts WHERE legacy_canvas_id = :'canvas_id'"
+	sql+="     )"
+	sql+="  RETURNING 1"
+	sql+=") SELECT count(*) AS deleted_tiles FROM deleted;"
+	sql+=" WITH deleted AS ("
+	sql+="  DELETE FROM quilts WHERE legacy_canvas_id = :'canvas_id' RETURNING 1"
+	sql+=") SELECT count(*) AS deleted_quilts FROM deleted;"
+	sql+=" WITH deleted AS ("
+	sql+="  DELETE FROM canvases WHERE id = :'canvas_id' RETURNING 1"
+	sql+=") SELECT count(*) AS deleted_canvases FROM deleted;"
+	sql+=" COMMIT;"
 
 	psql "${db_url}" \
 		--set ON_ERROR_STOP=1 \
@@ -168,10 +191,12 @@ main() {
 	database_url="$(resolve_database_url "${explicit_database_url}")"
 
 	if [[ -n "${canvas_id}" ]]; then
-		confirm_purge "canvas ${canvas_id} and its tiles" "${skip_confirmation}"
+		confirm_purge \
+			"canvas ${canvas_id}, its quilt, and its tiles" \
+			"${skip_confirmation}"
 		purge_canvas "${database_url}" "${canvas_id}"
 	else
-		confirm_purge 'all canvases and tiles' "${skip_confirmation}"
+		confirm_purge 'all canvases, quilts, and tiles' "${skip_confirmation}"
 		purge_all "${database_url}"
 	fi
 
