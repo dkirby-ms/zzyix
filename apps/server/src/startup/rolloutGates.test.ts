@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { validateProductionRolloutGates } from './rolloutGates.js'
+import { resolveProtocolV2MutationEnabled, validateProductionRolloutGates } from './rolloutGates.js'
 
 const approvedProduction = {
   NODE_ENV: 'production',
@@ -7,6 +7,15 @@ const approvedProduction = {
   AUTH_ROLLBACK_GATE_APPROVED: 'true',
   AUTH_RETENTION_POLICY_APPROVED: 'true',
   AUTH_DELETION_COMPLETION_POLICY_APPROVED: 'true',
+}
+
+const approvedProductionMutation = {
+  ...approvedProduction,
+  FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
+  AUTH_OWNER_E2E_GATE_APPROVED: 'true',
+  AUTH_MIGRATION_REHEARSAL_APPROVED: 'true',
+  AUTH_MUTATION_ROLLBACK_APPROVED: 'true',
+  AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: 'true',
 }
 
 describe('production rollout gates', () => {
@@ -52,5 +61,27 @@ describe('production rollout gates', () => {
 
   it('does not impose production approvals in test mode', () => {
     expect(() => validateProductionRolloutGates({ NODE_ENV: 'test', E2E_TEST_MODE: 'true' })).not.toThrow()
+  })
+
+  it('keeps mutation disabled by default and isolates local enablement to test mode', () => {
+    expect(resolveProtocolV2MutationEnabled(approvedProduction)).toBe(false)
+    expect(resolveProtocolV2MutationEnabled({
+      NODE_ENV: 'test',
+      E2E_TEST_MODE: 'true',
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
+    })).toBe(true)
+    expect(resolveProtocolV2MutationEnabled({
+      NODE_ENV: 'development',
+      E2E_TEST_MODE: 'true',
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
+    })).toBe(false)
+  })
+
+  it('enables production mutation only after every production approval passes', () => {
+    expect(resolveProtocolV2MutationEnabled(approvedProductionMutation)).toBe(true)
+    expect(() => resolveProtocolV2MutationEnabled({
+      ...approvedProductionMutation,
+      AUTH_OWNER_E2E_GATE_APPROVED: 'false',
+    })).toThrow('AUTH_OWNER_E2E_GATE_APPROVED')
   })
 })

@@ -70,12 +70,15 @@ export const getPrincipalContext = (request: Request): PrincipalContext =>
 
 export const buildMeResponse = (profile: SafePrincipalProfile): MeResponse => ({
   profile,
-  capabilities: {
+  commands: {
     createSession: true,
-    claimPatch: false,
-    transferPatch: false,
-    deleteAccount: false,
-    mutateProtocolV2: false,
+    claimPatch: true,
+    createTransfer: true,
+    acceptTransfer: true,
+    cancelTransfer: true,
+    abandonPatch: true,
+    requestAccountDeletion: true,
+    recoverAccount: true,
   },
 })
 

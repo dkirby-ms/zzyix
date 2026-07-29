@@ -3,10 +3,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { canvases, patches, patchVisibilityPolicies, principals, quilts, tileSpatialRefs, tiles } from './schema.js'
 import {
+  abandonPatch,
+  claimPatch,
   createProtectedSession,
   loadPatchDeliverySnapshot,
   listSessionSummaries,
   persistQuiltTilePlacement,
+  persistTilePlacement,
+  persistTileRemoval,
   pruneRetention,
   reconstructPatchState,
   savePatchSnapshot,
@@ -186,9 +190,9 @@ describe('authoritative patch recovery with retention', () => {
       .where(eq(patchVisibilityPolicies.patchId, QUIET_PATCH_ID))
   })
 
-  it('creates new sessions with an unclaimed authenticated policy and mutation disabled', async () => {
+  it('creates new sessions with an unclaimed authenticated claim target and mutation disabled', async () => {
     const sessionId = randomUUID()
-    await createProtectedSession(sessionId, {
+    const created = await createProtectedSession(sessionId, {
       canvasSize: { width: 10.4, height: 6.8 },
       boundsPolicy: {
         mode: 'bounded',
@@ -220,8 +224,64 @@ describe('authoritative patch recovery with retention', () => {
       ownerPrincipalId: null,
       existence: 'authenticated',
       fineData: 'authenticated',
-      claimEnabled: false,
+      claimEnabled: true,
     }])
+    expect(created.claimTarget.patchId).toEqual(expect.any(String))
+  })
+
+  it('rechecks legacy ownership for every placement and removal transaction', async () => {
+    const sessionId = randomUUID()
+    const created = await createProtectedSession(sessionId, {
+      canvasSize: { width: 10.4, height: 6.8 },
+      boundsPolicy: {
+        mode: 'bounded',
+        bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+      },
+    })
+    await expect(claimPatch({
+      operationId: randomUUID(),
+      principalId: NON_MEMBER_PRINCIPAL_ID,
+      patchId: created.claimTarget.patchId,
+    })).resolves.toMatchObject({ claimed: true })
+
+    const tileId = randomUUID()
+    await expect(persistTilePlacement({
+      sessionId,
+      principalId: NON_MEMBER_PRINCIPAL_ID,
+      placedBy: 'legacy-client',
+      payload: {
+        tileId,
+        shape: 'square',
+        color: '#123456',
+        material: 'ceramic',
+        transform: { position: { x: 0, y: 0 }, rotation: 0 },
+      },
+    })).resolves.toMatchObject({ ack: { rejected: false } })
+
+    await expect(abandonPatch({
+      operationId: randomUUID(),
+      principalId: NON_MEMBER_PRINCIPAL_ID,
+      patchId: created.claimTarget.patchId,
+    })).resolves.toMatchObject({ succeeded: true })
+
+    await expect(persistTilePlacement({
+      sessionId,
+      principalId: NON_MEMBER_PRINCIPAL_ID,
+      placedBy: 'legacy-client',
+      payload: {
+        tileId: randomUUID(),
+        shape: 'square',
+        color: '#654321',
+        material: 'stone',
+        transform: { position: { x: 2, y: 0 }, rotation: 0 },
+      },
+    })).resolves.toMatchObject({ ack: { rejected: true, reason: 'PLACEMENT_REJECTED' } })
+    await expect(persistTileRemoval({
+      sessionId,
+      principalId: NON_MEMBER_PRINCIPAL_ID,
+      removedBy: 'legacy-client',
+      payload: { tileId },
+    })).resolves.toMatchObject({ ack: { removed: false } })
   })
 
   it('reconstructs from authoritative rows after operation history expires', async () => {

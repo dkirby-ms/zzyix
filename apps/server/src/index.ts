@@ -10,6 +10,7 @@ import { RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
 import type {
   CanvasSizePreset,
   CreateSessionRequest,
+  CreateSessionResponse,
   ClientToServerEvents,
   ServerToClientEvents,
   InterServerEvents,
@@ -85,7 +86,7 @@ import { startRetentionJob } from './jobs/retention.js'
 import { buildPatchRoomAccess, resolveQuiltRooms } from './realtime/quiltRooms.js'
 import { loadAuthenticationConfig } from './auth/config.js'
 import { createTokenVerifier, type TokenVerifier } from './auth/tokenVerifier.js'
-import { validateProductionRolloutGates } from './startup/rolloutGates.js'
+import { resolveProtocolV2MutationEnabled, validateProductionRolloutGates } from './startup/rolloutGates.js'
 import { redactTelemetry } from './logging/redact.js'
 import { resolveDeletionPendingPrincipal, resolveOrProvisionPrincipal } from './auth/principalContext.js'
 import {
@@ -219,9 +220,7 @@ const isLegacyMutationCompatibilityEnabled = parseBooleanFlag(
   process.env.FEATURE_LEGACY_MUTATION_COMPATIBILITY_ENABLED,
   true,
 )
-const isProtocolV2MutationEnabled = process.env.NODE_ENV === 'test'
-  && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
-  && parseBooleanFlag(process.env.FEATURE_PROTOCOL_V2_MUTATION_ENABLED, false)
+const isProtocolV2MutationEnabled = resolveProtocolV2MutationEnabled()
 const quiltCanaryConfig = loadQuiltCanaryConfig()
 const legacyRetirementGates = loadLegacyRetirementGates()
 const legacyRetirementDecision = decideLegacyRetirement(legacyRetirementGates)
@@ -1607,7 +1606,7 @@ app.post('/sessions', requireHttpPrincipal, sessionCreateRateLimit, async (req, 
     sessions.set(sessionId, sessionState)
 
     // Initialize canvas in database to satisfy foreign key constraints
-    await createProtectedSession(sessionId, canvasConfig)
+    const createdSession = await createProtectedSession(sessionId, canvasConfig)
 
     writeLog('info', 'session_created', {
       sessionId,
@@ -1620,7 +1619,8 @@ app.post('/sessions', requireHttpPrincipal, sessionCreateRateLimit, async (req, 
         id: sessionId,
         canvasConfig,
       },
-    })
+      claimTarget: createdSession.claimTarget,
+    } satisfies CreateSessionResponse)
   } catch (error) {
     writeLog('error', 'session_creation_failed', { error })
     res.status(500).json({ error: 'Failed to create session' })
@@ -2169,7 +2169,7 @@ io.on('connection', (socket) => {
       return
     }
 
-    if (selectedProtocolVersion === 2 || !isLegacyMutationCompatibilityEnabled || !legacyMutationAuthorized) {
+    if (selectedProtocolVersion === 2 || !isLegacyMutationCompatibilityEnabled) {
       invokeAckSafely(ack, {
         placed: null,
         rejected: true,
@@ -2228,6 +2228,7 @@ io.on('connection', (socket) => {
       const result = await persistTilePlacement({
         sessionId,
         payload,
+        principalId: socket.data.principalId,
         placedBy: clientId,
       })
 
@@ -2284,7 +2285,7 @@ io.on('connection', (socket) => {
 
     if (
       selectedProtocolVersion === 2
-      || !legacyMutationAuthorized
+      || !isLegacyMutationCompatibilityEnabled
       || !isRemoveTilePayload(payload)
       || !isValidTileId(payload.tileId)
     ) {
@@ -2312,6 +2313,7 @@ io.on('connection', (socket) => {
       const result = await persistTileRemoval({
         sessionId,
         payload,
+        principalId: socket.data.principalId,
         removedBy: clientId,
       })
 

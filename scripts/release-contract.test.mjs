@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import test from 'node:test'
+import { parseExactHttpsOrigin, validateDeploymentOrigins } from './deployment-origin.mjs'
 
 const workflowPath = new URL('../.github/workflows/cd.yml', import.meta.url)
 const ciWorkflowPath = new URL('../.github/workflows/ci.yml', import.meta.url)
@@ -46,7 +47,7 @@ test('production rollout requires operational approvals and keeps mutation disab
   }
   assert.match(workflow, /Release approval is not granted: \$\{approval_name\}/)
   assert.doesNotMatch(workflow, /"FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true"/)
-  assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'false'/)
+  assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED: \$\{\{ vars\.FEATURE_PROTOCOL_V2_MUTATION_ENABLED \|\| 'false' \}\}/)
   assert.match(workflow, /AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED/)
   assert.match(workflow, /Mutation approval is not granted: \$\{approval_name\}/)
 })
@@ -78,17 +79,37 @@ test('restricted recovery job is provisioned and resolved from infrastructure ou
 test('deployment accepts only exact same-origin HTTPS client and CORS values', async () => {
   const workflow = await readWorkflow()
 
-  assert.match(workflow, /const parseExactHttpsOrigin = \(name, value\) =>/)
-  assert.match(workflow, /value\.includes\("\*"\)/)
-  assert.match(workflow, /parsed\.protocol !== "https:"/)
-  assert.match(workflow, /parsed\.username !== ""/)
-  assert.match(workflow, /parsed\.password !== ""/)
-  assert.match(workflow, /parsed\.pathname !== "\/"/)
-  assert.match(workflow, /parsed\.search !== ""/)
-  assert.match(workflow, /parsed\.hash !== ""/)
-  assert.match(workflow, /parseExactHttpsOrigin\("AUTH_API_ORIGIN", process\.env\.AUTH_API_ORIGIN\)/)
-  assert.match(workflow, /parseExactHttpsOrigin\("SERVER_CORS_ORIGIN", process\.env\.CONFIGURED_CORS_ORIGIN\)/)
-  assert.match(workflow, /SERVER_CORS_ORIGIN must match AUTH_API_ORIGIN for same-origin deployment/)
+  assert.match(workflow, /node scripts\/validate-deployment-origins\.mjs/)
+  assert.equal(parseExactHttpsOrigin('AUTH_API_ORIGIN', 'https://app.example.com'), 'https://app.example.com')
+
+  for (const invalidOrigin of [
+    '',
+    'not-a-url',
+    'http://app.example.com',
+    'https://user:password@app.example.com',
+    'https://app.example.com/path',
+    'https://app.example.com?query=true',
+    'https://app.example.com#fragment',
+    'https://*.example.com',
+  ]) {
+    assert.throws(() => parseExactHttpsOrigin('AUTH_API_ORIGIN', invalidOrigin))
+  }
+
+  assert.doesNotThrow(() => validateDeploymentOrigins({
+    apiOrigin: 'https://app.example.com',
+    redirectUri: 'https://app.example.com/callback',
+    corsOrigin: 'https://app.example.com',
+  }))
+  assert.throws(() => validateDeploymentOrigins({
+    apiOrigin: 'https://api.example.com',
+    redirectUri: 'https://app.example.com/callback',
+    corsOrigin: 'https://api.example.com',
+  }), /client redirect origin/)
+  assert.throws(() => validateDeploymentOrigins({
+    apiOrigin: 'https://app.example.com',
+    redirectUri: 'https://app.example.com/callback',
+    corsOrigin: 'https://api.example.com',
+  }), /same-origin deployment/)
 })
 
 test('migration job create and update reassert single-owner execution settings', async () => {
@@ -156,7 +177,7 @@ test('container runtime JSON generation escapes special characters', async () =>
 test('nginx proxies only the documented same-origin API roots', async () => {
   const nginx = await readFile(nginxPath, 'utf8')
 
-  assert.ok(nginx.includes('location ~ ^/(health|me|sessions|quilts|claims|ownership-transfers|account)(/|$) {'))
+  assert.ok(nginx.includes('location ~ ^/(health|me|sessions|ownership|quilts|claims|ownership-transfers|account)(/|$) {'))
   assert.match(nginx, /location \/socket\.io/)
   assert.match(nginx, /location \/ \{\n    try_files \$uri \$uri\/ \/index\.html;/)
 })

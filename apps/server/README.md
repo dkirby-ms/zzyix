@@ -142,10 +142,11 @@ Delegated-capability and moderator acceptance remains deferred. The
 `test:e2e:delegated` command intentionally fails so automation cannot treat that
 work as complete.
 
-Production CD always writes `FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false`.
-Changing that default requires separate reviewed workflow work after the
-owner-only gate, migration rehearsal, telemetry, retention, deletion, and
-rollback approvals are recorded. Runtime startup additionally requires
+Production CD reads `FEATURE_PROTOCOL_V2_MUTATION_ENABLED` from the deployment
+environment and defaults it to `false` when the variable is absent. Set it to
+`true` only after the owner-only gate, migration rehearsal, telemetry,
+retention, deletion, and rollback approvals are recorded. Runtime startup
+additionally requires
 `AUTH_OWNER_E2E_GATE_APPROVED`, `AUTH_MIGRATION_REHEARSAL_APPROVED`, and
 `AUTH_MUTATION_ROLLBACK_APPROVED`, and
 `AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED` whenever mutation is

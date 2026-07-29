@@ -7,8 +7,9 @@ import type { SessionSummary } from './network/session'
 import type { MeResponse } from '../../server/src/contracts'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
-const { createSessionMock, listSessionsMock, useSocketConnectionMock, resolveCanvasDebugMock, authSessionState } = vi.hoisted(() => ({
-  createSessionMock: vi.fn<() => Promise<string>>(),
+const { claimPatchMock, createSessionMock, listSessionsMock, useSocketConnectionMock, resolveCanvasDebugMock, authSessionState } = vi.hoisted(() => ({
+  claimPatchMock: vi.fn<() => Promise<void>>(),
+  createSessionMock: vi.fn(),
   listSessionsMock: vi.fn<() => Promise<SessionSummary[]>>(),
   useSocketConnectionMock: vi.fn(() => ({ current: null })),
   resolveCanvasDebugMock: vi.fn(() => false),
@@ -16,12 +17,15 @@ const { createSessionMock, listSessionsMock, useSocketConnectionMock, resolveCan
     status: 'authenticated',
     principal: {
       profile: { displayName: 'Ada' },
-      capabilities: {
+      commands: {
         createSession: true,
-        claimPatch: false,
-        transferPatch: false,
-        deleteAccount: true,
-        mutateProtocolV2: false as const,
+        claimPatch: true,
+        createTransfer: true,
+        acceptTransfer: true,
+        cancelTransfer: true,
+        abandonPatch: true,
+        requestAccountDeletion: true,
+        recoverAccount: true,
       },
     } as MeResponse | null,
     error: null as string | null,
@@ -50,6 +54,7 @@ const mockSessions: SessionSummary[] = [
 vi.mock('./network/session', () => ({
   ensureClientId: vi.fn(() => 'client-1'),
   createSession: createSessionMock,
+  claimPatch: claimPatchMock,
   listSessions: listSessionsMock,
   getStoredSessionId: vi.fn(() => sessionState.storedSessionId),
   setStoredSessionId: vi.fn(),
@@ -164,12 +169,15 @@ describe('App lobby-first behavior', () => {
     authSessionState.status = 'authenticated'
     authSessionState.principal = {
       profile: { displayName: 'Ada' },
-      capabilities: {
+      commands: {
         createSession: true,
-        claimPatch: false,
-        transferPatch: false,
-        deleteAccount: true,
-        mutateProtocolV2: false,
+        claimPatch: true,
+        createTransfer: true,
+        acceptTransfer: true,
+        cancelTransfer: true,
+        abandonPatch: true,
+        requestAccountDeletion: true,
+        recoverAccount: true,
       },
     }
     authSessionState.error = null
@@ -179,6 +187,7 @@ describe('App lobby-first behavior', () => {
     sessionState.storedSessionId = 'session-1'
     listSessionsMock.mockReset()
     createSessionMock.mockReset()
+    claimPatchMock.mockReset()
     useSocketConnectionMock.mockClear()
     resolveCanvasDebugMock.mockReset()
     resolveCanvasDebugMock.mockReturnValue(false)
@@ -220,9 +229,17 @@ describe('App lobby-first behavior', () => {
     expect(lastSocketCall?.[1]).toBe('session-1')
   })
 
-  it('create action transitions to canvas mode', async () => {
+  it('requires claiming the returned patch before entering a new canvas', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
-    createSessionMock.mockResolvedValue('created-session-1')
+    createSessionMock.mockResolvedValue({
+      session: { id: 'created-session-1' },
+      claimTarget: {
+        patchId: 'f0000000-0000-4000-8000-000000000001',
+        ownershipState: 'unclaimed',
+        claimEligibility: 'eligible',
+      },
+    })
+    claimPatchMock.mockResolvedValue(undefined)
 
     render(<App />)
 
@@ -230,15 +247,22 @@ describe('App lobby-first behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: /Vast/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Create Canvas' }))
 
-    await waitFor(() => {
-      expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
-    })
+    expect(await screen.findByRole('button', { name: 'Claim Patch' })).toBeInTheDocument()
+    expect(screen.queryByRole('complementary', { name: 'Tile palette controls' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Claim Patch' }))
+
+    await waitFor(() => expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument())
 
     expect(createSessionMock).toHaveBeenCalledTimes(1)
     expect(createSessionMock).toHaveBeenCalledWith(
       authSessionState.authenticatedFetch,
       authSessionState.apiOrigin,
       { canvasPreset: 'vast' },
+    )
+    expect(claimPatchMock).toHaveBeenCalledWith(
+      authSessionState.authenticatedFetch,
+      authSessionState.apiOrigin,
+      'f0000000-0000-4000-8000-000000000001',
     )
     const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
     expect(lastSocketCall?.[1]).toBe('created-session-1')
@@ -290,12 +314,15 @@ describe('App lobby-first behavior', () => {
     authSessionState.status = 'authenticated'
     authSessionState.principal = {
       profile: { displayName: 'Ada' },
-      capabilities: {
+      commands: {
         createSession: true,
-        claimPatch: false,
-        transferPatch: false,
-        deleteAccount: true,
-        mutateProtocolV2: false,
+        claimPatch: true,
+        createTransfer: true,
+        acceptTransfer: true,
+        cancelTransfer: true,
+        abandonPatch: true,
+        requestAccountDeletion: true,
+        recoverAccount: true,
       },
     }
     rerender(<App />)

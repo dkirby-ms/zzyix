@@ -29,6 +29,10 @@ export default defineConfig(({ mode }) => {
           target: serverTarget,
           changeOrigin: true,
         },
+        '/ownership': {
+          target: serverTarget,
+          changeOrigin: true,
+        },
         '/quilts': {
           target: serverTarget,
           changeOrigin: true,

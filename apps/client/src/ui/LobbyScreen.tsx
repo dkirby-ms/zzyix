@@ -1,4 +1,4 @@
-import type { CanvasSizePreset } from '../../../server/src/contracts'
+import type { CanvasSizePreset, CreateSessionResponse } from '../../../server/src/contracts'
 import type { SessionSummary } from '../network/session'
 
 type LobbyScreenProps = {
@@ -7,11 +7,14 @@ type LobbyScreenProps = {
   error: string | null
   previousSessionId: string | null
   creating: boolean
+  claiming: boolean
+  pendingClaim: CreateSessionResponse | null
   joiningSessionId: string | null
   onRefresh: () => void
   selectedCanvasPreset: CanvasSizePreset
   onCanvasPresetChange: (preset: CanvasSizePreset) => void
   onCreate: () => void
+  onClaim: () => void
   onJoin: (sessionId: string) => void
 }
 
@@ -44,11 +47,14 @@ export function LobbyScreen({
   error,
   previousSessionId,
   creating,
+  claiming,
+  pendingClaim,
   joiningSessionId,
   onRefresh,
   selectedCanvasPreset,
   onCanvasPresetChange,
   onCreate,
+  onClaim,
   onJoin,
 }: LobbyScreenProps) {
   return (
@@ -91,6 +97,18 @@ export function LobbyScreen({
           })}
         </div>
       </section>
+
+      {pendingClaim && (
+        <section className="lobby-claim" aria-label="Claim new canvas patch">
+          <div>
+            <h2>Claim Your Canvas Patch</h2>
+            <p>This patch is unclaimed. Claim it before entering the canvas and placing tiles.</p>
+          </div>
+          <button type="button" className="active" onClick={onClaim} disabled={claiming}>
+            {claiming ? 'Claiming...' : 'Claim Patch'}
+          </button>
+        </section>
+      )}
 
       {error && <p className="lobby-error">{error}</p>}
 

@@ -141,6 +141,21 @@ Items identified during planning that fall outside current implementation scope.
 
 ### Review Remediation Intake
 
+* DD-15: The 2026-07-29 full review found an incomplete production-shaped ownership workflow and additional release defects
+  * Plan specifies: Claims, owner-only protocol-v2 mutation, and release controls are complete at repository level
+  * Implementation differs: Normal session creation is claim-disabled, the client cannot claim, legacy sockets cache authority, deletion approval wiring is incorrect, and production protocol-v2 enablement is test-mode-bound
+  * Rationale: Phase 13 now tracks repository remediation and Phase 14 isolates live production evidence and approvals
+
+* WI-18: Complete creator claim and first-placement workflow — Expose a safe claim target, client claim action, and production-shaped E2E without test-seeded ownership (blocking priority, medium effort)
+  * Source: 2026-07-29 full review critical and major findings
+  * Dependency: Phase 13
+* WI-19: Reauthorize established legacy sockets — Check current principal and ownership transactionally for legacy mutation after claim, transfer, or abandonment (blocking priority, medium effort)
+  * Source: 2026-07-29 full review critical finding
+  * Dependency: Phase 13
+* WI-20: Separate deletion approvals and production mutation eligibility — Correct retention wiring and remove the test-mode dependency from approved production protocol-v2 enablement (blocking priority, small effort)
+  * Source: 2026-07-29 full review critical and major findings
+  * Dependency: Phase 13
+
 * DD-14: Fresh full review supersedes the all-phases-complete release claim
   * Plan specifies: The original eight implementation phases are complete
   * Implementation differs: Phases 9 through 12 now track critical and major remediation from the 2026-07-29 review
@@ -185,6 +200,22 @@ Items identified during planning that fall outside current implementation scope.
 * Phase 6, Step 6.4: Resolved by Phase 7's double-gated local OIDC issuer and passing authenticated two-replica owner-mutation convergence gate.
 
 ## User Decisions
+
+* ID-02: Use the existing custom staging origin — `https://zzyix.kirbytoso.xyz` selected
+  * Rationale: DNS, Azure hostname binding, TLS, and Entra redirect registration are already configured and verified
+* ID-03: Use light GitHub controls for cloud staging — No mandatory deployment reviewers; keep mutation disabled and require stricter controls when staging becomes a production release gate
+  * Rationale: The current environment is intended for real-auth cloud testing rather than production traffic
+* ID-04: Base operational policies approved — Telemetry, rollback, retention, and deletion-completion gates set true
+  * Rationale: The authorized owner confirmed all four policies are formally approved; mutation-specific approvals remain false pending evidence
+
+### Resolved Production Readiness Findings
+
+* PR-01: Staging database connectivity recovered
+  * Resolution: Replaced a stale database hostname with the actual private DNS A-record hostname, rotated the stale administrator credential without exposing it, synchronized Azure and GitHub secret stores, and completed the migration job successfully
+  * Evidence: Healthy server database connectivity and successful dated Container Apps migration execution on 2026-07-29
+* PR-02: Restricted recovery infrastructure deployed
+  * Resolution: Deployed the manual recovery job, custom role, and job-scoped assignment
+  * Evidence: Effective permissions contain only `Microsoft.App/jobs/read`, `Microsoft.App/jobs/start/action`, and `Microsoft.App/jobs/executions/read`
 
 * ID-01: External ID tenant and application configuration — Confirmed complete by the authorized administrator
   * Rationale: Published staging variables and secret presence were independently validated without exposing secret values

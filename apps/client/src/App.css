@@ -101,6 +101,33 @@
   opacity: 0.82;
 }
 
+.lobby-claim {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding: 0.72rem 0.86rem;
+  border: 1px solid rgba(54, 112, 82, 0.34);
+  border-radius: 8px;
+  background: rgba(232, 247, 236, 0.82);
+}
+
+.lobby-claim h2,
+.lobby-claim p {
+  margin: 0;
+}
+
+.lobby-claim h2 {
+  font-size: 1rem;
+}
+
+.lobby-claim p {
+  margin-top: 0.2rem;
+  font-size: 0.84rem;
+  opacity: 0.78;
+}
+
 .lobby-preset-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -746,6 +773,11 @@ button:focus-visible,
   .lobby-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .lobby-claim {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .lobby-row button {

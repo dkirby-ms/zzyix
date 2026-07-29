@@ -28,11 +28,13 @@ import type { ActiveTile, PlacementGuide, SequencedTilesState } from './interact
 import { ensureClientId } from './network/session'
 import { derivePlacementBounds } from './domain/placementSolver'
 import {
+  claimPatch,
   createSession,
   getStoredSessionId,
   listSessions,
   setStoredSessionId,
   type CreateSessionOptions,
+  type CreatedSession,
   type SessionSummary,
 } from './network/session'
 import { resolveCanvasDebug } from './config/debugFlags'
@@ -424,6 +426,8 @@ function ProtectedApp() {
   const [lobbyLoading, setLobbyLoading] = useState(false)
   const [lobbyError, setLobbyError] = useState<string | null>(null)
   const [creatingSession, setCreatingSession] = useState(false)
+  const [claimingPatch, setClaimingPatch] = useState(false)
+  const [pendingClaim, setPendingClaim] = useState<CreatedSession | null>(null)
   const [selectedCanvasPreset, setSelectedCanvasPreset] = useState<CanvasSizePreset>('expanded')
   const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
   const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
@@ -590,15 +594,31 @@ function ProtectedApp() {
       const createOptions: CreateSessionOptions = {
         canvasPreset: selectedCanvasPreset,
       }
-      const nextSessionId = await createSession(auth.authenticatedFetch, auth.apiOrigin, createOptions)
-      enterCanvas(nextSessionId)
+      const created = await createSession(auth.authenticatedFetch, auth.apiOrigin, createOptions)
+      setPendingClaim(created)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create canvas'
       setLobbyError(message)
     } finally {
       setCreatingSession(false)
     }
-  }, [auth.apiOrigin, auth.authenticatedFetch, enterCanvas, selectedCanvasPreset])
+  }, [auth.apiOrigin, auth.authenticatedFetch, selectedCanvasPreset])
+
+  const handleClaimPatch = useCallback(async (): Promise<void> => {
+    if (!pendingClaim) return
+    setClaimingPatch(true)
+    setLobbyError(null)
+    try {
+      await claimPatch(auth.authenticatedFetch, auth.apiOrigin, pendingClaim.claimTarget.patchId)
+      const claimedSessionId = pendingClaim.session.id
+      setPendingClaim(null)
+      enterCanvas(claimedSessionId)
+    } catch (error) {
+      setLobbyError(error instanceof Error ? error.message : 'Failed to claim canvas patch')
+    } finally {
+      setClaimingPatch(false)
+    }
+  }, [auth.apiOrigin, auth.authenticatedFetch, enterCanvas, pendingClaim])
 
   const triggerInvalidPulse = useCallback((): void => {
     setInvalidPulse(true)
@@ -1649,11 +1669,14 @@ function ProtectedApp() {
         error={lobbyError}
         previousSessionId={previousSessionId}
         creating={creatingSession}
+        claiming={claimingPatch}
+        pendingClaim={pendingClaim}
         joiningSessionId={joiningSessionId}
         onRefresh={() => void loadSessions()}
         selectedCanvasPreset={selectedCanvasPreset}
         onCanvasPresetChange={setSelectedCanvasPreset}
         onCreate={() => void handleCreateSession()}
+        onClaim={() => void handleClaimPatch()}
         onJoin={handleJoinSession}
       />
     </main>

@@ -271,7 +271,7 @@ jobs:
       AUTH_MIGRATION_REHEARSAL_APPROVED: ${{ vars.AUTH_MIGRATION_REHEARSAL_APPROVED }}
       AUTH_MUTATION_ROLLBACK_APPROVED: ${{ vars.AUTH_MUTATION_ROLLBACK_APPROVED }}
       AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: ${{ vars.AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED }}
-      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'false'
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: ${{ vars.FEATURE_PROTOCOL_V2_MUTATION_ENABLED || 'false' }}
 
     steps:
       - name: Check Out
@@ -364,37 +364,7 @@ jobs:
             exit 1
           fi
 
-          node --input-type=module --eval '
-            const parseExactHttpsOrigin = (name, value) => {
-              if (value.includes("*")) {
-                throw new Error(`${name} must not contain a wildcard`);
-              }
-              const parsed = new URL(value);
-              if (
-                parsed.protocol !== "https:" ||
-                parsed.username !== "" ||
-                parsed.password !== "" ||
-                parsed.pathname !== "/" ||
-                parsed.search !== "" ||
-                parsed.hash !== ""
-              ) {
-                throw new Error(`${name} must be an absolute HTTPS origin with no credentials, path, query, or fragment`);
-              }
-              return parsed.origin;
-            };
-
-            const apiOrigin = parseExactHttpsOrigin("AUTH_API_ORIGIN", process.env.AUTH_API_ORIGIN);
-            const redirectUri = new URL(process.env.AUTH_REDIRECT_URI);
-            if (apiOrigin !== redirectUri.origin) {
-              throw new Error("AUTH_API_ORIGIN must match the client redirect origin");
-            }
-            if (process.env.CONFIGURED_CORS_ORIGIN) {
-              const corsOrigin = parseExactHttpsOrigin("SERVER_CORS_ORIGIN", process.env.CONFIGURED_CORS_ORIGIN);
-              if (corsOrigin !== apiOrigin) {
-                throw new Error("SERVER_CORS_ORIGIN must match AUTH_API_ORIGIN for same-origin deployment");
-              }
-            }
-          '
+          node scripts/validate-deployment-origins.mjs
 
       - name: Apply Database Migrations
         uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883

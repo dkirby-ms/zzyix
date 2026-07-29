@@ -182,6 +182,11 @@ export type CreateSessionResponse = {
     id: string
     canvasConfig?: SessionCanvasConfig
   }
+  claimTarget: {
+    patchId: string
+    ownershipState: 'unclaimed'
+    claimEligibility: 'eligible'
+  }
 }
 
 export type SessionSummary = {
@@ -202,17 +207,20 @@ export type SafePrincipalProfile = {
   email?: string
 }
 
-export type PrincipalCapabilities = {
+export type PrincipalCommandAvailability = {
   createSession: boolean
   claimPatch: boolean
-  transferPatch: boolean
-  deleteAccount: boolean
-  mutateProtocolV2: false
+  createTransfer: boolean
+  acceptTransfer: boolean
+  cancelTransfer: boolean
+  abandonPatch: boolean
+  requestAccountDeletion: boolean
+  recoverAccount: boolean
 }
 
 export type MeResponse = {
   profile: SafePrincipalProfile
-  capabilities: PrincipalCapabilities
+  commands: PrincipalCommandAvailability
 }
 
 export type SafeApiError = {

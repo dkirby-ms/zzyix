@@ -12,6 +12,11 @@ The original eight phases and review-remediation Phases 9 through 11 are impleme
 
 ### Added
 
+* `apps/server/src/jobs/principalDeletionConfig.ts` - Reads independent retention and deletion-completion approvals for the deletion job
+* `apps/server/src/jobs/principalDeletionConfig.test.ts` - Covers independent deletion approval combinations
+* `scripts/deployment-origin.mjs` - Provides executable exact HTTPS same-origin validation
+* `scripts/validate-deployment-origins.mjs` - Exposes deployment-origin validation to CD
+
 * `apps/server/src/jobs/principalDeletionCli.ts` - Runs bounded due-account deletion with explicit retention approval and safe outcome reporting
 * `infra/bicep/modules/recovery-job.bicep` - Provisions a manual no-ingress recovery job and job-scoped invocation role
 
@@ -59,6 +64,20 @@ The original eight phases and review-remediation Phases 9 through 11 are impleme
 * `apps/server/src/db/authorization.benchmark.test.ts` - Opt-in production-cardinality authorization regression benchmark
 
 ### Modified
+
+* `apps/server/src/contracts.ts` - Exposes safe claim targets, resource ownership state, and truthful global ownership capabilities
+* `apps/server/src/index.ts` - Enables production protocol-v2 only through feature and approval gates and serves the production ownership workflow
+* `apps/server/src/db/repository.ts` - Creates claim-enabled sessions and transactionally rechecks legacy mutation ownership
+* `apps/server/src/auth/httpAuth.ts` - Reports ownership command availability without claiming resource-scoped permission
+* `apps/server/src/jobs/principalDeletionCli.ts` - Uses independent retention and deletion-completion approvals
+* `apps/server/src/startup/rolloutGates.ts` - Separates production protocol-v2 eligibility from test-issuer isolation
+* `apps/client/src/App.tsx` - Drives the normal create, claim, and owner-placement workflow
+* `apps/client/src/ui/LobbyScreen.tsx` - Presents claim-required ownership state before canvas entry
+* `apps/client/src/network/session.ts` - Calls production ownership contracts without internal principal identifiers
+* `apps/client/nginx.conf` - Proxies ownership routes through the same-origin boundary
+* `.github/workflows/cd.yml` - Executes behavioral deployment-origin validation
+* `scripts/release-contract.test.mjs` - Tests deployment origins through the executable validator
+* `e2e/authentication.spec.ts` - Proves sign-in, create, claim, and placement without test-seeded ownership
 
 * `apps/server/src/index.ts` - Exposes testable exact-origin Engine.IO admission used by live polling and WebSocket rejection coverage
 * `apps/server/src/db/repository.postgres.integration.test.ts` - Covers mixed-patch mutation authority without partial persistence
@@ -161,6 +180,20 @@ The original eight phases and review-remediation Phases 9 through 11 are impleme
 ### Removed
 
 ## Additional or Deviating Changes
+
+* Phase 14 staging configuration and external evidence are partially complete.
+  * The verified custom origin is configured consistently for API, redirect, logout, and CORS; every required staging variable is present.
+  * Telemetry, rollback, retention, and deletion-completion approvals are true. All mutation-specific approvals and `FEATURE_PROTOCOL_V2_MUTATION_ENABLED` remain false.
+  * The restricted recovery job, custom least-privilege role, and job-scoped assignment are deployed; effective actions are limited to job read, start, and execution read.
+  * The manual migration job is deployed with parallelism 1, completion count 1, 1,800-second timeout, and retry limit 2. A dated staging execution succeeded after correcting the stale private DNS hostname and rotating the stale administrator credential entirely through Azure and GitHub secret stores.
+  * The staging server resolves the PostgreSQL private A record, authenticates, completes migration checks, configures the Postgres socket adapter, and serves the same-origin health route.
+  * The `operational-recovery` GitHub environment now exists with only required non-secret Azure coordinates. Mandatory reviewers and required branch checks are intentionally deferred for the current test-oriented staging posture.
+  * Live issues 14 and 98 confirm runtime authentication and owner-only release scope while delegated acceptance remains under issue 107.
+
+* Phase 13 closes the 2026-07-29 product-workflow and authorization findings.
+  * Focused ownership, capability, legacy transaction, deletion, and rollout tests pass; the production-shaped create-claim-place E2E passes without internal IDs or seeded ownership.
+  * Full validation passes with 156 client tests, 224 server tests and one skipped server test, nine release-contract tests, and ten owner-only browser tests.
+  * Production protocol-v2 remains disabled pending Phase 14 external evidence and approvals.
 
 * Phase 12 local implementation and validation are complete, but the phase remains externally blocked.
   * Issues 14 and 98 retain broader scope, the staging environment has no protection rules, required approval variables are absent, and `SERVER_CORS_ORIGIN` is not an absolute HTTPS origin.

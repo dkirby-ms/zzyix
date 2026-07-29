@@ -1,4 +1,4 @@
-import type { CanvasSizePreset } from '../../../server/src/contracts'
+import type { CanvasSizePreset, CreateSessionResponse, OwnershipCommandResponse } from '../../../server/src/contracts'
 
 const SESSION_STORAGE_KEY = 'zzyix_session_id'
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
@@ -6,6 +6,8 @@ const CLIENT_STORAGE_KEY = 'zzyix_client_id'
 export type CreateSessionOptions = {
   canvasPreset: CanvasSizePreset
 }
+
+export type CreatedSession = CreateSessionResponse
 
 export type ChunkId = `${number}:${number}`
 
@@ -56,7 +58,7 @@ export const createSession = async (
   authenticatedFetch: typeof fetch,
   apiOrigin: string,
   options?: CreateSessionOptions,
-): Promise<string> => {
+): Promise<CreatedSession> => {
   const response = await authenticatedFetch(`${apiOrigin}/sessions`, {
     method: 'POST',
     headers: {
@@ -66,8 +68,23 @@ export const createSession = async (
   })
   if (!response.ok) throw new Error(`Failed to create session: ${response.status}`)
 
-  const data = (await response.json()) as { session: { id: string } }
-  return data.session.id
+  return response.json() as Promise<CreatedSession>
+}
+
+export const claimPatch = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+  patchId: string,
+): Promise<void> => {
+  const response = await authenticatedFetch(`${apiOrigin}/ownership/claims`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operationId: crypto.randomUUID(), patchId }),
+  })
+  const result = await response.json() as OwnershipCommandResponse
+  if (!response.ok || result.status !== 'succeeded') {
+    throw new Error('Failed to claim the new canvas patch')
+  }
 }
 
 export const listSessions = async (authenticatedFetch: typeof fetch, apiOrigin: string): Promise<SessionSummary[]> => {
@@ -105,9 +122,9 @@ export const ensureSession = async (authenticatedFetch: typeof fetch, apiOrigin:
   const stored = getStoredSessionId()
   if (stored) return stored
 
-  const sessionId = await createSession(authenticatedFetch, apiOrigin)
-  setStoredSessionId(sessionId)
-  return sessionId
+  const created = await createSession(authenticatedFetch, apiOrigin)
+  setStoredSessionId(created.session.id)
+  return created.session.id
 }
 
 export const ensureClientId = (): string => {

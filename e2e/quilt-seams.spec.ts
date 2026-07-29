@@ -118,9 +118,11 @@ test('canonical room aliases stay deduplicated across one-axis seams, corners, r
 })
 
 test('client traversal stays finite across deterministic seams and multiple laps', async ({ page }, testInfo) => {
+  await page.addInitScript((subject) => localStorage.setItem('zzyix:e2e-subject', subject), `e2e-quilt-traversal-${crypto.randomUUID()}`)
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
   await page.getByRole('button', { name: 'Create Canvas' }).click()
+  await page.getByRole('button', { name: 'Claim Patch' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
 
   const gridOff = await page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState())

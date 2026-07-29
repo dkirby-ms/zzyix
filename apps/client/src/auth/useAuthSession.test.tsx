@@ -105,12 +105,15 @@ describe('AuthSessionProvider', () => {
     useMsalMock.mockReturnValue({ instance, accounts: [account], inProgress: 'none' })
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       profile: { displayName: 'Ada' },
-      capabilities: {
+      commands: {
         createSession: true,
-        claimPatch: false,
-        transferPatch: false,
-        deleteAccount: true,
-        mutateProtocolV2: false,
+        claimPatch: true,
+        createTransfer: true,
+        acceptTransfer: true,
+        cancelTransfer: true,
+        abandonPatch: true,
+        requestAccountDeletion: true,
+        recoverAccount: true,
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
@@ -135,12 +138,15 @@ describe('AuthSessionProvider', () => {
     useMsalMock.mockReturnValue({ instance, accounts: [account], inProgress: 'none' })
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       profile: { displayName: 'Ada' },
-      capabilities: {
+      commands: {
         createSession: true,
-        claimPatch: false,
-        transferPatch: false,
-        deleteAccount: true,
-        mutateProtocolV2: false,
+        claimPatch: true,
+        createTransfer: true,
+        acceptTransfer: true,
+        cancelTransfer: true,
+        abandonPatch: true,
+        requestAccountDeletion: true,
+        recoverAccount: true,
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
@@ -163,12 +169,15 @@ describe('AuthSessionProvider', () => {
     useMsalMock.mockReturnValue({ instance, accounts: [account], inProgress: 'none' })
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       profile: { displayName: 'Ada' },
-      capabilities: {
+      commands: {
         createSession: true,
-        claimPatch: false,
-        transferPatch: false,
-        deleteAccount: true,
-        mutateProtocolV2: false,
+        claimPatch: true,
+        createTransfer: true,
+        acceptTransfer: true,
+        cancelTransfer: true,
+        abandonPatch: true,
+        requestAccountDeletion: true,
+        recoverAccount: true,
       },
     }), { status: 200 }))
 

@@ -33,3 +33,16 @@ export const validateProductionRolloutGates = (environment: RolloutEnvironment =
     }
   }
 }
+
+export const resolveProtocolV2MutationEnabled = (
+  environment: RolloutEnvironment = process.env,
+): boolean => {
+  if (!enabled(environment, 'FEATURE_PROTOCOL_V2_MUTATION_ENABLED')) return false
+
+  if (environment.NODE_ENV === 'production') {
+    validateProductionRolloutGates(environment)
+    return true
+  }
+
+  return environment.NODE_ENV === 'test' && enabled(environment, 'E2E_TEST_MODE')
+}

@@ -623,3 +623,37 @@ Validation commands:
 * `npm run test:authorization-benchmark`
 * `npm run test:e2e:owner-only`
 * `npm run test:e2e:multi-replica`
+
+## Implementation Phase 13: Product Workflow and Authorization Remediation
+
+Close the critical and major repository findings from the 2026-07-29 review. Preserve the approved self-service claim model: normal authenticated session creation must produce a claim-enabled unclaimed patch, expose a safe claim target through production contracts, and let the client claim before owner-only placement. Do not accept internal principal identifiers from the client. Add a production-shaped browser scenario that signs in, creates a session, claims its patch through normal contracts and UI, and places a tile without test-only ownership seeding.
+
+Legacy mutation must authorize the current principal and ownership inside the persistence transaction for every placement and removal instead of relying on socket-initialization state. The deletion CLI must pass `AUTH_RETENTION_POLICY_APPROVED` as retention approval independently from `AUTH_DELETION_COMPLETION_POLICY_APPROVED`. Separate test-issuer eligibility from protocol-v2 rollout so production mutation can become reachable only when the feature flag and every startup approval gate pass, while local issuer settings remain test-only. Replace static ownership capabilities with contracts that truthfully distinguish global command availability from resource-scoped eligibility and current ownership state. Replace workflow source-pattern origin assertions with behavioral parser coverage for malformed, non-HTTPS, and cross-origin values.
+
+Validation commands:
+* Focused client and server tests selected for the touched ownership, mutation, deletion, rollout, and capability modules
+* `npm run test:release-contract`
+* `npm run lint`
+* `npm run build`
+* `npm run test:client`
+* `npm run test:server`
+* `npm run test:e2e:owner-only`
+
+## Implementation Phase 14: Production Readiness Evidence and Approval
+
+Keep protocol-v2 production mutation disabled until every repository and external gate has dated evidence. Correct `SERVER_CORS_ORIGIN` to the exact absolute HTTPS client origin and validate all identity, API, scope, audience, and algorithm settings without recording secrets. Deploy the declared migration and recovery Container Apps jobs, verify migration ordering and safety settings, and prove the workflow identity has only the required job-scoped invocation permissions. Configure required reviewers on the staging and operational-recovery GitHub environments and require the named authenticated multi-replica check in branch protection.
+
+Inspect live issues 14 and 98 and separate owner-only release acceptance from delegated or broader protocol-v2 work. Record accountable approvals for retention, telemetry fields and thresholds, rollback criteria, deletion completion, migration rehearsal, owner E2E, mutation rollback, and representative authorization benchmark budgets. Run the complete release matrix in an isolated execution environment, capture dated non-secret command summaries and cloud control evidence, then enable protocol-v2 mutation through the existing approval-gated deployment path with an explicit rollback owner and canary observation window.
+
+Validation commands and evidence:
+* `npm run audit`
+* `npm run lint`
+* `npm run build`
+* `npm run test`
+* `npm run test:release-contract`
+* `./scripts/verify-quilt-migration.sh rehearse`
+* `npm run test:authorization-benchmark`
+* `npm run test:e2e:owner-only`
+* `npm run test:e2e:multi-replica`
+* Dated Azure job inventory, job configuration, deployment execution, and effective RBAC evidence
+* Dated GitHub environment reviewer, required-check, branch-protection, issue-scope, and approval evidence

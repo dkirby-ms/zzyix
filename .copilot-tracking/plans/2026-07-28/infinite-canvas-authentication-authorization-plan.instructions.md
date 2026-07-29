@@ -261,6 +261,43 @@ playwright*.config.ts
 * [x] Step 12.3: Run the complete validation matrix and report remaining blockers
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 12)
 
+### [x] Implementation Phase 13: Product Workflow and Authorization Remediation
+
+<!-- parallelizable: false -->
+
+* [x] Step 13.1: Complete self-service initial ownership and placement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.2: Recheck legacy mutation authority transactionally
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.3: Correct independent deletion approval enforcement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.4: Make approved production protocol-v2 enablement reachable
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.5: Expose truthful ownership capabilities
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.6: Add production-shaped ownership and origin coverage
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.7: Validate product and authorization remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+
+### [ ] Implementation Phase 14: Production Readiness Evidence and Approval
+
+<!-- parallelizable: false -->
+<!-- blocked: staging administration, GitHub administration, Azure access, issue ownership, and accountable approvals -->
+
+* [x] Step 14.1: Correct and validate staging deployment configuration
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [x] Step 14.2: Deploy and verify migration, recovery, and job-scoped RBAC controls
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.3: Configure GitHub environment and branch protections
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.4: Reconcile issue scope and record accountable approvals
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.5: Run the isolated release matrix and capture dated evidence
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.6: Approve controlled protocol-v2 production enablement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+
 ## Planning Log
 
 See `.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md` for discrepancy tracking, implementation paths considered, and suggested follow-on work.

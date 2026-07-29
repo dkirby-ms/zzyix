@@ -75,12 +75,15 @@ describe('HTTP authentication boundary', () => {
 
     expect(response).toEqual({
       profile: { displayName: 'Ada', email: 'ada@example.test' },
-      capabilities: {
+      commands: {
         createSession: true,
-        claimPatch: false,
-        transferPatch: false,
-        deleteAccount: false,
-        mutateProtocolV2: false,
+        claimPatch: true,
+        createTransfer: true,
+        acceptTransfer: true,
+        cancelTransfer: true,
+        abandonPatch: true,
+        requestAccountDeletion: true,
+        recoverAccount: true,
       },
     })
     expect(response).not.toHaveProperty('principalId')

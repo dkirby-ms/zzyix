@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, countDistinct, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
-import type { BoundsPolicy, ClientPresence, Session, SessionCanvasConfig, TileInstance } from '../contracts.js'
+import type { BoundsPolicy, ClientPresence, CreateSessionResponse, Session, SessionCanvasConfig, TileInstance } from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
 import {
@@ -52,6 +52,10 @@ export type AuthoritativeSessionRecord = {
   clients: ClientPresence[]
   lastOpSeq: number
   revision: number
+}
+
+export type CreatedProtectedSession = AuthoritativeSessionRecord & {
+  claimTarget: CreateSessionResponse['claimTarget']
 }
 
 export class ResourceNotFoundError extends Error {
@@ -135,6 +139,31 @@ export type PersistedOperationRecord = {
   payload: unknown
   clientId: string
   createdAt: number
+}
+
+const hasCurrentLegacyMutationAuthority = async (
+  tx: DatabaseClient,
+  sessionId: string,
+  principalId: string,
+): Promise<boolean> => {
+  const [principal] = await tx
+    .select({ status: principals.status })
+    .from(principals)
+    .where(eq(principals.id, principalId))
+    .for('update')
+    .limit(1)
+  if (principal?.status !== 'active') return false
+
+  const currentPatches = await tx
+    .select({ ownerPrincipalId: patches.ownerPrincipalId, state: patches.state })
+    .from(patches)
+    .innerJoin(quilts, eq(quilts.id, patches.quiltId))
+    .where(eq(quilts.legacyCanvasId, sessionId))
+    .orderBy(asc(patches.id))
+    .for('update')
+
+  return currentPatches.length > 0
+    && currentPatches.every((patch) => patch.state === 'active' && patch.ownerPrincipalId === principalId)
 }
 
 export type ReplaySessionRecord = AuthoritativeSessionRecord & {
@@ -1354,11 +1383,11 @@ export const loadSessionRecord = async (
 export const createProtectedSession = async (
   sessionId: string,
   canvasConfig: SessionCanvasConfig,
-): Promise<AuthoritativeSessionRecord> => {
+): Promise<CreatedProtectedSession> => {
   const { db } = getDatabaseBundle()
   const now = new Date()
 
-  await db.transaction(async (tx) => {
+  const claimTarget = await db.transaction(async (tx) => {
     await tx.insert(canvases).values({
       id: sessionId,
       canvasConfig,
@@ -1405,12 +1434,21 @@ export const createProtectedSession = async (
       presence: 'authenticated',
       search: 'authenticated',
       durableEvents: 'authenticated',
-      claimEnabled: false,
+      claimEnabled: true,
       policyVersion: 1,
     })
+
+    return {
+      patchId: patch.id,
+      ownershipState: 'unclaimed' as const,
+      claimEligibility: 'eligible' as const,
+    }
   })
 
-  return loadSessionRecord(sessionId)
+  return {
+    ...await loadSessionRecord(sessionId),
+    claimTarget,
+  }
 }
 
 export const listTilesByChunks = async (sessionId: string, chunks: ChunkCoordinate[]): Promise<TileInstance[]> => {
@@ -1925,6 +1963,7 @@ export const persistQuiltTileRemoval = async (params: {
 export const persistTilePlacement = async (params: {
   sessionId: string
   payload: PlaceTilePayload
+  principalId: string
   placedBy: string
   createdAt?: number
 }): Promise<PersistedPlacementResult> => {
@@ -1943,6 +1982,17 @@ export const persistTilePlacement = async (params: {
       material: payload.material,
       transform: payload.transform,
     })
+
+    if (!await hasCurrentLegacyMutationAuthority(tx, sessionId, params.principalId)) {
+      const [canvas] = await tx.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
+      if (!canvas) throw new Error(`Failed to load canvas ${sessionId}`)
+      const tileRows = await tx.select().from(tiles).where(eq(tiles.canvasId, sessionId)).orderBy(asc(tiles.createdAt))
+      return {
+        revision: currentRevision,
+        session: mapSession(canvas, tileRows),
+        ack: { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' },
+      }
+    }
 
     if (params.payload.expectedRevision !== undefined) {
       if (params.payload.expectedRevision < currentRevision) {
@@ -2156,6 +2206,7 @@ export const persistTilePlacement = async (params: {
 export const persistTileRemoval = async (params: {
   sessionId: string
   payload: RemoveTilePayload
+  principalId: string
   removedBy: string
 }): Promise<PersistedRemovalResult> => {
   const { db } = getDatabaseBundle()
@@ -2168,6 +2219,17 @@ export const persistTileRemoval = async (params: {
     const { key: idempotencyKey, requestHash } = makeIdempotencyKey('remove_tile', sessionId, payload.tileId, {
       tileId: payload.tileId,
     })
+
+    if (!await hasCurrentLegacyMutationAuthority(tx, sessionId, params.principalId)) {
+      const [canvas] = await tx.select().from(canvases).where(eq(canvases.id, sessionId)).limit(1)
+      if (!canvas) throw new Error(`Failed to load canvas ${sessionId}`)
+      const tileRows = await tx.select().from(tiles).where(eq(tiles.canvasId, sessionId)).orderBy(asc(tiles.createdAt))
+      return {
+        revision: currentRevision,
+        session: mapSession(canvas, tileRows),
+        ack: { removed: false },
+      }
+    }
 
     if (params.payload.expectedRevision !== undefined) {
       if (params.payload.expectedRevision < currentRevision) {
