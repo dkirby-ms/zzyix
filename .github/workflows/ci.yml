@@ -105,6 +105,19 @@ jobs:
     needs: lint
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     strategy:
       fail-fast: false
       matrix:
@@ -157,7 +170,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: zzyix
@@ -189,7 +202,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18-alpine
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: zzyix

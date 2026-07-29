@@ -65,6 +65,7 @@ The original eight phases and review-remediation Phases 9 through 11 are impleme
 
 ### Modified
 
+* `.github/workflows/ci.yml` - Supplies PostgreSQL 18 Alpine to the test matrix and authenticated E2E jobs
 * `apps/server/src/contracts.ts` - Exposes safe claim targets, resource ownership state, and truthful global ownership capabilities
 * `apps/server/src/index.ts` - Enables production protocol-v2 only through feature and approval gates and serves the production ownership workflow
 * `apps/server/src/db/repository.ts` - Creates claim-enabled sessions and transactionally rechecks legacy mutation ownership
@@ -180,6 +181,10 @@ The original eight phases and review-remediation Phases 9 through 11 are impleme
 ### Removed
 
 ## Additional or Deviating Changes
+
+* PR 112 server CI failed because the ordinary test job had no PostgreSQL service.
+  * Eight integration files attempted their loopback test database and failed with `ECONNREFUSED 127.0.0.1:5432`; the test matrix and authenticated E2E jobs now use the PostgreSQL 18 Alpine service contract already used by development.
+  * Local validation passes with 34 server test files, 224 tests and one skipped test; all nine release-contract tests and workflow diagnostics pass.
 
 * Phase 14 staging configuration and external evidence are partially complete.
   * The verified custom origin is configured consistently for API, redirect, logout, and CORS; every required staging variable is present.
