@@ -141,6 +141,51 @@ export const quilts = pgTable(
   }),
 )
 
+export const canonicalWorld = pgTable(
+  'canonical_world',
+  {
+    productKey: text('product_key').primaryKey(),
+    quiltId: uuid('quilt_id')
+      .notNull()
+      .references(() => quilts.id, { onDelete: 'restrict' }),
+    status: text('status').notNull(),
+    generation: integer('generation').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    quiltIndex: index('canonical_world_quilt_id_idx').on(table.quiltId),
+    productKeyCheck: check('canonical_world_product_key_check', sql`${table.productKey} = 'canonical'`),
+    statusCheck: check('canonical_world_status_check', sql`${table.status} in ('inactive', 'active')`),
+    generationCheck: check('canonical_world_generation_check', sql`${table.generation} > 0`),
+  }),
+)
+
+export const quiltPresenceLeases = pgTable(
+  'quilt_presence_leases',
+  {
+    socketId: text('socket_id').primaryKey(),
+    quiltId: uuid('quilt_id')
+      .notNull()
+      .references(() => quilts.id, { onDelete: 'cascade' }),
+    principalId: uuid('principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'cascade' }),
+    clientId: text('client_id').notNull(),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).defaultNow().notNull(),
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => ({
+    principalExpiryIndex: index('quilt_presence_leases_principal_expiry_idx').on(
+      table.quiltId,
+      table.principalId,
+      table.expiresAt,
+    ),
+    expiryIndex: index('quilt_presence_leases_expiry_idx').on(table.expiresAt),
+  }),
+)
+
 export const patches = pgTable(
   'patches',
   {

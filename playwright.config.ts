@@ -50,6 +50,8 @@ export default defineConfig({
         'AUTH_ACCEPTED_ALGORITHM=RS256',
         'FEATURE_MULTI_REPLICA_READY=true',
         'FEATURE_QUILT_PROTOCOL_V2_ENABLED=true',
+        'FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true',
+        'FEATURE_CANONICAL_DISCOVERY_ENABLED=true',
         'LOG_LEVEL=info',
         `PORT=${SERVER_PORT}`,
         'HOST=127.0.0.1',
@@ -64,6 +66,7 @@ export default defineConfig({
       command: [
         `VITE_SERVER_URL=${SERVER_URL}`,
         'VITE_E2E_TEST_MODE=true',
+        'VITE_CANONICAL_ENTRY_ENABLED=true',
         'VITE_TEST_OIDC_ISSUER=http://127.0.0.1:3199/',
         'npm run dev --workspace=apps/client -- --host 127.0.0.1 --port 4173 --strictPort',
       ].join(' '),

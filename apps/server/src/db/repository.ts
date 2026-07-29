@@ -1,12 +1,23 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, countDistinct, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
+import { and, asc, countDistinct, desc, eq, gt, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
-import type { BoundsPolicy, ClientPresence, CreateSessionResponse, Session, SessionCanvasConfig, TileInstance } from '../contracts.js'
+import type {
+  BoundsPolicy,
+  CanonicalPatchNavigation,
+  CanonicalWorldDescriptor,
+  ClientPresence,
+  CreateSessionResponse,
+  EligibleCanonicalPatchesResponse,
+  Session,
+  SessionCanvasConfig,
+  TileInstance,
+} from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
 import {
   canvases,
   authorizationAuditEvents,
+  canonicalWorld,
   externalPrincipalMappings,
   idempotencyKeys,
   operationLog,
@@ -19,6 +30,7 @@ import {
   patchSnapshots,
   patchVisibilityPolicies,
   principals,
+  quiltPresenceLeases,
   quilts,
   snapshots,
   tileSpatialRefs,
@@ -62,6 +74,20 @@ export class ResourceNotFoundError extends Error {
   constructor() {
     super('Resource not found.')
     this.name = 'ResourceNotFoundError'
+  }
+}
+
+export class CanonicalWorldGenerationConflictError extends Error {
+  constructor() {
+    super('Canonical world generation conflict.')
+    this.name = 'CanonicalWorldGenerationConflictError'
+  }
+}
+
+export class CanonicalWorldTargetInvalidError extends Error {
+  constructor() {
+    super('Canonical world target is invalid.')
+    this.name = 'CanonicalWorldTargetInvalidError'
   }
 }
 
@@ -1549,6 +1575,169 @@ export const listActiveParticipants = async (sessionId: string): Promise<ClientP
   return rows.map(mapClient)
 }
 
+const lockQuiltPresence = async (tx: DatabaseClient, quiltId: string, principalId: string): Promise<void> => {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${quiltId}), hashtext(${principalId}))`)
+}
+
+export type QuiltPresenceLeaseDecision = {
+  quiltId: string
+  principalId: string
+  clientId: string
+  joinedAt: number
+  isFirstLease?: boolean
+  isLastLease?: boolean
+}
+
+export const acquireQuiltPresenceLease = async (params: {
+  socketId: string
+  quiltId: string
+  principalId: string
+  clientId: string
+  now: number
+  ttlMs: number
+}): Promise<QuiltPresenceLeaseDecision> => {
+  const { db } = getDatabaseBundle()
+  const now = new Date(params.now)
+  const expiresAt = new Date(params.now + params.ttlMs)
+
+  return db.transaction(async (tx) => {
+    await lockQuiltPresence(tx, params.quiltId, params.principalId)
+    await tx.delete(quiltPresenceLeases).where(and(
+      eq(quiltPresenceLeases.quiltId, params.quiltId),
+      eq(quiltPresenceLeases.principalId, params.principalId),
+      lte(quiltPresenceLeases.expiresAt, now),
+    ))
+    const active = await tx
+      .select({ joinedAt: quiltPresenceLeases.joinedAt })
+      .from(quiltPresenceLeases)
+      .where(and(
+        eq(quiltPresenceLeases.quiltId, params.quiltId),
+        eq(quiltPresenceLeases.principalId, params.principalId),
+        gt(quiltPresenceLeases.expiresAt, now),
+      ))
+
+    await tx.insert(quiltPresenceLeases).values({
+      socketId: params.socketId,
+      quiltId: params.quiltId,
+      principalId: params.principalId,
+      clientId: params.clientId,
+      joinedAt: now,
+      heartbeatAt: now,
+      expiresAt,
+    }).onConflictDoUpdate({
+      target: quiltPresenceLeases.socketId,
+      set: { heartbeatAt: now, expiresAt },
+    })
+
+    return {
+      quiltId: params.quiltId,
+      principalId: params.principalId,
+      clientId: params.principalId,
+      joinedAt: active.reduce((earliest, lease) => Math.min(earliest, lease.joinedAt.getTime()), params.now),
+      isFirstLease: active.length === 0,
+    }
+  })
+}
+
+export const renewQuiltPresenceLease = async (socketId: string, now: number, ttlMs: number): Promise<boolean> => {
+  const { db } = getDatabaseBundle()
+  const renewed = await db
+    .update(quiltPresenceLeases)
+    .set({ heartbeatAt: new Date(now), expiresAt: new Date(now + ttlMs) })
+    .where(eq(quiltPresenceLeases.socketId, socketId))
+    .returning({ socketId: quiltPresenceLeases.socketId })
+  return renewed.length === 1
+}
+
+export const releaseQuiltPresenceLease = async (params: {
+  socketId: string
+  quiltId: string
+  principalId: string
+  now: number
+}): Promise<QuiltPresenceLeaseDecision> => {
+  const { db } = getDatabaseBundle()
+  const now = new Date(params.now)
+
+  return db.transaction(async (tx) => {
+    await lockQuiltPresence(tx, params.quiltId, params.principalId)
+    const removed = await tx
+      .delete(quiltPresenceLeases)
+      .where(eq(quiltPresenceLeases.socketId, params.socketId))
+      .returning({ joinedAt: quiltPresenceLeases.joinedAt })
+    await tx.delete(quiltPresenceLeases).where(and(
+      eq(quiltPresenceLeases.quiltId, params.quiltId),
+      eq(quiltPresenceLeases.principalId, params.principalId),
+      lte(quiltPresenceLeases.expiresAt, now),
+    ))
+    const active = await tx
+      .select({ socketId: quiltPresenceLeases.socketId })
+      .from(quiltPresenceLeases)
+      .where(and(
+        eq(quiltPresenceLeases.quiltId, params.quiltId),
+        eq(quiltPresenceLeases.principalId, params.principalId),
+        gt(quiltPresenceLeases.expiresAt, now),
+      ))
+
+    return {
+      quiltId: params.quiltId,
+      principalId: params.principalId,
+      clientId: params.principalId,
+      joinedAt: removed[0]?.joinedAt.getTime() ?? params.now,
+      isLastLease: removed.length > 0 && active.length === 0,
+    }
+  })
+}
+
+export const reapExpiredQuiltPresenceLeases = async (now: number): Promise<QuiltPresenceLeaseDecision[]> => {
+  const { db } = getDatabaseBundle()
+  const expiresAt = new Date(now)
+
+  return db.transaction(async (tx) => {
+    const expired = await tx
+      .select({
+        quiltId: quiltPresenceLeases.quiltId,
+        principalId: quiltPresenceLeases.principalId,
+      })
+      .from(quiltPresenceLeases)
+      .where(lte(quiltPresenceLeases.expiresAt, expiresAt))
+    const scopes = new Map(expired.map((lease) => [`${lease.quiltId}:${lease.principalId}`, lease]))
+    const departures: QuiltPresenceLeaseDecision[] = []
+
+    for (const scope of scopes.values()) {
+      await lockQuiltPresence(tx, scope.quiltId, scope.principalId)
+      const removed = await tx
+        .delete(quiltPresenceLeases)
+        .where(and(
+          eq(quiltPresenceLeases.quiltId, scope.quiltId),
+          eq(quiltPresenceLeases.principalId, scope.principalId),
+          lte(quiltPresenceLeases.expiresAt, expiresAt),
+        ))
+        .returning({ socketId: quiltPresenceLeases.socketId })
+      if (removed.length === 0) continue
+
+      const active = await tx
+        .select({ socketId: quiltPresenceLeases.socketId })
+        .from(quiltPresenceLeases)
+        .where(and(
+          eq(quiltPresenceLeases.quiltId, scope.quiltId),
+          eq(quiltPresenceLeases.principalId, scope.principalId),
+          gt(quiltPresenceLeases.expiresAt, expiresAt),
+        ))
+      if (active.length === 0) {
+        departures.push({
+          quiltId: scope.quiltId,
+          principalId: scope.principalId,
+          clientId: scope.principalId,
+          joinedAt: now,
+          isLastLease: true,
+        })
+      }
+    }
+
+    return departures
+  })
+}
+
 export const listSessionSummaries = async (principalId: string): Promise<SessionSummaryRecord[]> => {
   const { db } = getDatabaseBundle()
 
@@ -1593,6 +1782,7 @@ export const persistQuiltTilePlacement = async (params: {
   quiltId: string
   operationId: string
   principalId: string
+  placedBy: string
   expectedPatchRevisions: Record<string, number>
   payload: PlaceTilePayload
   createdAt?: number
@@ -1735,7 +1925,7 @@ export const persistQuiltTilePlacement = async (params: {
       chunkY: tileChunk.y,
       rotation: canonicalTransform.rotation,
       mirrored: canonicalTransform.mirrored ?? false,
-      placedBy: null,
+      placedBy: params.placedBy,
       createdAt,
     })
 
@@ -1798,6 +1988,7 @@ export const persistQuiltTilePlacement = async (params: {
         color: params.payload.color,
         material: params.payload.material,
         transform: canonicalTransform,
+        placedBy: params.placedBy,
         createdAt: createdAt.getTime(),
       },
       patchRevisions: Object.fromEntries(
@@ -2521,12 +2712,516 @@ export type QuiltDeliveryContext = {
   }>
 }
 
+const CANONICAL_PRODUCT_KEY = 'canonical'
+const CANONICAL_POLICY_VERSION = 1
+
+type CanonicalPointerStatus = 'missing' | 'inactive' | 'active'
+
+type ValidatedCanonicalTarget = {
+  quilt: {
+    id: string
+    legacyCanvasId: string
+    topology: 'toroidal'
+    protocolVersion: 2
+    patchRows: number
+    patchColumns: number
+    patchWidth: number
+    patchHeight: number
+    originX: number
+    originY: number
+  }
+  patchCount: number
+  initialPatch: { id: string; row: number; column: number }
+  policyVersion: number
+  exactProvisioningState: boolean
+}
+
+export type CanonicalWorldOperatorResult = {
+  schemaVersion: 1
+  action: 'status' | 'provision' | 'activate' | 'deactivate'
+  result: 'succeeded' | 'idempotent'
+  idempotent: boolean
+  productKey: 'canonical'
+  pointerStatus: CanonicalPointerStatus
+  generation: number
+  quilt?: ValidatedCanonicalTarget['quilt']
+  patchCount?: number
+  initialPatch?: ValidatedCanonicalTarget['initialPatch']
+  policyVersion?: number
+}
+
+export type CanonicalProvisionInput = {
+  action: 'provision'
+  expectedGeneration: 0
+  patchRows: number
+  patchColumns: number
+  patchWidth: number
+  patchHeight: number
+  originX: number
+  originY: number
+  operatorId: string
+  reason: string
+}
+
+export type CanonicalActivateInput = {
+  action: 'activate'
+  quiltId: string
+  expectedGeneration: number
+  operatorId: string
+  reason: string
+}
+
+export type CanonicalDeactivateInput = {
+  action: 'deactivate'
+  expectedGeneration: number
+  operatorId: string
+  reason: string
+}
+
+const baselinePolicy = {
+  existence: 'authenticated',
+  fineData: 'authenticated',
+  aggregateData: 'authenticated',
+  presence: 'authenticated',
+  search: 'authenticated',
+  durableEvents: 'authenticated',
+  claimEnabled: true,
+  policyVersion: CANONICAL_POLICY_VERSION,
+} as const
+
+const isCanonicalBaselinePolicy = (policy: PersistedVisibilityPolicy): boolean =>
+  policy.existence === 'authenticated'
+  && policy.fineData === 'authenticated'
+  && policy.aggregateData === 'authenticated'
+  && policy.presence === 'authenticated'
+  && policy.search === 'authenticated'
+  && policy.durableEvents === 'authenticated'
+  && policy.claimEnabled
+  && policy.policyVersion >= CANONICAL_POLICY_VERSION
+
+const validateCanonicalTargetWithDatabase = async (
+  tx: DatabaseClient,
+  quiltId: string,
+): Promise<ValidatedCanonicalTarget | null> => {
+  const [target] = await tx
+    .select({
+      id: quilts.id,
+      legacyCanvasId: quilts.legacyCanvasId,
+      compatibilityCanvasId: canvases.id,
+      patchRows: quilts.patchRows,
+      patchColumns: quilts.patchColumns,
+      patchWidth: quilts.patchWidth,
+      patchHeight: quilts.patchHeight,
+      originX: quilts.originX,
+      originY: quilts.originY,
+      topology: quilts.topology,
+      protocolVersion: quilts.protocolVersion,
+    })
+    .from(quilts)
+    .leftJoin(canvases, eq(canvases.id, quilts.legacyCanvasId))
+    .where(eq(quilts.id, quiltId))
+    .limit(1)
+
+  if (
+    !target
+    || !target.legacyCanvasId
+    || target.compatibilityCanvasId !== target.legacyCanvasId
+    || target.protocolVersion !== 2
+    || target.topology !== 'toroidal'
+    || !Number.isSafeInteger(target.patchRows)
+    || !Number.isSafeInteger(target.patchColumns)
+    || target.patchRows <= 0
+    || target.patchColumns <= 0
+    || !Number.isFinite(target.patchWidth)
+    || !Number.isFinite(target.patchHeight)
+    || !Number.isFinite(target.originX)
+    || !Number.isFinite(target.originY)
+    || target.patchWidth <= 0
+    || target.patchHeight <= 0
+  ) return null
+
+  const patchRecords = await tx
+    .select({
+      id: patches.id,
+      row: patches.row,
+      column: patches.column,
+      state: patches.state,
+      ownerPrincipalId: patches.ownerPrincipalId,
+      revision: patches.revision,
+      existence: patchVisibilityPolicies.existence,
+      fineData: patchVisibilityPolicies.fineData,
+      aggregateData: patchVisibilityPolicies.aggregateData,
+      presence: patchVisibilityPolicies.presence,
+      search: patchVisibilityPolicies.search,
+      durableEvents: patchVisibilityPolicies.durableEvents,
+      claimEnabled: patchVisibilityPolicies.claimEnabled,
+      policyVersion: patchVisibilityPolicies.policyVersion,
+    })
+    .from(patches)
+    .leftJoin(patchVisibilityPolicies, eq(patchVisibilityPolicies.patchId, patches.id))
+    .where(eq(patches.quiltId, quiltId))
+    .orderBy(asc(patches.row), asc(patches.column))
+
+  const expectedPatchCount = target.patchRows * target.patchColumns
+  if (!Number.isSafeInteger(expectedPatchCount) || patchRecords.length !== expectedPatchCount) return null
+
+  const addresses = new Set<string>()
+  let exactProvisioningState = true
+  let minimumPolicyVersion = Number.MAX_SAFE_INTEGER
+  for (const patch of patchRecords) {
+    if (
+      !Number.isSafeInteger(patch.row)
+      || !Number.isSafeInteger(patch.column)
+      || patch.row < 0
+      || patch.row >= target.patchRows
+      || patch.column < 0
+      || patch.column >= target.patchColumns
+      || (patch.state !== 'unclaimed' && patch.state !== 'active')
+    ) return null
+
+    const address = `${patch.row}:${patch.column}`
+    if (addresses.has(address)) return null
+    addresses.add(address)
+
+    const policyCandidate = {
+      existence: patch.existence,
+      fineData: patch.fineData,
+      aggregateData: patch.aggregateData,
+      presence: patch.presence,
+      search: patch.search,
+      durableEvents: patch.durableEvents,
+      claimEnabled: patch.claimEnabled,
+      policyVersion: patch.policyVersion,
+    }
+    if (!isPersistedVisibilityPolicy(policyCandidate) || !isCanonicalBaselinePolicy(policyCandidate)) return null
+    minimumPolicyVersion = Math.min(minimumPolicyVersion, policyCandidate.policyVersion)
+    exactProvisioningState &&= patch.state === 'unclaimed'
+      && patch.ownerPrincipalId === null
+      && patch.revision === 0
+      && policyCandidate.policyVersion === CANONICAL_POLICY_VERSION
+  }
+
+  for (let row = 0; row < target.patchRows; row += 1) {
+    for (let column = 0; column < target.patchColumns; column += 1) {
+      if (!addresses.has(`${row}:${column}`)) return null
+    }
+  }
+
+  const initialPatch = patchRecords[0]
+  if (!initialPatch || initialPatch.row !== 0 || initialPatch.column !== 0) return null
+  return {
+    quilt: {
+      id: target.id,
+      legacyCanvasId: target.legacyCanvasId,
+      topology: 'toroidal',
+      protocolVersion: 2,
+      patchRows: target.patchRows,
+      patchColumns: target.patchColumns,
+      patchWidth: target.patchWidth,
+      patchHeight: target.patchHeight,
+      originX: target.originX,
+      originY: target.originY,
+    },
+    patchCount: patchRecords.length,
+    initialPatch: { id: initialPatch.id, row: initialPatch.row, column: initialPatch.column },
+    policyVersion: minimumPolicyVersion,
+    exactProvisioningState,
+  }
+}
+
+const operatorResult = (
+  action: CanonicalWorldOperatorResult['action'],
+  pointerStatus: CanonicalPointerStatus,
+  generation: number,
+  target?: ValidatedCanonicalTarget,
+  idempotent = false,
+): CanonicalWorldOperatorResult => ({
+  schemaVersion: 1,
+  action,
+  result: idempotent ? 'idempotent' : 'succeeded',
+  idempotent,
+  productKey: CANONICAL_PRODUCT_KEY,
+  pointerStatus,
+  generation,
+  ...(target ? {
+    quilt: target.quilt,
+    patchCount: target.patchCount,
+    initialPatch: target.initialPatch,
+    policyVersion: target.policyVersion,
+  } : {}),
+})
+
+const lockCanonicalWorld = async (tx: DatabaseClient): Promise<void> => {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext('canonical-world'), hashtext('canonical'))`)
+}
+
+const readCanonicalPointer = async (tx: DatabaseClient) => {
+  const [pointer] = await tx
+    .select()
+    .from(canonicalWorld)
+    .where(eq(canonicalWorld.productKey, CANONICAL_PRODUCT_KEY))
+    .limit(1)
+  return pointer
+}
+
+export const discoverCanonicalWorld = async (): Promise<CanonicalWorldDescriptor | null> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    const pointer = await readCanonicalPointer(tx)
+    if (!pointer || pointer.status !== 'active') return null
+    const target = await validateCanonicalTargetWithDatabase(tx, pointer.quiltId)
+    if (!target) return null
+    return {
+      quiltId: target.quilt.id,
+      legacyCanvasId: target.quilt.legacyCanvasId,
+      topology: target.quilt.topology,
+      protocolVersion: target.quilt.protocolVersion,
+      patchRows: target.quilt.patchRows,
+      patchColumns: target.quilt.patchColumns,
+      patchWidth: target.quilt.patchWidth,
+      patchHeight: target.quilt.patchHeight,
+      originX: target.quilt.originX,
+      originY: target.quilt.originY,
+      generation: pointer.generation,
+      initialPatch: target.initialPatch,
+    }
+  }, { isolationLevel: 'repeatable read', accessMode: 'read only' })
+}
+
+const toCanonicalPatchNavigation = (
+  descriptor: Pick<CanonicalWorldDescriptor, 'quiltId' | 'patchWidth' | 'patchHeight' | 'originX' | 'originY'>,
+  patch: { id: string; row: number; column: number },
+): CanonicalPatchNavigation => ({
+  quiltId: descriptor.quiltId,
+  patchId: patch.id,
+  row: patch.row,
+  column: patch.column,
+  centerX: descriptor.originX + (patch.column + 0.5) * descriptor.patchWidth,
+  centerY: descriptor.originY + (patch.row + 0.5) * descriptor.patchHeight,
+})
+
+export const listEligibleCanonicalPatches = async (
+  principalId: string,
+): Promise<EligibleCanonicalPatchesResponse | null> => {
+  const descriptor = await discoverCanonicalWorld()
+  if (!descriptor) return null
+  const { db } = getDatabaseBundle()
+
+  const [principal, ownedPatch] = await Promise.all([
+    db.select({ status: principals.status, kind: principals.kind })
+      .from(principals)
+      .where(eq(principals.id, principalId))
+      .limit(1),
+    db.select({ id: patches.id })
+      .from(patches)
+      .where(and(
+        eq(patches.quiltId, descriptor.quiltId),
+        eq(patches.ownerPrincipalId, principalId),
+        eq(patches.state, 'active'),
+      ))
+      .limit(1),
+  ])
+  const claimAllowed = principal[0]?.status === 'active' && principal[0]?.kind === 'human' && ownedPatch.length === 0
+  if (!claimAllowed) return { quiltId: descriptor.quiltId, generation: descriptor.generation, claimAllowed, patches: [] }
+
+  const eligible = await db
+    .select({ id: patches.id, row: patches.row, column: patches.column })
+    .from(patches)
+    .innerJoin(patchVisibilityPolicies, eq(patchVisibilityPolicies.patchId, patches.id))
+    .where(and(
+      eq(patches.quiltId, descriptor.quiltId),
+      eq(patches.state, 'unclaimed'),
+      isNull(patches.ownerPrincipalId),
+      eq(patchVisibilityPolicies.claimEnabled, true),
+    ))
+    .orderBy(asc(patches.row), asc(patches.column))
+
+  return {
+    quiltId: descriptor.quiltId,
+    generation: descriptor.generation,
+    claimAllowed,
+    patches: eligible.map((patch) => toCanonicalPatchNavigation(descriptor, patch)),
+  }
+}
+
+export const resolveCanonicalPatchNavigation = async (
+  quiltId: string,
+  patchId: string,
+): Promise<CanonicalPatchNavigation | null> => {
+  const descriptor = await discoverCanonicalWorld()
+  if (!descriptor || descriptor.quiltId !== quiltId) return null
+  const { db } = getDatabaseBundle()
+  const [patch] = await db
+    .select({ id: patches.id, row: patches.row, column: patches.column })
+    .from(patches)
+    .where(and(eq(patches.id, patchId), eq(patches.quiltId, quiltId)))
+    .limit(1)
+  return patch ? toCanonicalPatchNavigation(descriptor, patch) : null
+}
+
+export const getCanonicalWorldStatus = async (): Promise<CanonicalWorldOperatorResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await lockCanonicalWorld(tx)
+    const pointer = await readCanonicalPointer(tx)
+    if (!pointer) return operatorResult('status', 'missing', 0)
+    const target = await validateCanonicalTargetWithDatabase(tx, pointer.quiltId)
+    if (!target) throw new CanonicalWorldTargetInvalidError()
+    return operatorResult('status', pointer.status as 'inactive' | 'active', pointer.generation, target)
+  }, { isolationLevel: 'read committed' })
+}
+
+const geometryMatches = (target: ValidatedCanonicalTarget, input: CanonicalProvisionInput): boolean =>
+  target.quilt.patchRows === input.patchRows
+  && target.quilt.patchColumns === input.patchColumns
+  && target.quilt.patchWidth === input.patchWidth
+  && target.quilt.patchHeight === input.patchHeight
+  && target.quilt.originX === input.originX
+  && target.quilt.originY === input.originY
+
+export const provisionCanonicalWorld = async (
+  input: CanonicalProvisionInput,
+): Promise<CanonicalWorldOperatorResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await lockCanonicalWorld(tx)
+    if (input.expectedGeneration !== 0) throw new CanonicalWorldGenerationConflictError()
+    const pointer = await readCanonicalPointer(tx)
+    if (pointer) {
+      const target = await validateCanonicalTargetWithDatabase(tx, pointer.quiltId)
+      if (!target) throw new CanonicalWorldTargetInvalidError()
+      if (
+        pointer.status !== 'inactive'
+        || pointer.generation !== 1
+        || !target.exactProvisioningState
+        || !geometryMatches(target, input)
+      ) throw new CanonicalWorldGenerationConflictError()
+      return operatorResult('provision', 'inactive', 1, target, true)
+    }
+    const compatibilityCanvasId = randomUUID()
+    const quiltId = randomUUID()
+    const patchRecords = Array.from({ length: input.patchRows * input.patchColumns }, (_, index) => ({
+      id: randomUUID(),
+      quiltId,
+      row: Math.floor(index / input.patchColumns),
+      column: index % input.patchColumns,
+      state: 'unclaimed',
+      revision: 0,
+    }))
+    await tx.insert(canvases).values({
+      id: compatibilityCanvasId,
+      canvasConfig: {
+        canvasSize: {
+          width: input.patchColumns * input.patchWidth,
+          height: input.patchRows * input.patchHeight,
+        },
+        boundsPolicy: { mode: 'unbounded' },
+      },
+    })
+    await tx.insert(quilts).values({
+      id: quiltId,
+      legacyCanvasId: compatibilityCanvasId,
+      patchRows: input.patchRows,
+      patchColumns: input.patchColumns,
+      patchWidth: input.patchWidth,
+      patchHeight: input.patchHeight,
+      originX: input.originX,
+      originY: input.originY,
+      topology: 'toroidal',
+      protocolVersion: 2,
+    })
+    await tx.insert(patches).values(patchRecords)
+    await tx.insert(patchVisibilityPolicies).values(patchRecords.map((patch) => ({
+      patchId: patch.id,
+      ...baselinePolicy,
+    })))
+    await tx.insert(canonicalWorld).values({
+      productKey: CANONICAL_PRODUCT_KEY,
+      quiltId,
+      status: 'inactive',
+      generation: 1,
+    })
+
+    const target = await validateCanonicalTargetWithDatabase(tx, quiltId)
+    if (!target) throw new CanonicalWorldTargetInvalidError()
+    return operatorResult('provision', 'inactive', 1, target)
+  }, { isolationLevel: 'read committed' })
+}
+
+export const activateCanonicalWorld = async (
+  input: CanonicalActivateInput,
+): Promise<CanonicalWorldOperatorResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await lockCanonicalWorld(tx)
+    const pointer = await readCanonicalPointer(tx)
+    if (pointer?.status === 'active' && pointer.quiltId === input.quiltId) {
+      const target = await validateCanonicalTargetWithDatabase(tx, pointer.quiltId)
+      if (!target) throw new CanonicalWorldTargetInvalidError()
+      return operatorResult('activate', 'active', pointer.generation, target, true)
+    }
+    const currentGeneration = pointer?.generation ?? 0
+    if (currentGeneration !== input.expectedGeneration) throw new CanonicalWorldGenerationConflictError()
+    const target = await validateCanonicalTargetWithDatabase(tx, input.quiltId)
+    if (!target) throw new CanonicalWorldTargetInvalidError()
+    const generation = currentGeneration + 1
+    if (pointer) {
+      const updated = await tx.update(canonicalWorld).set({
+        quiltId: input.quiltId,
+        status: 'active',
+        generation,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(canonicalWorld.productKey, CANONICAL_PRODUCT_KEY),
+        eq(canonicalWorld.generation, input.expectedGeneration),
+      )).returning({ generation: canonicalWorld.generation })
+      if (updated.length !== 1) throw new CanonicalWorldGenerationConflictError()
+    } else {
+      await tx.insert(canonicalWorld).values({
+        productKey: CANONICAL_PRODUCT_KEY,
+        quiltId: input.quiltId,
+        status: 'active',
+        generation,
+      })
+    }
+    return operatorResult('activate', 'active', generation, target)
+  }, { isolationLevel: 'read committed' })
+}
+
+export const deactivateCanonicalWorld = async (
+  input: CanonicalDeactivateInput,
+): Promise<CanonicalWorldOperatorResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await lockCanonicalWorld(tx)
+    const pointer = await readCanonicalPointer(tx)
+    if (!pointer) throw new CanonicalWorldGenerationConflictError()
+    const target = await validateCanonicalTargetWithDatabase(tx, pointer.quiltId)
+    if (!target) throw new CanonicalWorldTargetInvalidError()
+    if (pointer.status === 'inactive') {
+      return operatorResult('deactivate', 'inactive', pointer.generation, target, true)
+    }
+    if (pointer.generation !== input.expectedGeneration) throw new CanonicalWorldGenerationConflictError()
+    const generation = pointer.generation + 1
+    const updated = await tx.update(canonicalWorld).set({
+      status: 'inactive',
+      generation,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(canonicalWorld.productKey, CANONICAL_PRODUCT_KEY),
+      eq(canonicalWorld.generation, input.expectedGeneration),
+    )).returning({ generation: canonicalWorld.generation })
+    if (updated.length !== 1) throw new CanonicalWorldGenerationConflictError()
+    return operatorResult('deactivate', 'inactive', generation, target)
+  }, { isolationLevel: 'read committed' })
+}
+
 export const loadQuiltDeliveryContext = async (params: {
-  sessionId: string
+  quiltId: string
   principalId: string
 }): Promise<QuiltDeliveryContext | null> => {
   const { db } = getDatabaseBundle()
-  const [quilt] = await db.select().from(quilts).where(eq(quilts.legacyCanvasId, params.sessionId)).limit(1)
+  const [quilt] = await db.select().from(quilts).where(eq(quilts.id, params.quiltId)).limit(1)
   if (!quilt) return null
 
   const principalId = params.principalId

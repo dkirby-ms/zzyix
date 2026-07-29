@@ -1,0 +1,2622 @@
+{
+  "id": "f88b5924-1246-4e4a-a9ce-c03ff716fc02",
+  "prevId": "0db6f21f-cab0-41f4-9868-7d9210fe7ea4",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.authorization_audit_events": {
+      "name": "authorization_audit_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attempted_action": {
+          "name": "attempted_action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "actor_principal_id": {
+          "name": "actor_principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subject_principal_id": {
+          "name": "subject_principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quilt_id": {
+          "name": "quilt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "socket_id": {
+          "name": "socket_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_channel": {
+          "name": "source_channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "replica_id": {
+          "name": "replica_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "policy_version": {
+          "name": "policy_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "before_state": {
+          "name": "before_state",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "after_state": {
+          "name": "after_state",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "authorization_audit_events_actor_created_idx": {
+          "name": "authorization_audit_events_actor_created_idx",
+          "columns": [
+            {
+              "expression": "actor_principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "authorization_audit_events_patch_created_idx": {
+          "name": "authorization_audit_events_patch_created_idx",
+          "columns": [
+            {
+              "expression": "patch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "authorization_audit_events_type_created_idx": {
+          "name": "authorization_audit_events_type_created_idx",
+          "columns": [
+            {
+              "expression": "event_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "authorization_audit_events_actor_principal_id_principals_id_fk": {
+          "name": "authorization_audit_events_actor_principal_id_principals_id_fk",
+          "tableFrom": "authorization_audit_events",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "actor_principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "authorization_audit_events_subject_principal_id_principals_id_fk": {
+          "name": "authorization_audit_events_subject_principal_id_principals_id_fk",
+          "tableFrom": "authorization_audit_events",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "subject_principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "authorization_audit_events_quilt_id_quilts_id_fk": {
+          "name": "authorization_audit_events_quilt_id_quilts_id_fk",
+          "tableFrom": "authorization_audit_events",
+          "tableTo": "quilts",
+          "columnsFrom": [
+            "quilt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "authorization_audit_events_patch_id_patches_id_fk": {
+          "name": "authorization_audit_events_patch_id_patches_id_fk",
+          "tableFrom": "authorization_audit_events",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "authorization_audit_events_outcome_check": {
+          "name": "authorization_audit_events_outcome_check",
+          "value": "\"authorization_audit_events\".\"outcome\" in ('allowed', 'denied', 'succeeded', 'failed')"
+        },
+        "authorization_audit_events_source_channel_check": {
+          "name": "authorization_audit_events_source_channel_check",
+          "value": "\"authorization_audit_events\".\"source_channel\" in ('http', 'socket', 'job', 'operation')"
+        },
+        "authorization_audit_events_policy_version_check": {
+          "name": "authorization_audit_events_policy_version_check",
+          "value": "\"authorization_audit_events\".\"policy_version\" is null or \"authorization_audit_events\".\"policy_version\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.canonical_world": {
+      "name": "canonical_world",
+      "schema": "",
+      "columns": {
+        "product_key": {
+          "name": "product_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "quilt_id": {
+          "name": "quilt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "generation": {
+          "name": "generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "canonical_world_quilt_id_idx": {
+          "name": "canonical_world_quilt_id_idx",
+          "columns": [
+            {
+              "expression": "quilt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "canonical_world_quilt_id_quilts_id_fk": {
+          "name": "canonical_world_quilt_id_quilts_id_fk",
+          "tableFrom": "canonical_world",
+          "tableTo": "quilts",
+          "columnsFrom": [
+            "quilt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "canonical_world_product_key_check": {
+          "name": "canonical_world_product_key_check",
+          "value": "\"canonical_world\".\"product_key\" = 'canonical'"
+        },
+        "canonical_world_status_check": {
+          "name": "canonical_world_status_check",
+          "value": "\"canonical_world\".\"status\" in ('inactive', 'active')"
+        },
+        "canonical_world_generation_check": {
+          "name": "canonical_world_generation_check",
+          "value": "\"canonical_world\".\"generation\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.canvases": {
+      "name": "canvases",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "canvas_config": {
+          "name": "canvas_config",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "canvases_updated_at_idx": {
+          "name": "canvases_updated_at_idx",
+          "columns": [
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.external_principal_mappings": {
+      "name": "external_principal_mappings",
+      "schema": "",
+      "columns": {
+        "provider_namespace": {
+          "name": "provider_namespace",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "external_subject": {
+          "name": "external_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "external_principal_mappings_principal_id_principals_id_fk": {
+          "name": "external_principal_mappings_principal_id_principals_id_fk",
+          "tableFrom": "external_principal_mappings",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "external_principal_mappings_pk": {
+          "name": "external_principal_mappings_pk",
+          "columns": [
+            "provider_namespace",
+            "external_subject"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "external_principal_mappings_principal_id_unique": {
+          "name": "external_principal_mappings_principal_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "principal_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.idempotency_keys": {
+      "name": "idempotency_keys",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status_code": {
+          "name": "status_code",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idempotency_keys_expires_at_idx": {
+          "name": "idempotency_keys_expires_at_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "idempotency_keys_pk": {
+          "name": "idempotency_keys_pk",
+          "columns": [
+            "key",
+            "client_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "idempotency_keys_client_id_key_unique": {
+          "name": "idempotency_keys_client_id_key_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "client_id",
+            "key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.operation_log": {
+      "name": "operation_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "operation_log_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "canvas_id": {
+          "name": "canvas_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "op_seq": {
+          "name": "op_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "op_type": {
+          "name": "op_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "op_log_canvas_seq_idx": {
+          "name": "op_log_canvas_seq_idx",
+          "columns": [
+            {
+              "expression": "canvas_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "op_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "op_log_canvas_created_idx": {
+          "name": "op_log_canvas_created_idx",
+          "columns": [
+            {
+              "expression": "canvas_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "operation_log_canvas_id_canvases_id_fk": {
+          "name": "operation_log_canvas_id_canvases_id_fk",
+          "tableFrom": "operation_log",
+          "tableTo": "canvases",
+          "columnsFrom": [
+            "canvas_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "operation_log_canvas_id_op_seq_unique": {
+          "name": "operation_log_canvas_id_op_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "canvas_id",
+            "op_seq"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "operation_log_op_type_check": {
+          "name": "operation_log_op_type_check",
+          "value": "\"operation_log\".\"op_type\" in ('tile_placed', 'tile_removed')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.participants": {
+      "name": "participants",
+      "schema": "",
+      "columns": {
+        "canvas_id": {
+          "name": "canvas_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "left_at": {
+          "name": "left_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "participants_canvas_id_idx": {
+          "name": "participants_canvas_id_idx",
+          "columns": [
+            {
+              "expression": "canvas_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "participants_canvas_id_canvases_id_fk": {
+          "name": "participants_canvas_id_canvases_id_fk",
+          "tableFrom": "participants",
+          "tableTo": "canvases",
+          "columnsFrom": [
+            "canvas_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "participants_pk": {
+          "name": "participants_pk",
+          "columns": [
+            "canvas_id",
+            "client_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.patch_claim_quota_records": {
+      "name": "patch_claim_quota_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quilt_id": {
+          "name": "quilt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason_code": {
+          "name": "reason_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempted_at": {
+          "name": "attempted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "patch_claim_quota_records_principal_attempt_idx": {
+          "name": "patch_claim_quota_records_principal_attempt_idx",
+          "columns": [
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "attempted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "patch_claim_quota_records_principal_outcome_idx": {
+          "name": "patch_claim_quota_records_principal_outcome_idx",
+          "columns": [
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "outcome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "attempted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "patch_claim_quota_records_principal_id_principals_id_fk": {
+          "name": "patch_claim_quota_records_principal_id_principals_id_fk",
+          "tableFrom": "patch_claim_quota_records",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "patch_claim_quota_records_quilt_id_quilts_id_fk": {
+          "name": "patch_claim_quota_records_quilt_id_quilts_id_fk",
+          "tableFrom": "patch_claim_quota_records",
+          "tableTo": "quilts",
+          "columnsFrom": [
+            "quilt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "patch_claim_quota_records_patch_id_patches_id_fk": {
+          "name": "patch_claim_quota_records_patch_id_patches_id_fk",
+          "tableFrom": "patch_claim_quota_records",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "patch_claim_quota_records_operation_id_unique": {
+          "name": "patch_claim_quota_records_operation_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "operation_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "patch_claim_quota_records_outcome_check": {
+          "name": "patch_claim_quota_records_outcome_check",
+          "value": "\"patch_claim_quota_records\".\"outcome\" in ('claimed', 'denied', 'conflict')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.patch_memberships": {
+      "name": "patch_memberships",
+      "schema": "",
+      "columns": {
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "patch_memberships_patch_role_idx": {
+          "name": "patch_memberships_patch_role_idx",
+          "columns": [
+            {
+              "expression": "patch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "role",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "patch_memberships_patch_id_patches_id_fk": {
+          "name": "patch_memberships_patch_id_patches_id_fk",
+          "tableFrom": "patch_memberships",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "patch_memberships_principal_id_principals_id_fk": {
+          "name": "patch_memberships_principal_id_principals_id_fk",
+          "tableFrom": "patch_memberships",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "patch_memberships_pk": {
+          "name": "patch_memberships_pk",
+          "columns": [
+            "patch_id",
+            "principal_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "patch_memberships_role_check": {
+          "name": "patch_memberships_role_check",
+          "value": "\"patch_memberships\".\"role\" in ('member', 'owner')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.patch_operations": {
+      "name": "patch_operations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "byDefault",
+            "name": "patch_operations_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "op_seq": {
+          "name": "op_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "actor_principal_id": {
+          "name": "actor_principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "op_type": {
+          "name": "op_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "legacy_operation_id": {
+          "name": "legacy_operation_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "patch_operations_patch_created_idx": {
+          "name": "patch_operations_patch_created_idx",
+          "columns": [
+            {
+              "expression": "patch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "patch_operations_patch_id_patches_id_fk": {
+          "name": "patch_operations_patch_id_patches_id_fk",
+          "tableFrom": "patch_operations",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "patch_operations_actor_principal_id_principals_id_fk": {
+          "name": "patch_operations_actor_principal_id_principals_id_fk",
+          "tableFrom": "patch_operations",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "actor_principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "patch_operations_patch_id_op_seq_unique": {
+          "name": "patch_operations_patch_id_op_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "patch_id",
+            "op_seq"
+          ]
+        },
+        "patch_operations_event_id_unique": {
+          "name": "patch_operations_event_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "event_id"
+          ]
+        },
+        "patch_operations_legacy_operation_id_unique": {
+          "name": "patch_operations_legacy_operation_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "legacy_operation_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "patch_operations_op_type_check": {
+          "name": "patch_operations_op_type_check",
+          "value": "\"patch_operations\".\"op_type\" in ('tile_placed', 'tile_removed')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.patch_snapshots": {
+      "name": "patch_snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "op_seq": {
+          "name": "op_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "legacy_snapshot_id": {
+          "name": "legacy_snapshot_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "patch_snapshots_patch_seq_idx": {
+          "name": "patch_snapshots_patch_seq_idx",
+          "columns": [
+            {
+              "expression": "patch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "op_seq",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "patch_snapshots_patch_id_patches_id_fk": {
+          "name": "patch_snapshots_patch_id_patches_id_fk",
+          "tableFrom": "patch_snapshots",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "patch_snapshots_patch_id_op_seq_unique": {
+          "name": "patch_snapshots_patch_id_op_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "patch_id",
+            "op_seq"
+          ]
+        },
+        "patch_snapshots_legacy_snapshot_id_unique": {
+          "name": "patch_snapshots_legacy_snapshot_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "legacy_snapshot_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.patch_visibility_policies": {
+      "name": "patch_visibility_policies",
+      "schema": "",
+      "columns": {
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "existence": {
+          "name": "existence",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'authenticated'"
+        },
+        "fine_data": {
+          "name": "fine_data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'authenticated'"
+        },
+        "aggregate_data": {
+          "name": "aggregate_data",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'authenticated'"
+        },
+        "presence": {
+          "name": "presence",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'authenticated'"
+        },
+        "search": {
+          "name": "search",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'authenticated'"
+        },
+        "durable_events": {
+          "name": "durable_events",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'authenticated'"
+        },
+        "claim_enabled": {
+          "name": "claim_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "policy_version": {
+          "name": "policy_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "patch_visibility_policies_patch_id_patches_id_fk": {
+          "name": "patch_visibility_policies_patch_id_patches_id_fk",
+          "tableFrom": "patch_visibility_policies",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "patch_visibility_policies_existence_check": {
+          "name": "patch_visibility_policies_existence_check",
+          "value": "\"patch_visibility_policies\".\"existence\" in ('hidden', 'authenticated', 'public')"
+        },
+        "patch_visibility_policies_fine_data_check": {
+          "name": "patch_visibility_policies_fine_data_check",
+          "value": "\"patch_visibility_policies\".\"fine_data\" in ('hidden', 'authenticated', 'public')"
+        },
+        "patch_visibility_policies_aggregate_data_check": {
+          "name": "patch_visibility_policies_aggregate_data_check",
+          "value": "\"patch_visibility_policies\".\"aggregate_data\" in ('hidden', 'authenticated', 'public')"
+        },
+        "patch_visibility_policies_presence_check": {
+          "name": "patch_visibility_policies_presence_check",
+          "value": "\"patch_visibility_policies\".\"presence\" in ('hidden', 'authenticated', 'public') and \"patch_visibility_policies\".\"presence\" <> 'public'"
+        },
+        "patch_visibility_policies_search_check": {
+          "name": "patch_visibility_policies_search_check",
+          "value": "\"patch_visibility_policies\".\"search\" in ('hidden', 'authenticated', 'public')"
+        },
+        "patch_visibility_policies_durable_events_check": {
+          "name": "patch_visibility_policies_durable_events_check",
+          "value": "\"patch_visibility_policies\".\"durable_events\" in ('hidden', 'authenticated', 'public')"
+        },
+        "patch_visibility_policies_policy_version_check": {
+          "name": "patch_visibility_policies_policy_version_check",
+          "value": "\"patch_visibility_policies\".\"policy_version\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.patches": {
+      "name": "patches",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "quilt_id": {
+          "name": "quilt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "row": {
+          "name": "row",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "column": {
+          "name": "column",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "owner_principal_id": {
+          "name": "owner_principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'unclaimed'"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "patches_quilt_state_idx": {
+          "name": "patches_quilt_state_idx",
+          "columns": [
+            {
+              "expression": "quilt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "state",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "patches_quilt_id_quilts_id_fk": {
+          "name": "patches_quilt_id_quilts_id_fk",
+          "tableFrom": "patches",
+          "tableTo": "quilts",
+          "columnsFrom": [
+            "quilt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "patches_owner_principal_id_principals_id_fk": {
+          "name": "patches_owner_principal_id_principals_id_fk",
+          "tableFrom": "patches",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "owner_principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "patches_quilt_row_column_unique": {
+          "name": "patches_quilt_row_column_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "quilt_id",
+            "row",
+            "column"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "patches_state_check": {
+          "name": "patches_state_check",
+          "value": "\"patches\".\"state\" in ('unclaimed', 'active', 'suspended', 'deletion_requested', 'deleted')"
+        },
+        "patches_address_check": {
+          "name": "patches_address_check",
+          "value": "\"patches\".\"row\" >= 0 and \"patches\".\"column\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.pending_ownership_transfers": {
+      "name": "pending_ownership_transfers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "operation_id": {
+          "name": "operation_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sender_principal_id": {
+          "name": "sender_principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recipient_principal_id": {
+          "name": "recipient_principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "pending_ownership_transfers_patch_status_idx": {
+          "name": "pending_ownership_transfers_patch_status_idx",
+          "columns": [
+            {
+              "expression": "patch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pending_ownership_transfers_recipient_status_idx": {
+          "name": "pending_ownership_transfers_recipient_status_idx",
+          "columns": [
+            {
+              "expression": "recipient_principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pending_ownership_transfers_patch_id_patches_id_fk": {
+          "name": "pending_ownership_transfers_patch_id_patches_id_fk",
+          "tableFrom": "pending_ownership_transfers",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "pending_ownership_transfers_sender_principal_id_principals_id_fk": {
+          "name": "pending_ownership_transfers_sender_principal_id_principals_id_fk",
+          "tableFrom": "pending_ownership_transfers",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "sender_principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "pending_ownership_transfers_recipient_principal_id_principals_id_fk": {
+          "name": "pending_ownership_transfers_recipient_principal_id_principals_id_fk",
+          "tableFrom": "pending_ownership_transfers",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "recipient_principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pending_ownership_transfers_operation_id_unique": {
+          "name": "pending_ownership_transfers_operation_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "operation_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "pending_ownership_transfers_status_check": {
+          "name": "pending_ownership_transfers_status_check",
+          "value": "\"pending_ownership_transfers\".\"status\" in ('pending', 'accepted', 'cancelled', 'expired')"
+        },
+        "pending_ownership_transfers_distinct_principals_check": {
+          "name": "pending_ownership_transfers_distinct_principals_check",
+          "value": "\"pending_ownership_transfers\".\"sender_principal_id\" <> \"pending_ownership_transfers\".\"recipient_principal_id\""
+        },
+        "pending_ownership_transfers_resolution_check": {
+          "name": "pending_ownership_transfers_resolution_check",
+          "value": "(\"pending_ownership_transfers\".\"status\" = 'pending' and \"pending_ownership_transfers\".\"resolved_at\" is null)\n        or (\"pending_ownership_transfers\".\"status\" <> 'pending' and \"pending_ownership_transfers\".\"resolved_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.principals": {
+      "name": "principals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletion_requested_at": {
+          "name": "deletion_requested_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletion_recovery_deadline": {
+          "name": "deletion_recovery_deadline",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "deletion_completed_at": {
+          "name": "deletion_completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "principals_kind_check": {
+          "name": "principals_kind_check",
+          "value": "\"principals\".\"kind\" in ('human', 'system')"
+        },
+        "principals_status_check": {
+          "name": "principals_status_check",
+          "value": "\"principals\".\"status\" in ('active', 'disabled', 'deletion_pending', 'deleted')"
+        },
+        "principals_deletion_timeline_check": {
+          "name": "principals_deletion_timeline_check",
+          "value": "(\"principals\".\"status\" not in ('deletion_pending', 'deleted') or \"principals\".\"deletion_requested_at\" is not null)\n        and (\"principals\".\"status\" <> 'deletion_pending' or \"principals\".\"deletion_recovery_deadline\" is not null)\n        and (\"principals\".\"status\" <> 'deleted' or \"principals\".\"deletion_completed_at\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.quilt_presence_leases": {
+      "name": "quilt_presence_leases",
+      "schema": "",
+      "columns": {
+        "socket_id": {
+          "name": "socket_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "quilt_id": {
+          "name": "quilt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "principal_id": {
+          "name": "principal_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "joined_at": {
+          "name": "joined_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "heartbeat_at": {
+          "name": "heartbeat_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "quilt_presence_leases_principal_expiry_idx": {
+          "name": "quilt_presence_leases_principal_expiry_idx",
+          "columns": [
+            {
+              "expression": "quilt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "principal_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "quilt_presence_leases_expiry_idx": {
+          "name": "quilt_presence_leases_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "quilt_presence_leases_quilt_id_quilts_id_fk": {
+          "name": "quilt_presence_leases_quilt_id_quilts_id_fk",
+          "tableFrom": "quilt_presence_leases",
+          "tableTo": "quilts",
+          "columnsFrom": [
+            "quilt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "quilt_presence_leases_principal_id_principals_id_fk": {
+          "name": "quilt_presence_leases_principal_id_principals_id_fk",
+          "tableFrom": "quilt_presence_leases",
+          "tableTo": "principals",
+          "columnsFrom": [
+            "principal_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.quilts": {
+      "name": "quilts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "legacy_canvas_id": {
+          "name": "legacy_canvas_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "patch_rows": {
+          "name": "patch_rows",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patch_columns": {
+          "name": "patch_columns",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patch_width": {
+          "name": "patch_width",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patch_height": {
+          "name": "patch_height",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origin_x": {
+          "name": "origin_x",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "origin_y": {
+          "name": "origin_y",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "topology": {
+          "name": "topology",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "protocol_version": {
+          "name": "protocol_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "quilts_legacy_canvas_id_canvases_id_fk": {
+          "name": "quilts_legacy_canvas_id_canvases_id_fk",
+          "tableFrom": "quilts",
+          "tableTo": "canvases",
+          "columnsFrom": [
+            "legacy_canvas_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "quilts_legacy_canvas_id_unique": {
+          "name": "quilts_legacy_canvas_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "legacy_canvas_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "quilts_topology_check": {
+          "name": "quilts_topology_check",
+          "value": "\"quilts\".\"topology\" in ('bounded', 'toroidal')"
+        },
+        "quilts_dimensions_check": {
+          "name": "quilts_dimensions_check",
+          "value": "\"quilts\".\"patch_rows\" > 0 and \"quilts\".\"patch_columns\" > 0 and \"quilts\".\"patch_width\" > 0 and \"quilts\".\"patch_height\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.snapshots": {
+      "name": "snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "canvas_id": {
+          "name": "canvas_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "op_seq": {
+          "name": "op_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "snapshots_canvas_seq_idx": {
+          "name": "snapshots_canvas_seq_idx",
+          "columns": [
+            {
+              "expression": "canvas_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "op_seq",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "snapshots_canvas_id_op_seq_unique": {
+          "name": "snapshots_canvas_id_op_seq_unique",
+          "columns": [
+            {
+              "expression": "canvas_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "op_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "snapshots_canvas_id_canvases_id_fk": {
+          "name": "snapshots_canvas_id_canvases_id_fk",
+          "tableFrom": "snapshots",
+          "tableTo": "canvases",
+          "columnsFrom": [
+            "canvas_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tile_spatial_refs": {
+      "name": "tile_spatial_refs",
+      "schema": "",
+      "columns": {
+        "tile_id": {
+          "name": "tile_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patch_id": {
+          "name": "patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunk_x": {
+          "name": "chunk_x",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunk_y": {
+          "name": "chunk_y",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "tile_spatial_refs_patch_chunk_tile_idx": {
+          "name": "tile_spatial_refs_patch_chunk_tile_idx",
+          "columns": [
+            {
+              "expression": "patch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "chunk_x",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "chunk_y",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "tile_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tile_spatial_refs_tile_id_tiles_id_fk": {
+          "name": "tile_spatial_refs_tile_id_tiles_id_fk",
+          "tableFrom": "tile_spatial_refs",
+          "tableTo": "tiles",
+          "columnsFrom": [
+            "tile_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tile_spatial_refs_patch_id_patches_id_fk": {
+          "name": "tile_spatial_refs_patch_id_patches_id_fk",
+          "tableFrom": "tile_spatial_refs",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "tile_spatial_refs_pk": {
+          "name": "tile_spatial_refs_pk",
+          "columns": [
+            "tile_id",
+            "patch_id",
+            "chunk_x",
+            "chunk_y"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tiles": {
+      "name": "tiles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "canvas_id": {
+          "name": "canvas_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quilt_id": {
+          "name": "quilt_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "anchor_patch_id": {
+          "name": "anchor_patch_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shape": {
+          "name": "shape",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "color": {
+          "name": "color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "material": {
+          "name": "material",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pos_x": {
+          "name": "pos_x",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pos_y": {
+          "name": "pos_y",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunk_x": {
+          "name": "chunk_x",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "chunk_y": {
+          "name": "chunk_y",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "rotation": {
+          "name": "rotation",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mirrored": {
+          "name": "mirrored",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "placed_by": {
+          "name": "placed_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "tiles_canvas_id_idx": {
+          "name": "tiles_canvas_id_idx",
+          "columns": [
+            {
+              "expression": "canvas_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tiles_quilt_id_idx": {
+          "name": "tiles_quilt_id_idx",
+          "columns": [
+            {
+              "expression": "quilt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tiles_anchor_patch_created_idx": {
+          "name": "tiles_anchor_patch_created_idx",
+          "columns": [
+            {
+              "expression": "anchor_patch_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tiles_canvas_chunk_created_idx": {
+          "name": "tiles_canvas_chunk_created_idx",
+          "columns": [
+            {
+              "expression": "canvas_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "chunk_x",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "chunk_y",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tiles_canvas_id_canvases_id_fk": {
+          "name": "tiles_canvas_id_canvases_id_fk",
+          "tableFrom": "tiles",
+          "tableTo": "canvases",
+          "columnsFrom": [
+            "canvas_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "tiles_quilt_id_quilts_id_fk": {
+          "name": "tiles_quilt_id_quilts_id_fk",
+          "tableFrom": "tiles",
+          "tableTo": "quilts",
+          "columnsFrom": [
+            "quilt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tiles_anchor_patch_id_patches_id_fk": {
+          "name": "tiles_anchor_patch_id_patches_id_fk",
+          "tableFrom": "tiles",
+          "tableTo": "patches",
+          "columnsFrom": [
+            "anchor_patch_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "tiles_shape_check": {
+          "name": "tiles_shape_check",
+          "value": "\"tiles\".\"shape\" in ('square', 'triangle', 'rectangle', 'l-shape')"
+        },
+        "tiles_material_check": {
+          "name": "tiles_material_check",
+          "value": "\"tiles\".\"material\" in ('ceramic', 'glass', 'stone')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "users_client_id_unique": {
+          "name": "users_client_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "client_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

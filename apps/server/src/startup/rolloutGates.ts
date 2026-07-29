@@ -1,3 +1,5 @@
+import { decideLegacyRetirement, loadLegacyRetirementGates } from '../migration/quiltRollout.js'
+
 type RolloutEnvironment = Record<string, string | undefined>
 
 const enabled = (environment: RolloutEnvironment, name: string): boolean => environment[name] === 'true'
@@ -32,7 +34,18 @@ export const validateProductionRolloutGates = (environment: RolloutEnvironment =
       throw new Error(`Production mutation approvals are incomplete: ${missingMutationApprovals.join(', ')}`)
     }
   }
+
+  if (enabled(environment, 'FEATURE_LEGACY_RETIREMENT_REQUESTED')) {
+    const decision = decideLegacyRetirement(loadLegacyRetirementGates(environment))
+    if (!decision.retireLegacy) {
+      throw new Error(`Production legacy retirement gates are incomplete: ${decision.unmetGates.join(', ')}`)
+    }
+  }
 }
+
+export const resolveCanonicalDiscoveryEnabled = (
+  environment: RolloutEnvironment = process.env,
+): boolean => enabled(environment, 'FEATURE_CANONICAL_DISCOVERY_ENABLED')
 
 export const resolveProtocolV2MutationEnabled = (
   environment: RolloutEnvironment = process.env,

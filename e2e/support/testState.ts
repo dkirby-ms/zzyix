@@ -7,6 +7,7 @@ type CanvasSizePreset = 'classic' | 'expanded' | 'vast'
 
 export type ResetSharedCanvasOptions = {
   createSession?: boolean
+  createCanonicalWorld?: boolean
   canvasPreset?: CanvasSizePreset
   ownerExternalSubject?: string
 }
@@ -15,6 +16,11 @@ export type ResetSharedCanvasResult = {
   reset: true
   session?: {
     id: string
+  }
+  canonical?: {
+    quiltId: string
+    patchId: string
+    generation: number
   }
 }
 
@@ -29,6 +35,7 @@ export const resetSharedCanvasState = async (
     },
     data: {
       createSession: options.createSession ?? false,
+      createCanonicalWorld: options.createCanonicalWorld ?? false,
       canvasPreset: options.canvasPreset,
       ownerExternalSubject: options.ownerExternalSubject,
     },
@@ -44,13 +51,12 @@ export const createIsolatedSharedCanvas = async (
   options: Omit<ResetSharedCanvasOptions, 'createSession'> = {},
 ): Promise<{ sessionId: string }> => {
   const result = await resetSharedCanvasState(request, {
-    createSession: true,
+    createCanonicalWorld: true,
     canvasPreset: options.canvasPreset,
     ownerExternalSubject: options.ownerExternalSubject,
   })
 
-  const sessionId = result.session?.id
-  expect(sessionId, 'test reset should seed a shared canvas session').toBeTruthy()
+  expect(result.canonical, 'test reset should seed a canonical quilt').toBeTruthy()
 
-  return { sessionId: sessionId as string }
+  return { sessionId: result.canonical!.quiltId }
 }

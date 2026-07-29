@@ -17,17 +17,21 @@ import {
   isSelectionUpdatePayload,
   registerClientSocket,
   recordQuiltClientRuntimeMetrics,
+  recordCanonicalClientTelemetry,
   resolveLegacySocketAccess,
   haveEqualChunkScope,
   selectScopedReplayOperations,
   unregisterClientSocket,
   sendOwnershipResult,
+  sendCanonicalWorldDiscovery,
 } from './index.js'
 import { buildPatchRoomAccess } from './realtime/quiltRooms.js'
 import type { PersistedVisibilityPolicy } from './domain/authorizationPolicy.js'
 import type { PatchDeliveryOperation } from './db/repository.js'
 import { vec2 } from './domain/math2d.js'
 import { configureQuiltTelemetry } from './migration/quiltTelemetry.js'
+import { createHttpAuth } from './auth/httpAuth.js'
+import { AuthenticationError } from './auth/errors.js'
 
 let sessionCounter = 0
 
@@ -84,6 +88,72 @@ describe('ownership HTTP contracts', () => {
       requestId: 'request-1',
     })
     expect(unavailable.json).toHaveBeenCalledWith(quota.json.mock.calls[0][0])
+  })
+})
+
+describe('canonical discovery HTTP contract', () => {
+  const response = () => {
+    const json = vi.fn()
+    const status = vi.fn(() => ({ json }))
+    const setHeader = vi.fn()
+    return {
+      response: { status, setHeader, getHeader: vi.fn(() => 'request-1') } as never,
+      json,
+      setHeader,
+      status,
+    }
+  }
+
+  it('maps missing, inactive, and invalid repository outcomes to one retryable 503', async () => {
+    const unavailable = response()
+    await sendCanonicalWorldDiscovery(unavailable.response, vi.fn().mockResolvedValue(null))
+
+    expect(unavailable.setHeader).toHaveBeenCalledWith('Retry-After', '30')
+    expect(unavailable.status).toHaveBeenCalledWith(503)
+    expect(unavailable.json).toHaveBeenCalledWith({
+      code: 'canonical_world_unavailable',
+      message: 'The canonical world is temporarily unavailable.',
+      requestId: 'request-1',
+      retryAfterSeconds: 30,
+    })
+  })
+
+  it('does not load the descriptor while discovery is disabled', async () => {
+    const unavailable = response()
+    const loader = vi.fn()
+    await sendCanonicalWorldDiscovery(unavailable.response, loader, false)
+
+    expect(unavailable.status).toHaveBeenCalledWith(503)
+    expect(loader).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { error: new AuthenticationError('authentication_required'), statusCode: 401, code: 'authentication_required' },
+    { error: new AuthenticationError('insufficient_scope'), statusCode: 403, code: 'insufficient_scope' },
+  ])('preserves authentication-first $statusCode without invoking discovery', async ({ error, statusCode, code }) => {
+    const loader = vi.fn()
+    const authResponse = response()
+    const middleware = createHttpAuth(vi.fn().mockRejectedValue(error), vi.fn())
+    const next = vi.fn(() => sendCanonicalWorldDiscovery(authResponse.response, loader))
+
+    await middleware({ header: vi.fn(() => 'Bearer token') } as never, authResponse.response, next)
+
+    expect(authResponse.status).toHaveBeenCalledWith(statusCode)
+    expect(authResponse.json).toHaveBeenCalledWith(expect.objectContaining({ code, requestId: 'request-1' }))
+    expect(next).not.toHaveBeenCalled()
+    expect(loader).not.toHaveBeenCalled()
+  })
+
+  it('preserves unexpected failures as safe internal errors', async () => {
+    const failed = response()
+    await sendCanonicalWorldDiscovery(failed.response, vi.fn().mockRejectedValue(new Error('database details')))
+
+    expect(failed.status).toHaveBeenCalledWith(500)
+    expect(failed.json).toHaveBeenCalledWith({
+      code: 'internal_error',
+      message: 'An internal error occurred.',
+      requestId: 'request-1',
+    })
   })
 })
 
@@ -943,6 +1013,41 @@ describe('multi-client collaboration', () => {
 })
 
 describe('protocol-v2 authorization boundary', () => {
+  it('owns canonical telemetry envelope fields and rejects unknown client fields', () => {
+    const observer = vi.fn()
+    configureQuiltTelemetry(observer)
+    try {
+      const payload = {
+        name: 'canonical_entry',
+        attemptId: '10000000-0000-4000-8000-000000000001',
+        outcome: 'ready',
+        durationMs: 12,
+        selectedProtocolVersion: 2,
+      }
+      expect(recordCanonicalClientTelemetry(payload, {
+        quiltId: '20000000-0000-4000-8000-000000000001',
+        canonicalGeneration: 3,
+        cohort: 'global',
+      })).toBe(true)
+      expect(observer).toHaveBeenCalledWith(expect.objectContaining({
+        ...payload,
+        schemaVersion: 1,
+        eventId: expect.any(String),
+        occurredAt: expect.any(String),
+        quiltId: '20000000-0000-4000-8000-000000000001',
+        canonicalGeneration: 3,
+        cohort: 'global',
+      }))
+      expect(recordCanonicalClientTelemetry({ ...payload, principalId: 'forbidden' }, {
+        quiltId: '20000000-0000-4000-8000-000000000001',
+        canonicalGeneration: 3,
+        cohort: 'global',
+      })).toBe(false)
+    } finally {
+      configureQuiltTelemetry()
+    }
+  })
+
   const authenticatedPolicy: PersistedVisibilityPolicy = {
     existence: 'authenticated',
     fineData: 'authenticated',
@@ -1070,7 +1175,10 @@ describe('protocol-v2 authorization boundary', () => {
 
   it('accepts finite normal-operation client runtime measurements', () => {
     const payload = {
-      quiltId: 'quilt-1',
+      sampleId: '10000000-0000-4000-8000-000000000001',
+      entryAttemptId: '20000000-0000-4000-8000-000000000001',
+      canonicalGeneration: 2,
+      quiltId: '30000000-0000-4000-8000-000000000001',
       retainedPatchCount: 2,
       retainedTileCount: 12,
       sceneObjectCount: 24,
@@ -1088,22 +1196,33 @@ describe('protocol-v2 authorization boundary', () => {
     try {
       expect(recordQuiltClientRuntimeMetrics(payload, {
         canaryTelemetryEnabled: true,
-        quiltId: 'quilt-1',
-        principalId: 'principal-1',
+        quiltId: payload.quiltId,
+        entryAttemptId: payload.entryAttemptId,
+        canonicalGeneration: 2,
+        cohort: 'global',
       })).toBe(true)
-      expect(observer).toHaveBeenCalledWith({
+      expect(observer).toHaveBeenCalledWith(expect.objectContaining({
+        schemaVersion: 1,
+        eventId: payload.sampleId,
+        attemptId: payload.entryAttemptId,
         name: 'client_runtime',
-        quiltId: 'quilt-1',
-        principalId: 'principal-1',
-        canary: true,
-        measurements: {
-          retainedPatchCount: 2,
-          retainedTileCount: 12,
-          sceneObjectCount: 24,
-          drawCalls: 5,
-          frameTimeMs: 16.7,
-        },
-      })
+        quiltId: payload.quiltId,
+        canonicalGeneration: 2,
+        cohort: 'global',
+        outcome: 'sampled',
+        retainedPatchCount: 2,
+        retainedTileCount: 12,
+        sceneObjectCount: 24,
+        drawCalls: 5,
+        frameTimeMs: 16.7,
+      }))
+      expect(recordQuiltClientRuntimeMetrics(payload, {
+        canaryTelemetryEnabled: true,
+        quiltId: payload.quiltId,
+        entryAttemptId: payload.entryAttemptId,
+        canonicalGeneration: 3,
+        cohort: 'global',
+      })).toBe(false)
     } finally {
       configureQuiltTelemetry()
     }

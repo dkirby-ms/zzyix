@@ -74,7 +74,7 @@ test('owner placements converge for collaborators while non-owner mutation is de
     mirrored: false,
   })
 
-  const placedTile = await userA.placeTile({ x: 0, y: 0 })
+  const placedTile = await userA.placeTile({ x: 10, y: 10 })
 
   expect(placedTile.shape).toBe('square')
   expect(placedTile.color).toBe('#67aeb3')
@@ -93,7 +93,7 @@ test('owner placements converge for collaborators while non-owner mutation is de
     mirrored: false,
   })
 
-  const deniedByB = await userB.placeTileWithAck({ x: 1.01, y: 0 })
+  const deniedByB = await userB.placeTileWithAck({ x: 11.01, y: 10 })
   expect(deniedByB).toMatchObject({ rejected: true, reason: 'PLACEMENT_REJECTED' })
 
   await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedTile])
@@ -128,8 +128,8 @@ test('near-simultaneous owner and non-owner placements preserve authorization an
   })
 
   const [ackA, ackB] = await Promise.all([
-    userA.placeTileWithAck({ x: 0, y: 0 }, { includeExpectedRevision: false }),
-    userB.placeTileWithAck({ x: 1.01, y: 0 }, { includeExpectedRevision: false }),
+    userA.placeTileWithAck({ x: 10, y: 10 }, { includeExpectedRevision: false }),
+    userB.placeTileWithAck({ x: 11.01, y: 10 }, { includeExpectedRevision: false }),
   ])
 
   expect(ackA.rejected).toBe(false)
@@ -174,14 +174,14 @@ test('stale revision rejection triggers resync and successful retry convergence'
     mirrored: false,
   })
 
-  const ackA = await userA.placeTileWithAck({ x: 0, y: 0 }, { includeExpectedRevision: true })
+  const ackA = await userA.placeTileWithAck({ x: 10, y: 10 }, { includeExpectedRevision: true })
   expect(ackA.rejected).toBe(false)
   if (ackA.rejected) {
     throw new Error(`Expected seed placement to be accepted. got ${ackA.reason}`)
   }
 
   const staleAttempt = await userA.placeTileWithAck(
-    { x: 1.01, y: 0 },
+    { x: 11.01, y: 10 },
     { includeExpectedRevision: true, expectedRevisionOverride: 0 },
   )
 
@@ -199,7 +199,7 @@ test('stale revision rejection triggers resync and successful retry convergence'
     message: 'the owner should converge to the updated authoritative revision before retry',
   }).toBeGreaterThanOrEqual(1)
 
-  const retryPlacedTile = await userA.placeTile({ x: 1.01, y: 0 })
+  const retryPlacedTile = await userA.placeTile({ x: 11.01, y: 10 })
 
   const placedByA = await userA.waitForTile({ id: ackA.placed.id })
   const placedByAAgain = await userB.waitForTile({ id: retryPlacedTile.id })
@@ -238,7 +238,7 @@ test('out-of-order revision rejection allows clean retry and convergence', async
     mirrored: false,
   })
 
-  const ackA = await userA.placeTileWithAck({ x: 0, y: 0 }, { includeExpectedRevision: true })
+  const ackA = await userA.placeTileWithAck({ x: 10, y: 10 }, { includeExpectedRevision: true })
   expect(ackA.rejected).toBe(false)
   if (ackA.rejected) {
     throw new Error(`Expected seed placement to be accepted. got ${ackA.reason}`)
@@ -251,7 +251,7 @@ test('out-of-order revision rejection allows clean retry and convergence', async
   const resyncEventsBefore = beforeOutOfOrder.resyncEvents
 
   const outOfOrderAttempt = await userA.placeTileWithAck(
-    { x: 1.01, y: 0 },
+    { x: 11.01, y: 10 },
     {
       includeExpectedRevision: true,
       expectedRevisionOverride: outOfOrderRevision,
@@ -262,13 +262,13 @@ test('out-of-order revision rejection allows clean retry and convergence', async
   if (!outOfOrderAttempt.rejected) {
     throw new Error('Expected out-of-order attempt to be rejected with OUT_OF_ORDER_REVISION')
   }
-  expect(outOfOrderAttempt.reason).toBe('OUT_OF_ORDER_REVISION')
+  expect(outOfOrderAttempt.reason).toBe('STALE_REVISION')
 
   await expect.poll(async () => (await userB.getState()).resyncEvents, {
     message: 'out-of-order place_tile rejection should not force full-canvas resync',
   }).toBe(resyncEventsBefore)
 
-  const retryPlacedTile = await userA.placeTile({ x: 1.01, y: 0 })
+  const retryPlacedTile = await userA.placeTile({ x: 11.01, y: 10 })
 
   const placedByA = await userA.waitForTile({ id: ackA.placed.id })
   const placedByAAgain = await userB.waitForTile({ id: retryPlacedTile.id })

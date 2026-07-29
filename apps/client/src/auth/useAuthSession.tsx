@@ -9,6 +9,7 @@ export type AuthSession = {
   principal: MeResponse | null
   error: string | null
   apiOrigin: string
+  canonicalEntryEnabled: boolean
   authenticatedFetch: typeof fetch
   acquireAccessToken: AccessTokenProvider
   login: () => Promise<void>

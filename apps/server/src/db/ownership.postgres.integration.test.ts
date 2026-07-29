@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
 import {
   abandonPatch,
+  acquireQuiltPresenceLease,
   acceptOwnershipTransfer,
   cancelOwnershipTransfer,
   claimPatch,
@@ -12,6 +13,9 @@ import {
   expireOwnershipTransfers,
   recoverPrincipalDeletion,
   requestPrincipalDeletion,
+  reapExpiredQuiltPresenceLeases,
+  releaseQuiltPresenceLease,
+  renewQuiltPresenceLease,
 } from './repository.js'
 import {
   authorizationAuditEvents,
@@ -21,6 +25,7 @@ import {
   patchVisibilityPolicies,
   pendingOwnershipTransfers,
   principals,
+  quiltPresenceLeases,
   quilts,
 } from './schema.js'
 
@@ -51,6 +56,44 @@ describe('patch ownership claims', () => {
   }, 30_000)
 
   afterAll(async () => database?.dispose(), 30_000)
+
+  it('makes cross-replica first and last presence lease decisions transactionally', async () => {
+    const now = Date.parse('2026-07-29T12:00:00Z')
+    const [first, second] = await Promise.all([
+      acquireQuiltPresenceLease({
+        socketId: 'replica-a:socket-1', quiltId, principalId: firstPrincipalId,
+        clientId: 'tab-a', now, ttlMs: 45_000,
+      }),
+      acquireQuiltPresenceLease({
+        socketId: 'replica-b:socket-2', quiltId, principalId: firstPrincipalId,
+        clientId: 'tab-b', now, ttlMs: 45_000,
+      }),
+    ])
+
+    expect([first.isFirstLease, second.isFirstLease].filter(Boolean)).toHaveLength(1)
+    await expect(releaseQuiltPresenceLease({
+      socketId: 'replica-a:socket-1', quiltId, principalId: firstPrincipalId, now: now + 1_000,
+    })).resolves.toMatchObject({ isLastLease: false })
+    await expect(releaseQuiltPresenceLease({
+      socketId: 'replica-b:socket-2', quiltId, principalId: firstPrincipalId, now: now + 2_000,
+    })).resolves.toMatchObject({ isLastLease: true })
+    expect(await database.db.select().from(quiltPresenceLeases)).toHaveLength(0)
+  })
+
+  it('renews live leases and reaps an expired last lease once', async () => {
+    const now = Date.parse('2026-07-29T13:00:00Z')
+    await acquireQuiltPresenceLease({
+      socketId: 'replica-a:socket-3', quiltId, principalId: secondPrincipalId,
+      clientId: 'tab-c', now, ttlMs: 45_000,
+    })
+
+    await expect(renewQuiltPresenceLease('replica-a:socket-3', now + 30_000, 45_000)).resolves.toBe(true)
+    await expect(reapExpiredQuiltPresenceLeases(now + 46_000)).resolves.toEqual([])
+    await expect(reapExpiredQuiltPresenceLeases(now + 76_000)).resolves.toEqual([
+      expect.objectContaining({ quiltId, principalId: secondPrincipalId, isLastLease: true }),
+    ])
+    await expect(reapExpiredQuiltPresenceLeases(now + 77_000)).resolves.toEqual([])
+  })
 
   it('produces exactly one winner and audits both concurrent attempts', async () => {
     const operationIds = [randomUUID(), randomUUID()]

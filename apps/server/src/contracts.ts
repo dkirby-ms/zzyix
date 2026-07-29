@@ -230,6 +230,52 @@ export type SafeApiError = {
   retryAfterSeconds?: number
 }
 
+export type ClientUpgradeRequiredError = SafeApiError & {
+  code: 'client_upgrade_required'
+  minimumSchemaVersion: typeof SCHEMA_VERSION
+  minimumProtocolVersion: typeof QUILT_PROTOCOL_VERSION
+}
+
+export type CanonicalWorldDescriptor = {
+  quiltId: string
+  legacyCanvasId: string
+  topology: 'toroidal'
+  protocolVersion: 2
+  patchRows: number
+  patchColumns: number
+  patchWidth: number
+  patchHeight: number
+  originX: number
+  originY: number
+  generation: number
+  initialPatch: {
+    id: string
+    row: number
+    column: number
+  }
+}
+
+export type CanonicalWorldUnavailableError = SafeApiError & {
+  code: 'canonical_world_unavailable'
+  retryAfterSeconds: 30
+}
+
+export type CanonicalPatchNavigation = {
+  quiltId: string
+  patchId: string
+  row: number
+  column: number
+  centerX: number
+  centerY: number
+}
+
+export type EligibleCanonicalPatchesResponse = {
+  quiltId: string
+  generation: number
+  claimAllowed: boolean
+  patches: CanonicalPatchNavigation[]
+}
+
 export type OwnershipOperationRequest = {
   operationId: string
 }
@@ -308,18 +354,22 @@ export type AccountDeletionResponse = {
 /** Passed in socket.handshake.auth when the client connects. */
 export type ConnectionAuth = {
   token: string
-  sessionId: string
+  quiltId: string
   clientId: string
-  protocolVersion?: 1 | 2
-  enableProtocolV1Compatibility?: boolean
+  schemaVersion: typeof SCHEMA_VERSION
+  protocolVersion: typeof QUILT_PROTOCOL_VERSION
+  canonicalGeneration: number
+  entryAttemptId: string
 }
 
 /** Per-socket metadata stored by Socket.IO (accessible as socket.data). */
 export type SocketData = {
   clientId: string
-  sessionId: string
-  protocolVersion: 1 | 2
-  enableProtocolV1Compatibility: boolean
+  quiltId: string
+  schemaVersion: typeof SCHEMA_VERSION
+  protocolVersion: typeof QUILT_PROTOCOL_VERSION
+  canonicalGeneration: number
+  entryAttemptId: string
   principalId: string
   tokenExpiresAt: number
 }
@@ -601,6 +651,9 @@ export type QuiltProtocolHandshake = {
 }
 
 export type QuiltClientRuntimeMetrics = {
+  sampleId: string
+  entryAttemptId: string
+  canonicalGeneration: number
   quiltId: string
   retainedPatchCount: number
   retainedTileCount: number
@@ -608,6 +661,11 @@ export type QuiltClientRuntimeMetrics = {
   drawCalls: number
   frameTimeMs: number
 }
+
+export type CanonicalClientTelemetry =
+  | { name: 'canonical_entry'; attemptId: string; outcome: 'ready' | 'discovery_failed' | 'protocol_rejected' | 'connection_failed' | 'initial_sync_failed'; durationMs: number; selectedProtocolVersion?: 1 | 2 }
+  | { name: 'canonical_reconnect'; attemptId: string; outcome: 'recovered' | 'exhausted'; durationMs: number; attempts: number }
+  | { name: 'canonical_resubscribe'; attemptId: string; outcome: 'completed' | 'failed'; durationMs: number; requestedRooms: number; acceptedRooms: number; rejectedRooms: number; resyncRequired: number }
 
 export type QuiltRoomKind = 'fine' | 'aggregate' | 'presence' | 'events'
 
@@ -701,6 +759,8 @@ export interface ClientToServerEvents {
   subscribe_quilt_area: (payload: SubscribeQuiltAreaPayload, ack: (response: SubscribeQuiltAreaAck) => void) => void
   /** Submit sampled client runtime measurements for an authenticated canary subject. */
   quilt_client_runtime_metrics: (payload: QuiltClientRuntimeMetrics) => void
+  /** Submit one canonical entry/reconnect/resubscribe terminal for server-owned telemetry. */
+  canonical_telemetry: (payload: CanonicalClientTelemetry) => void
 }
 
 /** Events emitted by the server, received by clients. */

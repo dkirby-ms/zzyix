@@ -43,6 +43,7 @@ const runtimeConfig = {
   apiOrigin: 'https://api.example.test',
   redirectUri: 'https://app.example.test/auth/callback',
   postLogoutRedirectUri: 'https://app.example.test/signed-out',
+  canonicalEntryEnabled: true,
 }
 
 describe('AuthProvider', () => {

@@ -76,15 +76,18 @@ describe('quilt migration rollout controls', () => {
   })
 
   it('keeps legacy available until every external exit gate passes', () => {
-    const incomplete = loadLegacyRetirementGates({ FEATURE_LEGACY_RETIREMENT_REQUESTED: 'true' })
+    const incomplete = loadLegacyRetirementGates()
     expect(decideLegacyRetirement(incomplete)).toMatchObject({
       retireLegacy: false,
       unmetGates: expect.arrayContaining(['authenticatedPrincipalIntegrationPassed', 'measuredWindowApproved']),
     })
+  })
 
-    const complete = Object.fromEntries(
-      Object.keys(incomplete).map((key) => [key, true]),
-    ) as typeof incomplete
-    expect(decideLegacyRetirement(complete)).toEqual({ retireLegacy: true, unmetGates: [] })
+  it('rejects retirement when report evidence is absent instead of trusting free-standing booleans', () => {
+    expect(() => loadLegacyRetirementGates({
+      FEATURE_LEGACY_RETIREMENT_REQUESTED: 'true',
+      LEGACY_RETIREMENT_MEASURED_WINDOW_APPROVED: 'true',
+      LEGACY_RETIREMENT_CLIENT_BUDGET_PASSED: 'true',
+    })).toThrow('report path and SHA-256')
   })
 })

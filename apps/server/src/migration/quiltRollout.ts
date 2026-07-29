@@ -1,4 +1,10 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import {
+  parseCanonicalRetirementReport,
+  reportSha256,
+  serializeCanonicalReport,
+} from '../operations/canonicalRetirementReportCli.js'
 
 export type QuiltCanaryConfig = {
   enabled: boolean
@@ -88,18 +94,35 @@ export const resolveQuiltRollout = (
 
 export const loadLegacyRetirementGates = (
   environment: NodeJS.ProcessEnv = process.env,
-): LegacyRetirementGates => ({
-  requested: parseBoolean(environment.FEATURE_LEGACY_RETIREMENT_REQUESTED),
-  parityPassed: parseBoolean(environment.LEGACY_RETIREMENT_PARITY_PASSED),
-  recoveryPassed: parseBoolean(environment.LEGACY_RETIREMENT_RECOVERY_PASSED),
-  multiReplicaPassed: parseBoolean(environment.LEGACY_RETIREMENT_MULTI_REPLICA_PASSED),
-  authenticatedPrincipalIntegrationPassed: parseBoolean(
-    environment.LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED,
-  ),
-  clientBudgetPassed: parseBoolean(environment.LEGACY_RETIREMENT_CLIENT_BUDGET_PASSED),
-  measuredWindowApproved: parseBoolean(environment.LEGACY_RETIREMENT_MEASURED_WINDOW_APPROVED),
-  rollbackPolicyApproved: parseBoolean(environment.LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED),
-})
+): LegacyRetirementGates => {
+  const requested = parseBoolean(environment.FEATURE_LEGACY_RETIREMENT_REQUESTED)
+  let clientBudgetPassed = false
+  let measuredWindowApproved = false
+  if (requested) {
+    const reportPath = environment.LEGACY_RETIREMENT_REPORT_PATH
+    const expectedDigest = environment.LEGACY_RETIREMENT_REPORT_SHA256?.toLowerCase()
+    if (!reportPath || !expectedDigest || !/^[0-9a-f]{64}$/.test(expectedDigest)) {
+      throw new Error('Legacy retirement requires a report path and SHA-256 digest')
+    }
+    const reportBytes = readFileSync(reportPath)
+    if (reportSha256(reportBytes) !== expectedDigest) throw new Error('Legacy retirement report digest mismatch')
+    const report = parseCanonicalRetirementReport(JSON.parse(reportBytes.toString('utf8')))
+    if (serializeCanonicalReport(report) !== reportBytes.toString('utf8')) throw new Error('Legacy retirement report is not canonical JSON')
+    if (report.decision.recommendation !== 'promote') throw new Error('Legacy retirement report does not recommend promotion')
+    clientBudgetPassed = report.decision.clientBudgetPassed
+    measuredWindowApproved = report.decision.measuredWindowApproved
+  }
+  return {
+    requested,
+    parityPassed: parseBoolean(environment.LEGACY_RETIREMENT_PARITY_PASSED),
+    recoveryPassed: parseBoolean(environment.LEGACY_RETIREMENT_RECOVERY_PASSED),
+    multiReplicaPassed: parseBoolean(environment.LEGACY_RETIREMENT_MULTI_REPLICA_PASSED),
+    authenticatedPrincipalIntegrationPassed: parseBoolean(environment.LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED),
+    clientBudgetPassed,
+    measuredWindowApproved,
+    rollbackPolicyApproved: parseBoolean(environment.LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED),
+  }
+}
 
 export const decideLegacyRetirement = (gates: LegacyRetirementGates): LegacyRetirementDecision => {
   const gateNames: LegacyRetirementDecision['unmetGates'] = [

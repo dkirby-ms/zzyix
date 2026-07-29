@@ -1,20 +1,20 @@
 ---
-title: Finite Toroidal Quilt Architecture Decision
-description: Product, topology, identity, authorization, migration, and operating budget contract for community quilts
-ms.date: 2026-07-27
+title: Canonical Finite Toroidal Quilt Architecture Decision
+description: Product, topology, identity, authorization, and operating budget contract for the canonical quilt
+ms.date: 2026-07-29
 ms.topic: concept
 keywords:
   - quilt topology
   - patch authorization
-  - migration
+   - canonical quilt
   - realtime collaboration
 ---
 
 ## Status
 
-Accepted for initial implementation. Selection of an authenticated external identity
-provider remains a release gate before principal-backed persistence or authorization is
-enforced.
+Accepted for implementation and amended on 2026-07-29 to define one supported canonical
+quilt. Selection of an authenticated external identity provider remains a release gate
+before principal-backed persistence or authorization is enforced.
 
 ## Context
 
@@ -24,18 +24,25 @@ Those properties cannot establish ownership or safely scale to a wrapped collabo
 world. The initial quilt contract must therefore fix product semantics before topology,
 persistence, protocol, and rendering work begins.
 
-This decision establishes finite community quilts. A quilt is large enough to support
-many adjacent owned regions, but it remains finite so storage, recovery, subscriptions,
-and authorization have explicit bounds. Periodic display does not create additional
-persisted content.
+This decision establishes one canonical finite toroidal quilt as the supported product
+experience. Product language may call this quilt infinite because navigation continues
+across periodic images, but the authoritative topology remains finite so storage,
+recovery, subscriptions, and authorization have explicit bounds. Periodic display does
+not create additional persisted content.
 
 ## Decision
 
 ### Tenancy and visible regions
 
-A deployment may host multiple community quilts. A principal may participate in multiple quilts,
-with an independent membership and role assignment in each quilt.
-Quilts are not personal tenancy containers.
+The supported product exposes exactly one canonical protocol-V2 toroidal quilt. Every
+supported principal enters that same quilt without creating, selecting, or joining a
+separate canvas or quilt. Quilt and patch roles remain independently scoped even though
+the product has one tenancy target.
+
+The deployment provisions a new canonical quilt for this purpose instead of adopting an
+existing quilt. A database-backed canonical pointer selects the target; client builds do
+not embed its identifier. Other quilt or canvas records may remain temporarily as inert
+implementation residue, but they are not supported product destinations.
 
 Patches are visible, first-class owned regions. They are product concepts used for
 claiming, attribution, authorization, moderation, navigation, and history. Chunks are
@@ -44,10 +51,9 @@ must not change patch ownership or transaction boundaries.
 
 ### Immutable topology
 
-Each quilt records `patchRows`, `patchColumns`, `patchWidth`, and `patchHeight`.
-Deployment configuration supplies the initial row and column counts when a quilt is
-created. The initial patch dimensions are the existing largest `vast` canvas
-dimensions: 31.2 world units wide and 20.4 world units high.
+The canonical quilt records `patchRows` as 32, `patchColumns` as 32, `patchWidth` as
+31.2 world units, and `patchHeight` as 20.4 world units. It contains exactly 1,024
+addressed patches. The placement grid and topology use the canonical origin `(0, 0)`.
 
 The canonical quilt width is `patchColumns * patchWidth`, and the canonical quilt
 height is `patchRows * patchHeight`. Canonical coordinates use half-open ranges:
@@ -61,9 +67,9 @@ intersect multiple canonical patches. There is exactly one canonical identity fo
 persisted object, regardless of how many periodic images are displayed.
 
 Rows, columns, patch width, and patch height become immutable when the first content,
-claim, membership-dependent policy, or durable event is recorded for the quilt. A
-configured dimension change after that point requires a new quilt and an explicit
-migration. Runtime resizing is not part of this contract.
+claim, membership-dependent policy, or durable event is recorded for the quilt. Runtime
+resizing is not part of this contract. A future topology change requires a separate
+architecture and product decision; it is not legacy-content migration work.
 
 ### Navigation and canonical identity
 
@@ -72,11 +78,12 @@ continue through any number of periodic images without a visible jump. Persisten
 authorization, search, events, selections, and mutation footprints resolve to canonical
 coordinates before use.
 
-Canonical links contain the quilt identifier plus either a canonical location or a
-durable object identifier. Links never depend on a camera-relative periodic image.
-Opening a canonical-location link chooses the nearest display image to the current
-camera when possible. Opening a durable-object link resolves the object's current
-canonical identity and then chooses a nearby display image.
+Root entry focuses patch row 0, column 0. Durable patch links contain the canonical quilt
+identifier and stable patch identifier. Canonical row, column, or location may accompany
+the stable identifiers as navigation metadata, but it is not claim or resource identity.
+Links never use compatibility canvas identity or depend on a camera-relative periodic
+image. Opening a durable patch or object link resolves its current canonical identity and
+then chooses the nearest display image to the current camera when possible.
 
 The placement grid has one quilt-global origin at canonical `(0, 0)`. Patch boundaries
 do not restart grid phase or pattern alignment.
@@ -104,8 +111,16 @@ that authorized principals are participating in the quilt, but it must not revea
 hidden patch, a hidden principal-to-patch association, or activity within a hidden
 patch.
 
-Presence is ephemeral and cannot grant ownership, membership, or mutation permission.
-Participation in a quilt is not evidence of access to every patch.
+Replica-wide presence uses database-backed ephemeral per-socket leases. Each socket owns
+its lease, renews it by heartbeat, and lets it expire after disconnect or heartbeat loss.
+Join and leave publication uses a transactional decision over all unexpired leases so a
+replica cannot announce departure while another socket lease for the same principal and
+scope remains active. Lease cleanup and last-lease decisions must be safe under concurrent
+replicas.
+
+Presence leases are liveness records only. They cannot grant ownership, membership,
+visibility, or mutation permission. Participation in a quilt is not evidence of access
+to every patch.
 
 ### Undo and copy or paste
 
@@ -122,17 +137,18 @@ canonicalizes the destination footprint and requires mutation permission from ev
 intersected patch. If any patch denies permission or validation fails, no pasted object,
 spatial reference, history entry, or event is committed.
 
-### Legacy migration
+### Legacy residue and canary rollback
 
-Legacy canvases remain bounded with their existing edge semantics. A legacy canvas must
-not be silently reinterpreted as a one-by-one torus because doing so would make formerly
-distant edges adjacent.
+User-created canvases and noncanonical quilts are outside the supported product contract.
+The product provides no legacy-content access, migration, import, archive, restore, or
+identity-preservation workflow. Additive legacy database records may remain inert until
+normal retention permits deletion.
 
-Migration requires either explicit owner opt-in to a selected quilt placement or a
-deterministic packing process with a reviewed mapping. The process preserves durable
-object identity where possible, records source-to-destination provenance, detects
-collisions before commit, and supports parity verification and rollback. Unmigrated
-legacy canvases remain available through the bounded legacy path during staged rollout.
+During canary rollout, application routing may temporarily return users to the existing
+lobby and compatibility route while preserving writes through the canonical quilt's
+compatibility alias. This is an operational rollback mechanism, not supported legacy
+product behavior. Rollback must not select a second writable quilt, reinterpret legacy
+content, drop additive schema, or delete the canonical quilt.
 
 ## Identity and authorization contract
 
@@ -176,9 +192,17 @@ audited, and limited to the action under review.
 
 ### Patch lifecycle
 
-An eligible authenticated quilt member may atomically claim an unclaimed patch. The
-claim creates ownership and its durable event together. Concurrent claims have one
-winner.
+Eligible unclaimed patches are discovered in deterministic row-major order, sorted first
+by canonical row and then by canonical column. The stable patch identifier is the claim
+identity; row, column, and location are navigation metadata. An eligible authenticated
+quilt member may atomically claim an unclaimed patch by stable patch identifier. The
+claim creates ownership and its durable event together, and concurrent claims have one
+winner. A successful claim navigates to and focuses the claimed patch.
+
+One active owned patch per principal per quilt remains the ownership quota. A principal
+who already owns an active patch cannot claim another patch in the canonical quilt.
+Existing claim-attempt and successful-claim rate windows remain global per principal;
+canonical convergence does not make either window quilt-scoped.
 
 Ownership transfer uses an explicit pending transfer to a stable internal principal.
 The recipient must accept before ownership changes. Until acceptance, the current owner
@@ -194,11 +218,6 @@ Patch deletion is a moderated, recoverable lifecycle transition before final era
 A deletion request blocks new mutations. Approval hides fine data and presence, retains
 data required for recovery and audit, and emits only events visible under the matrix.
 Final erasure occurs only after the separately approved retention policy permits it.
-
-Legacy content without a verified owner is system-owned and unclaimed. The system owner
-is not a user principal and cannot perform interactive actions. Such a patch remains
-read-only until an authenticated principal completes the claim or transfer process.
-Import provenance and legacy attribution do not establish ownership.
 
 ### Visibility matrix
 
@@ -263,12 +282,12 @@ for one class must not be copied to another without measurement.
 
 ## Rollout and release gates
 
-1. Product review accepts the topology, migration, visibility, moderation, undo, and
-   copy or paste semantics in this decision.
+1. Product review accepts the canonical tenancy, topology, visibility, moderation, undo,
+   and copy or paste semantics in this decision.
 2. Security review selects the external identity provider and accepts principal mapping,
    account lifecycle, audit, and moderator controls.
-3. Additive persistence work proves deterministic legacy mapping, parity, and rollback
-   before any legacy canvas opts in.
+3. Canonical provisioning proves one complete 32-by-32 protocol-V2 target, validates its
+   database pointer, and keeps noncanonical records outside supported routing.
 4. Patch-scoped transaction tests prove atomic seam conflicts, deterministic lock order,
    and parallel distant-patch writes before cross-patch mutation is enabled.
 5. Protocol-v2 recovery and authorization tests prove scoped snapshots, redaction,
@@ -283,7 +302,7 @@ for one class must not be copied to another without measurement.
 
 * Product-visible ownership aligns with the authorization and history boundary.
 * Canonical persistence prevents periodic display aliases from duplicating identity.
-* Immutable dimensions make modulo arithmetic, links, recovery, and migration stable.
+* Immutable dimensions make modulo arithmetic, links, and recovery stable.
 * One visibility matrix reduces disagreement among realtime, search, and API surfaces.
 * Atomic footprint authorization prevents partial cross-boundary changes.
 
@@ -293,16 +312,17 @@ for one class must not be copied to another without measurement.
 * Cross-patch operations require multi-resource locking and may cost more than local
   operations.
 * Hidden patches require careful aggregate, event, roster, and search redaction.
-* Legacy migration requires explicit consent or reviewed deterministic packing.
+* Canary rollback must preserve one writable canonical target without becoming a legacy
+   product mode.
 * Production capacity remains gated on measurements that are not yet available.
 
 ## Alternatives considered
 
-### One global quilt
+### Multiple product quilts
 
-A single deployment-wide quilt simplifies discovery but couples every community to one
-visibility, moderation, topology, and migration domain. It also prevents a principal
-from joining independently governed quilts. This option was rejected.
+Multiple product quilts allow independently governed communities but preserve selection,
+creation, and routing concepts that conflict with the canonical infinite-canvas
+experience. This option was rejected. One deployment-wide canonical quilt was selected.
 
 ### One quilt per user
 
@@ -315,11 +335,11 @@ Duplicating an object into each periodic image or intersected patch makes identi
 undo, links, and events ambiguous. One canonical object with patch spatial references
 was selected instead.
 
-### Silent one-by-one torus migration
+### Legacy migration or federation
 
-Treating every legacy canvas as a one-by-one torus is mechanically convenient but
-changes edge adjacency and collision behavior. Explicit opt-in or deterministic packing
-was selected instead.
+Migrating, importing, packing, or federating legacy canvases would add collision,
+provenance, edge-semantics, and identity contracts without advancing the canonical
+experience. These workflows were rejected from the product contract.
 
 ## References
 

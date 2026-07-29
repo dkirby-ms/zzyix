@@ -249,6 +249,155 @@ $$;
 SQL
 }
 
+verify_canonical_pointer_upgrade() {
+  local database_url="$1"
+  psql "${database_url}" --no-psqlrc --set ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF to_regclass('public.canonical_world') IS NULL THEN
+    RAISE EXCEPTION 'Canonical pointer table is missing';
+  END IF;
+  IF EXISTS (SELECT 1 FROM canonical_world) THEN
+    RAISE EXCEPTION 'Canonical pointer migration selected a target implicitly';
+  END IF;
+END
+$$;
+SQL
+}
+
+run_canonical_command() {
+  local database_url="$1"
+  shift
+  DATABASE_URL="${database_url}" \
+    node apps/server/dist/cli/selectCanonicalWorld.js "$@"
+}
+
+verify_canonical_control_plane() {
+  local database_url="$1"
+  local status_output
+  local provision_output
+  local replay_output
+  local quilt_id
+  local stale_error
+  local activation_output
+  local rollback_output
+
+  status_output="$(run_canonical_command \
+    "${database_url}" --action status)"
+  jq -e '
+    .schemaVersion == 1 and
+    .action == "status" and
+    .result == "succeeded" and
+    .pointerStatus == "missing" and
+    .generation == 0
+  ' <<<"${status_output}" >/dev/null
+
+  provision_output="$(run_canonical_command \
+    "${database_url}" \
+    --action provision \
+    --expected-generation 0 \
+    --patch-rows 32 \
+    --patch-columns 32 \
+    --patch-width 31.2 \
+    --patch-height 20.4 \
+    --origin-x 0 \
+    --origin-y 0 \
+    --operator-id migration-rehearsal \
+    --reason 'verify initial canonical provision')"
+  jq -e '
+    .result == "succeeded" and
+    .idempotent == false and
+    .pointerStatus == "inactive" and
+    .generation == 1 and
+    .patchCount == 1024 and
+    .initialPatch.row == 0 and
+    .initialPatch.column == 0
+  ' <<<"${provision_output}" >/dev/null
+  quilt_id="$(jq -r '.quilt.id' <<<"${provision_output}")"
+
+  replay_output="$(run_canonical_command \
+    "${database_url}" \
+    --action provision \
+    --expected-generation 0 \
+    --patch-rows 32 \
+    --patch-columns 32 \
+    --patch-width 31.2 \
+    --patch-height 20.4 \
+    --origin-x 0 \
+    --origin-y 0 \
+    --operator-id migration-rehearsal \
+    --reason 'verify idempotent canonical provision')"
+  jq -e --arg quilt_id "${quilt_id}" '
+    .result == "idempotent" and
+    .idempotent == true and
+    .pointerStatus == "inactive" and
+    .generation == 1 and
+    .quilt.id == $quilt_id
+  ' <<<"${replay_output}" >/dev/null
+  [[ "$(jq -r '.initialPatch.id' <<<"${replay_output}")" == \
+    "$(jq -r '.initialPatch.id' <<<"${provision_output}")" ]] || \
+    err 'Canonical provision replay changed the initial patch identity'
+
+  if stale_error="$(run_canonical_command \
+    "${database_url}" \
+    --action activate \
+    --quilt-id "${quilt_id}" \
+    --expected-generation 0 \
+    --operator-id migration-rehearsal \
+    --reason 'verify stale generation rejection' 2>&1)"; then
+    err 'Stale canonical activation unexpectedly succeeded'
+  fi
+  jq -e '
+    .result == "failed" and
+    .code == "generation_conflict"
+  ' <<<"${stale_error}" >/dev/null
+
+  activation_output="$(run_canonical_command \
+    "${database_url}" \
+    --action activate \
+    --quilt-id "${quilt_id}" \
+    --expected-generation 1 \
+    --operator-id migration-rehearsal \
+    --reason 'activate canonical target')"
+  jq -e '
+    .result == "succeeded" and
+    .pointerStatus == "active" and
+    .generation == 2
+  ' <<<"${activation_output}" >/dev/null
+
+  rollback_output="$(run_canonical_command \
+    "${database_url}" \
+    --action deactivate \
+    --expected-generation 2 \
+    --operator-id migration-rehearsal \
+    --reason 'verify forward routing rollback')"
+  jq -e '
+    .result == "succeeded" and
+    .pointerStatus == "inactive" and
+    .generation == 3
+  ' <<<"${rollback_output}" >/dev/null
+
+  psql "${database_url}" --no-psqlrc --set ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM canonical_world
+    WHERE product_key = 'canonical'
+      AND status = 'inactive'
+      AND generation = 3
+  ) THEN
+    RAISE EXCEPTION 'Canonical routing rollback did not preserve an inactive pointer';
+  END IF;
+  IF (SELECT count(*) FROM patches
+      WHERE quilt_id = (SELECT quilt_id FROM canonical_world
+                        WHERE product_key = 'canonical')) <> 1024 THEN
+    RAISE EXCEPTION 'Canonical routing rollback changed the provisioned graph';
+  END IF;
+END
+$$;
+SQL
+}
+
 cleanup_rehearsal_databases() {
   if [[ -z "${REHEARSAL_ADMIN_URL}" ]]; then
     return
@@ -296,6 +445,9 @@ rehearse() {
     err 'Fresh and upgraded databases produced different schemas'
   verify_authentication_schema "${fresh_database_url}"
   verify_authentication_schema "${upgrade_database_url}"
+  verify_canonical_pointer_upgrade "${fresh_database_url}"
+  verify_canonical_pointer_upgrade "${upgrade_database_url}"
+  verify_canonical_control_plane "${fresh_database_url}"
 
   backfill "${upgrade_database_url}"
   backfill "${upgrade_database_url}"

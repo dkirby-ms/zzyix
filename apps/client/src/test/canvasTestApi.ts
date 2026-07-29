@@ -5,7 +5,7 @@ import type { PlaceTileAck } from '../../../server/src/contracts'
 
 export const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
 
-export type CanvasTestMode = 'lobby' | 'canvas'
+export type CanvasTestMode = 'lobby' | 'canonical-loading' | 'canonical-unavailable' | 'canvas'
 
 export type CanvasTestTileSnapshot = {
   id: string

@@ -50,6 +50,17 @@ test('production rollout requires operational approvals and keeps mutation disab
   assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED: \$\{\{ vars\.FEATURE_PROTOCOL_V2_MUTATION_ENABLED \|\| 'false' \}\}/)
   assert.match(workflow, /AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED/)
   assert.match(workflow, /Mutation approval is not granted: \$\{approval_name\}/)
+  for (const featureFlag of [
+    'FEATURE_PROTOCOL_V2_MUTATION_ENABLED',
+    'FEATURE_QUILT_PROTOCOL_V2_ENABLED',
+    'FEATURE_CANONICAL_DISCOVERY_ENABLED',
+    'FEATURE_CANONICAL_ENTRY_ENABLED',
+  ]) {
+    assert.match(workflow, new RegExp(`${featureFlag}: \\$\\{\\{ vars\\.${featureFlag} \\|\\| 'false' \\}\\}`))
+  }
+  assert.match(workflow, /Canonical entry requires protocol V2\./)
+  assert.equal(workflow.match(/FEATURE_CANONICAL_DISCOVERY_ENABLED=\$\{FEATURE_CANONICAL_DISCOVERY_ENABLED\}/g)?.length, 3)
+  assert.equal(workflow.match(/FEATURE_CANONICAL_ENTRY_ENABLED=\$\{FEATURE_CANONICAL_ENTRY_ENABLED\}/g)?.length, 2)
 })
 
 test('CI requires authenticated multi-replica E2E', async () => {
@@ -162,15 +173,17 @@ test('container runtime JSON generation escapes special characters', async () =>
     '--arg', 'apiOrigin', values[3],
     '--arg', 'redirectUri', values[4],
     '--arg', 'postLogoutRedirectUri', values[5],
-    '{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri}',
+    '--argjson', 'canonicalEntryEnabled', 'true',
+    '{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri, canonicalEntryEnabled: $canonicalEntryEnabled}',
   ]
   const { stdout } = await execFileAsync('jq', jqArguments)
 
-  assert.deepEqual(Object.values(JSON.parse(stdout)), values)
+  assert.deepEqual(Object.values(JSON.parse(stdout)), [...values, true])
   const dockerfile = await readFile(dockerfilePath, 'utf8')
   assert.match(dockerfile, /apk add --no-cache gettext jq/)
   assert.match(dockerfile, /jq empty \/usr\/share\/nginx\/html\/auth-config\.json/)
   assert.match(dockerfile, /nginx -t/)
+  assert.match(dockerfile, /--argjson canonicalEntryEnabled "\$FEATURE_CANONICAL_ENTRY_ENABLED"/)
   assert.doesNotMatch(dockerfile, /auth-config\.template\.json/)
 })
 

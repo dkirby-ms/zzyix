@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyPlaceTile,
   applyRemoveTile,
+  buildClientUpgradeRequiredSocketError,
   buildListSessionsResponse,
   cleanupSessions,
   createAuthoritativeSessionState,
@@ -16,13 +17,68 @@ import {
   resolveCanvasConfigFromPreset,
   isSelectionUpdatePayload,
   isOriginAllowed,
+  isSupportedCanonicalConnectionAuth,
   resolveCorsOrigin,
+  sendClientUpgradeRequired,
   shouldCleanupSession,
   toRejectReason,
 } from './index.js'
 import { vec2 } from './domain/math2d.js'
 
 describe('authoritative handler semantics', () => {
+  it('rejects unsupported socket versions with the exact safe upgrade payload', () => {
+    const supported = {
+      token: 'token',
+      quiltId: '10000000-0000-4000-8000-000000000001',
+      clientId: 'client-1',
+      schemaVersion: '2.0.0' as const,
+      protocolVersion: 2 as const,
+      canonicalGeneration: 2,
+      entryAttemptId: '20000000-0000-4000-8000-000000000001',
+    }
+    expect(isSupportedCanonicalConnectionAuth(supported)).toBe(true)
+    expect(isSupportedCanonicalConnectionAuth({ ...supported, schemaVersion: '1.0.0' as never })).toBe(false)
+    expect(isSupportedCanonicalConnectionAuth({ ...supported, quiltId: '' })).toBe(false)
+    expect(buildClientUpgradeRequiredSocketError().data).toEqual({
+      code: 'client_upgrade_required',
+      message: 'This client version is no longer supported.',
+      minimumSchemaVersion: '2.0.0',
+      minimumProtocolVersion: 2,
+    })
+  })
+
+  it('returns the exact deterministic client upgrade response', () => {
+    const headers = new Map<string, string>()
+    let status = 0
+    let body: unknown
+    const response = {
+      setHeader: (name: string, value: string) => headers.set(name, value),
+      status: (value: number) => {
+        status = value
+        return response
+      },
+      json: (value: unknown) => {
+        body = value
+        return response
+      },
+    }
+
+    sendClientUpgradeRequired(response as never, 'request-123')
+
+    expect(status).toBe(426)
+    expect(headers).toEqual(new Map([
+      ['Cache-Control', 'no-store'],
+      ['Upgrade', 'zzyix/2.0'],
+    ]))
+    expect(body).toEqual({
+      code: 'client_upgrade_required',
+      message: 'This client version is no longer supported.',
+      requestId: 'request-123',
+      minimumSchemaVersion: '2.0.0',
+      minimumProtocolVersion: 2,
+    })
+  })
+
   it('builds lobby summary metadata with deterministic V1 fallbacks', () => {
     const payload = buildListSessionsResponse([
       { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', participantCount: 2 },

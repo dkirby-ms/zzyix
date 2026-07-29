@@ -279,6 +279,51 @@
   overflow-x: hidden;
 }
 
+.canonical-navigation {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid rgba(59, 45, 36, 0.12);
+  background: rgba(248, 243, 234, 0.82);
+}
+
+.canonical-navigation-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.canonical-navigation h2,
+.canonical-navigation p {
+  margin: 0;
+}
+
+.canonical-navigation h2 {
+  font-size: 0.92rem;
+}
+
+.canonical-navigation p {
+  font-size: 0.78rem;
+  opacity: 0.78;
+}
+
+.canonical-patch-list {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+
+.canonical-patch-list button {
+  flex: 0 0 auto;
+}
+
+.canonical-navigation .canonical-navigation-error {
+  color: var(--color-feedback-danger);
+  opacity: 1;
+}
+
 .canvas-action-bar {
   display: flex;
   flex-wrap: wrap;

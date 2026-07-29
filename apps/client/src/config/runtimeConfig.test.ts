@@ -9,6 +9,7 @@ const validConfig = {
   apiOrigin: 'https://app.example.com/',
   redirectUri: 'https://app.example.com/auth/callback/',
   postLogoutRedirectUri: 'https://app.example.com/signed-out/',
+  canonicalEntryEnabled: true,
 }
 
 describe('parseRuntimeAuthConfig', () => {
@@ -41,5 +42,14 @@ describe('parseRuntimeAuthConfig', () => {
       redirectUri: 'http://localhost:5173/',
       postLogoutRedirectUri: 'http://localhost:5173/',
     }).redirectUri).toBe('http://localhost:5173/')
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['string-valued', 'true'],
+    ['unresolved', '${FEATURE_CANONICAL_ENTRY_ENABLED}'],
+  ])('rejects a %s canonical entry gate', (_label, canonicalEntryEnabled) => {
+    expect(() => parseRuntimeAuthConfig({ ...validConfig, canonicalEntryEnabled }))
+      .toThrow('canonicalEntryEnabled" must be a JSON boolean')
   })
 })

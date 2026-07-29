@@ -1,5 +1,5 @@
 type AppHeaderProps = {
-  onReturnToLobby: () => void
+  onReturnToLobby?: () => void
   connectionState: string
   collaboratorCount: number
   canUndo: boolean
@@ -19,9 +19,11 @@ export const AppHeader = ({
 }: AppHeaderProps) => {
   return (
     <header className="app-header">
-      <button type="button" className="return-btn" onClick={onReturnToLobby}>
-        ← Back
-      </button>
+      {onReturnToLobby && (
+        <button type="button" className="return-btn" onClick={onReturnToLobby}>
+          ← Back
+        </button>
+      )}
       <span className="app-header-title">Mosaic Atelier</span>
       <div className="app-header-meta">
         <span className="collaborator-summary">

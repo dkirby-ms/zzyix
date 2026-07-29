@@ -6,11 +6,10 @@ import { createServer } from 'http'
 import { Server } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
 import { rateLimit } from 'express-rate-limit'
-import { RUNTIME_CHUNK_WORLD_SIZE } from './contracts.js'
+import { RUNTIME_CHUNK_WORLD_SIZE, SCHEMA_VERSION, QUILT_PROTOCOL_VERSION } from './contracts.js'
 import type {
   CanvasSizePreset,
   CreateSessionRequest,
-  CreateSessionResponse,
   ClientToServerEvents,
   ServerToClientEvents,
   InterServerEvents,
@@ -41,6 +40,7 @@ import type {
   QuiltRoomRequest,
   SubscribeQuiltAreaAck,
   QuiltClientRuntimeMetrics,
+  CanonicalClientTelemetry,
   MeResponse,
   AccountDeletionResponse,
   OwnershipCommandResponse,
@@ -49,11 +49,14 @@ import type {
   QuiltPlaceTileRequest,
   QuiltRemoveTileAck,
   QuiltRemoveTileRequest,
+  CanonicalWorldDescriptor,
+  CanonicalWorldUnavailableError,
+  ClientUpgradeRequiredError,
+  SafeApiError,
 } from './contracts.js'
 import {
   closeDatabaseBundle,
   getDatabaseBundle,
-  listSessionSummaries,
   listTilesByChunksWithParity,
   listActiveParticipants,
   loadSessionReplayRecord,
@@ -77,6 +80,15 @@ import {
   requestPrincipalDeletion,
   persistQuiltTilePlacement,
   persistQuiltTileRemoval,
+  discoverCanonicalWorld,
+  provisionCanonicalWorld,
+  activateCanonicalWorld,
+  listEligibleCanonicalPatches,
+  resolveCanonicalPatchNavigation,
+  acquireQuiltPresenceLease,
+  renewQuiltPresenceLease,
+  releaseQuiltPresenceLease,
+  reapExpiredQuiltPresenceLeases,
 } from './db/index.js'
 import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
 import { ResourceNotFoundError, type SessionSummaryRecord } from './db/repository.js'
@@ -86,7 +98,11 @@ import { startRetentionJob } from './jobs/retention.js'
 import { buildPatchRoomAccess, resolveQuiltRooms } from './realtime/quiltRooms.js'
 import { loadAuthenticationConfig } from './auth/config.js'
 import { createTokenVerifier, type TokenVerifier } from './auth/tokenVerifier.js'
-import { resolveProtocolV2MutationEnabled, validateProductionRolloutGates } from './startup/rolloutGates.js'
+import {
+  resolveCanonicalDiscoveryEnabled,
+  resolveProtocolV2MutationEnabled,
+  validateProductionRolloutGates,
+} from './startup/rolloutGates.js'
 import { redactTelemetry } from './logging/redact.js'
 import { resolveDeletionPendingPrincipal, resolveOrProvisionPrincipal } from './auth/principalContext.js'
 import {
@@ -101,10 +117,9 @@ import { createSocketAuth } from './auth/socketAuth.js'
 import {
   decideLegacyRetirement,
   loadLegacyRetirementGates,
-  loadQuiltCanaryConfig,
-  resolveQuiltRollout,
 } from './migration/quiltRollout.js'
 import { configureQuiltTelemetry, emitQuiltTelemetry } from './migration/quiltTelemetry.js'
+import { parseCanonicalTelemetryEvent } from './operations/canonicalRetirementReportCli.js'
 
 type AuthoritativeSessionState = {
   session: Session
@@ -134,6 +149,10 @@ const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'gla
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
 const DEFAULT_SESSION_STALE_MS = 30 * 60 * 1000
+const QUILT_PRESENCE_LEASE_TTL_MS = Number(process.env.QUILT_PRESENCE_LEASE_TTL_MS ?? 45_000)
+const QUILT_PRESENCE_HEARTBEAT_MS = Number(process.env.QUILT_PRESENCE_HEARTBEAT_MS ?? 15_000)
+const CANONICAL_TARGET_VALIDATION_INTERVAL_MS = Number(process.env.CANONICAL_TARGET_VALIDATION_INTERVAL_MS ?? 30_000)
+const registerRetiredCanvasHandlers = false
 const CANVAS_WIDTH = defaultBounds.maxX - defaultBounds.minX
 const CANVAS_HEIGHT = defaultBounds.maxY - defaultBounds.minY
 const DEFAULT_BOUNDS_POLICY: BoundsPolicy = {
@@ -174,14 +193,6 @@ const pruneSocketAuthRateLimitBuckets = (now: number): void => {
   }
 }
 
-const sessionCreateRateLimit = rateLimit({
-  windowMs: Number(process.env.SESSION_CREATE_RATE_LIMIT_WINDOW_MS ?? 60_000),
-  limit: Number(process.env.SESSION_CREATE_RATE_LIMIT_MAX_REQUESTS ?? 20),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many requests. Please try again later.' },
-})
-
 const parseBooleanFlag = (value: string | undefined, fallback: boolean): boolean => {
   if (value === undefined) {
     return fallback
@@ -221,7 +232,7 @@ const isLegacyMutationCompatibilityEnabled = parseBooleanFlag(
   true,
 )
 const isProtocolV2MutationEnabled = resolveProtocolV2MutationEnabled()
-const quiltCanaryConfig = loadQuiltCanaryConfig()
+const isCanonicalDiscoveryEnabled = resolveCanonicalDiscoveryEnabled()
 const legacyRetirementGates = loadLegacyRetirementGates()
 const legacyRetirementDecision = decideLegacyRetirement(legacyRetirementGates)
 const QUILT_PROTOCOL_LIMITS: QuiltProtocolLimits = {
@@ -244,7 +255,14 @@ export const isQuiltRoomRequest = (value: unknown): value is QuiltRoomRequest =>
 }
 
 export const isQuiltClientRuntimeMetrics = (value: unknown): value is QuiltClientRuntimeMetrics => {
-  if (!isObjectRecord(value) || typeof value.quiltId !== 'string') return false
+  if (!isObjectRecord(value)
+    || typeof value.quiltId !== 'string'
+    || typeof value.sampleId !== 'string'
+    || !UUID_PATTERN.test(value.sampleId)
+    || typeof value.entryAttemptId !== 'string'
+    || !UUID_PATTERN.test(value.entryAttemptId)
+    || !Number.isSafeInteger(value.canonicalGeneration)
+    || Number(value.canonicalGeneration) <= 0) return false
   const measurements = [
     value.retainedPatchCount,
     value.retainedTileCount,
@@ -261,31 +279,79 @@ export const recordQuiltClientRuntimeMetrics = (
   payload: unknown,
   context: {
     canaryTelemetryEnabled: boolean
-    quiltId?: string
-    principalId?: string
+    quiltId: string
+    entryAttemptId: string
+    canonicalGeneration: number
+    cohort: 'canary' | 'global'
   },
 ): boolean => {
   if (
     !context.canaryTelemetryEnabled
-    || !context.quiltId
     || !isQuiltClientRuntimeMetrics(payload)
     || payload.quiltId !== context.quiltId
+    || payload.entryAttemptId !== context.entryAttemptId
+    || payload.canonicalGeneration !== context.canonicalGeneration
   ) return false
 
   emitQuiltTelemetry({
+    schemaVersion: 1,
+    eventId: payload.sampleId,
+    attemptId: payload.entryAttemptId,
+    occurredAt: new Date().toISOString(),
     name: 'client_runtime',
     quiltId: context.quiltId,
-    principalId: context.principalId,
-    canary: true,
-    measurements: {
-      retainedPatchCount: payload.retainedPatchCount,
-      retainedTileCount: payload.retainedTileCount,
-      sceneObjectCount: payload.sceneObjectCount,
-      drawCalls: payload.drawCalls,
-      frameTimeMs: payload.frameTimeMs,
-    },
+    canonicalGeneration: context.canonicalGeneration,
+    cohort: context.cohort,
+    outcome: 'sampled',
+    retainedPatchCount: payload.retainedPatchCount,
+    retainedTileCount: payload.retainedTileCount,
+    sceneObjectCount: payload.sceneObjectCount,
+    drawCalls: payload.drawCalls,
+    frameTimeMs: payload.frameTimeMs,
   })
   return true
+}
+
+export const recordCanonicalClientTelemetry = (
+  payload: unknown,
+  context: { quiltId: string; canonicalGeneration: number; cohort: 'canary' | 'global' },
+): boolean => {
+  if (!isObjectRecord(payload) || typeof payload.attemptId !== 'string' || !UUID_PATTERN.test(payload.attemptId)) return false
+  try {
+    const event = parseCanonicalTelemetryEvent({
+      ...payload,
+      schemaVersion: 1,
+      eventId: crypto.randomUUID(),
+      occurredAt: new Date().toISOString(),
+      quiltId: context.quiltId,
+      canonicalGeneration: context.canonicalGeneration,
+      cohort: context.cohort,
+    })
+    if (!['canonical_entry', 'canonical_reconnect', 'canonical_resubscribe'].includes(event.name)) return false
+    emitQuiltTelemetry(event)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const recordCanonicalSafetyTelemetry = (
+  code: 'descriptor_leak' | 'target_invalidated',
+  context: { attemptId: string; quiltId: string; canonicalGeneration: number; cohort: 'canary' | 'global'; requestId?: string },
+): void => {
+  emitQuiltTelemetry({
+    schemaVersion: 1,
+    eventId: crypto.randomUUID(),
+    attemptId: context.attemptId,
+    occurredAt: new Date().toISOString(),
+    quiltId: context.quiltId,
+    canonicalGeneration: context.canonicalGeneration,
+    cohort: context.cohort,
+    name: 'canonical_safety',
+    outcome: 'detected',
+    code,
+    ...(context.requestId ? { requestId: context.requestId } : {}),
+  })
 }
 
 export const resolveLegacySocketAccess = (context: QuiltDeliveryContext | null): {
@@ -557,6 +623,8 @@ export const selectScopedReplayOperations = (
 
 export const quiltChunkRoomName = (canonicalRoomId: string, chunkId: ChunkId): string =>
   `${canonicalRoomId}:chunk:${chunkId}`
+
+export const quiltPresenceRoomName = (quiltId: string): string => `quilt:${quiltId}:presence`
 
 const cloneCanvasConfig = (config: SessionCanvasConfig): SessionCanvasConfig => ({
   canvasSize: {
@@ -1403,7 +1471,14 @@ const httpServer = createServer(app)
 const isTestControlEnabled = process.env.NODE_ENV === 'test' && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
 const testControlToken = (process.env.E2E_RESET_TOKEN ?? TEST_CONTROL_DEFAULT_TOKEN).trim()
 
-app.use(express.json())
+const jsonBodyParser = express.json()
+app.use((req, res, next) => {
+  if (req.path === '/sessions') {
+    next()
+    return
+  }
+  jsonBodyParser(req, res, next)
+})
 
 let configuredTokenVerifier: TokenVerifier | undefined
 const configureAuthentication = (): void => {
@@ -1517,6 +1592,116 @@ app.get('/me', requireHttpPrincipal, async (req, res) => {
   res.status(200).json(response)
 })
 
+export const sendCanonicalWorldDiscovery = async (
+  res: express.Response,
+  loader: () => Promise<CanonicalWorldDescriptor | null> = discoverCanonicalWorld,
+  discoveryEnabled = true,
+  attemptId: string = crypto.randomUUID(),
+): Promise<void> => {
+  const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
+  const startedAt = performance.now()
+  let descriptor: CanonicalWorldDescriptor | null = null
+  let outcome: 'success' | 'unavailable' | 'error' = 'error'
+  let httpStatus: 200 | 503 | 500 = 500
+  let reasonCode: 'missing' | 'inactive' | 'invalid_target' | 'internal_error' = 'internal_error'
+  try {
+    if (!discoveryEnabled) {
+      outcome = 'unavailable'; httpStatus = 503; reasonCode = 'inactive'
+      res.setHeader('Retry-After', '30')
+      res.status(503).json({
+        code: 'canonical_world_unavailable',
+        message: 'The canonical world is temporarily unavailable.',
+        requestId,
+        retryAfterSeconds: 30,
+      } satisfies CanonicalWorldUnavailableError)
+      return
+    }
+    descriptor = await loader()
+    if (!descriptor) {
+      outcome = 'unavailable'; httpStatus = 503; reasonCode = 'missing'
+      res.setHeader('Retry-After', '30')
+      res.status(503).json({
+        code: 'canonical_world_unavailable',
+        message: 'The canonical world is temporarily unavailable.',
+        requestId,
+        retryAfterSeconds: 30,
+      } satisfies CanonicalWorldUnavailableError)
+      return
+    }
+    outcome = 'success'; httpStatus = 200
+    res.status(200).json(descriptor)
+  } catch (error) {
+    writeLog('error', 'canonical_world_discovery_failed', { error })
+    res.status(500).json({
+      code: 'internal_error',
+      message: 'An internal error occurred.',
+      requestId,
+    } satisfies SafeApiError)
+  } finally {
+    emitQuiltTelemetry({
+      schemaVersion: 1,
+      eventId: crypto.randomUUID(),
+      attemptId: UUID_PATTERN.test(attemptId) ? attemptId : crypto.randomUUID(),
+      occurredAt: new Date().toISOString(),
+      quiltId: descriptor?.quiltId ?? '00000000-0000-4000-8000-000000000000',
+      canonicalGeneration: descriptor?.generation ?? 1,
+      cohort: 'global',
+      name: 'canonical_discovery',
+      outcome,
+      durationMs: performance.now() - startedAt,
+      httpStatus,
+      ...(outcome === 'success' ? {} : { reasonCode }),
+    })
+  }
+}
+
+app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
+  getPrincipalContext(req)
+  await sendCanonicalWorldDiscovery(res, discoverCanonicalWorld, isCanonicalDiscoveryEnabled, req.header('x-canonical-attempt-id'))
+})
+
+app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, async (req, res) => {
+  const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
+  if (!isCanonicalDiscoveryEnabled) {
+    res.status(503).json({
+      code: 'canonical_world_unavailable',
+      message: 'The canonical world is temporarily unavailable.',
+      requestId,
+      retryAfterSeconds: 30,
+    } satisfies CanonicalWorldUnavailableError)
+    return
+  }
+
+  const result = await listEligibleCanonicalPatches(getPrincipalContext(req).principalId)
+  if (!result) {
+    res.status(503).json({
+      code: 'canonical_world_unavailable',
+      message: 'The canonical world is temporarily unavailable.',
+      requestId,
+      retryAfterSeconds: 30,
+    } satisfies CanonicalWorldUnavailableError)
+    return
+  }
+  res.status(200).json(result)
+})
+
+app.get('/quilts/:quiltId/patches/:patchId/navigation', requireHttpPrincipal, async (req, res) => {
+  getPrincipalContext(req)
+  const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
+  const { quiltId, patchId } = req.params
+  if (typeof quiltId !== 'string' || typeof patchId !== 'string'
+    || !UUID_PATTERN.test(quiltId) || !UUID_PATTERN.test(patchId)) {
+    sendResourceNotFound(res, requestId)
+    return
+  }
+  const navigation = await resolveCanonicalPatchNavigation(quiltId, patchId)
+  if (!navigation) {
+    sendResourceNotFound(res, requestId)
+    return
+  }
+  res.status(200).json(navigation)
+})
+
 app.post('/ownership/claims', requireHttpPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, ['patchId'])) return sendInvalidOwnershipRequest(res)
   const principalId = getPrincipalContext(req).principalId
@@ -1580,55 +1765,41 @@ app.post('/account/deletion/recover', requireDeletionPendingPrincipal, async (re
   res.status(200).json({ status: 'active', idempotent: result.idempotent } satisfies AccountDeletionResponse)
 })
 
-app.get('/sessions', requireHttpPrincipal, async (req, res) => {
-  try {
-    const summaries = await listSessionSummaries(getPrincipalContext(req).principalId)
-    const response = buildListSessionsResponse(summaries)
+export const sendClientUpgradeRequired = (response: express.Response, requestId: string): void => {
+  emitQuiltTelemetry({
+    schemaVersion: 1,
+    eventId: crypto.randomUUID(),
+    attemptId: crypto.randomUUID(),
+    occurredAt: new Date().toISOString(),
+    quiltId: '00000000-0000-4000-8000-000000000000',
+    canonicalGeneration: 1,
+    cohort: 'global',
+    name: 'canonical_old_client_rejected',
+    outcome: 'rejected',
+    transport: 'http',
+  })
+  response.setHeader('Cache-Control', 'no-store')
+  response.setHeader('Upgrade', 'zzyix/2.0')
+  response.status(426).json({
+    code: 'client_upgrade_required',
+    message: 'This client version is no longer supported.',
+    requestId,
+    minimumSchemaVersion: SCHEMA_VERSION,
+    minimumProtocolVersion: QUILT_PROTOCOL_VERSION,
+  } satisfies ClientUpgradeRequiredError)
+}
 
-    res.status(200).json(response)
-  } catch (error) {
-    writeLog('error', 'session_list_failed', { error })
-    res.status(500).json({ error: 'Failed to list sessions' })
-  }
+app.get('/sessions', requireHttpPrincipal, (_req, res) => {
+  sendClientUpgradeRequired(res, res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID())
 })
 
-// Session creation endpoint
-app.post('/sessions', requireHttpPrincipal, sessionCreateRateLimit, async (req, res) => {
-  if (!isCreateSessionRequest(req.body ?? {})) {
-    res.status(400).json({ error: 'Invalid session creation payload' })
-    return
-  }
-
-  try {
-    const sessionId = crypto.randomUUID()
-    const canvasConfig = resolveCanvasConfigFromPreset(req.body?.canvasPreset)
-    const sessionState = createAuthoritativeSessionState(sessionId, Date.now(), canvasConfig)
-    sessions.set(sessionId, sessionState)
-
-    // Initialize canvas in database to satisfy foreign key constraints
-    const createdSession = await createProtectedSession(sessionId, canvasConfig)
-
-    writeLog('info', 'session_created', {
-      sessionId,
-      canvasPreset: req.body?.canvasPreset ?? 'expanded',
-      canvasSize: canvasConfig.canvasSize,
-    })
-
-    res.status(200).json({
-      session: {
-        id: sessionId,
-        canvasConfig,
-      },
-      claimTarget: createdSession.claimTarget,
-    } satisfies CreateSessionResponse)
-  } catch (error) {
-    writeLog('error', 'session_creation_failed', { error })
-    res.status(500).json({ error: 'Failed to create session' })
-  }
+app.post('/sessions', requireHttpPrincipal, (_req, res) => {
+  sendClientUpgradeRequired(res, res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID())
 })
 
 type TestResetRequest = {
   createSession?: boolean
+  createCanonicalWorld?: boolean
   canvasPreset?: CanvasSizePreset
   ownerExternalSubject?: string
 }
@@ -1639,6 +1810,10 @@ const isTestResetRequest = (value: unknown): value is TestResetRequest => {
   }
 
   if (value.createSession !== undefined && typeof value.createSession !== 'boolean') {
+    return false
+  }
+
+  if (value.createCanonicalWorld !== undefined && typeof value.createCanonicalWorld !== 'boolean') {
     return false
   }
 
@@ -1678,7 +1853,7 @@ const resetAuthoritativeState = async (): Promise<void> => {
 if (isTestControlEnabled) {
   const testResetRateLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 10,
+    max: 100,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many test reset requests, please try again later.' },
@@ -1697,11 +1872,67 @@ if (isTestControlEnabled) {
     }
 
     const createSessionForRun = req.body?.createSession ?? false
+    const createCanonicalWorldForRun = req.body?.createCanonicalWorld ?? false
     const canvasPreset = req.body?.canvasPreset
     const ownerExternalSubject = req.body?.ownerExternalSubject
 
     try {
       await resetAuthoritativeState()
+
+      if (createCanonicalWorldForRun) {
+        const provisioned = await provisionCanonicalWorld({
+          action: 'provision',
+          expectedGeneration: 0,
+          patchRows: 32,
+          patchColumns: 32,
+          patchWidth: 31.2,
+          patchHeight: 20.4,
+          originX: 0,
+          originY: 0,
+          operatorId: 'e2e-reset',
+          reason: 'isolated canonical acceptance fixture',
+        })
+        if (!provisioned.quilt || !provisioned.initialPatch) throw new Error('Canonical fixture provisioning failed')
+        await activateCanonicalWorld({
+          action: 'activate',
+          quiltId: provisioned.quilt.id,
+          expectedGeneration: provisioned.generation,
+          operatorId: 'e2e-reset',
+          reason: 'activate isolated canonical acceptance fixture',
+        })
+
+        if (ownerExternalSubject) {
+          const providerNamespace = process.env.AUTH_TRUSTED_ISSUER
+          if (!providerNamespace) throw new Error('AUTH_TRUSTED_ISSUER is required to seed a test owner')
+          const principalId = crypto.randomUUID()
+          await getDatabaseBundle().db.transaction(async (tx) => {
+            await tx.execute(sql`INSERT INTO principals (id, kind) VALUES (${principalId}, 'human')`)
+            await tx.execute(sql`
+              INSERT INTO external_principal_mappings (provider_namespace, external_subject, principal_id)
+              VALUES (${providerNamespace}, ${ownerExternalSubject}, ${principalId})
+            `)
+            await tx.execute(sql`
+              UPDATE patches SET owner_principal_id = ${principalId}, state = 'active'
+              WHERE id = ${provisioned.initialPatch!.id}
+            `)
+            await tx.execute(sql`
+              INSERT INTO patch_memberships (patch_id, principal_id, role)
+              VALUES (${provisioned.initialPatch!.id}, ${principalId}, 'owner')
+            `)
+          })
+        }
+
+        res.status(200).json({
+          reset: true,
+          session: { id: provisioned.quilt.legacyCanvasId },
+          canonical: {
+            quiltId: provisioned.quilt.id,
+            patchId: provisioned.initialPatch.id,
+            generation: provisioned.generation + 1,
+          },
+        })
+        return
+      }
 
       if (!createSessionForRun) {
         res.status(200).json({ reset: true })
@@ -1763,6 +1994,7 @@ if (isTestControlEnabled) {
     const canvasId = crypto.randomUUID()
     const quiltId = crypto.randomUUID()
     const patchId = crypto.randomUUID()
+    const secondPatchId = crypto.randomUUID()
     const principalId = crypto.randomUUID()
     const externalSubject = typeof req.body?.externalSubject === 'string'
       ? req.body.externalSubject
@@ -1771,6 +2003,7 @@ if (isTestControlEnabled) {
     const providerNamespace = process.env.AUTH_TRUSTED_ISSUER
     const tileId = crypto.randomUUID()
     try {
+      await resetAuthoritativeState()
       await getDatabaseBundle().db.transaction(async (tx) => {
         await tx.execute(sql`INSERT INTO canvases (id, version) VALUES (${canvasId}, 0)`)
         await tx.execute(sql`
@@ -1789,7 +2022,9 @@ if (isTestControlEnabled) {
         }
         await tx.execute(sql`
           INSERT INTO patches (id, quilt_id, row, "column", state, revision)
-          VALUES (${patchId}, ${quiltId}, 0, 0, 'active', 0)
+          VALUES
+            (${patchId}, ${quiltId}, 0, 0, 'active', 0),
+            (${secondPatchId}, ${quiltId}, 0, 1, 'unclaimed', 0)
         `)
         await tx.execute(sql`UPDATE patches SET owner_principal_id = ${principalId} WHERE id = ${patchId}`)
         await tx.execute(sql`
@@ -1800,7 +2035,14 @@ if (isTestControlEnabled) {
           VALUES (
             ${patchId}, 'authenticated', 'authenticated', 'authenticated', 'authenticated',
             'authenticated', 'authenticated', ${claimEnabled}, 1
+          ), (
+            ${secondPatchId}, 'authenticated', 'authenticated', 'authenticated', 'authenticated',
+            'authenticated', 'authenticated', ${claimEnabled}, 1
           )
+        `)
+        await tx.execute(sql`
+          INSERT INTO canonical_world (product_key, quilt_id, status, generation)
+          VALUES ('canonical', ${quiltId}, 'active', 1)
         `)
         await tx.execute(sql`
           INSERT INTO tiles (
@@ -1975,87 +2217,102 @@ const configureRealtimeAdapter = (): void => {
   })
 }
 
+export const isSupportedCanonicalConnectionAuth = (auth: Partial<ConnectionAuth> | null | undefined): auth is ConnectionAuth =>
+  auth?.schemaVersion === SCHEMA_VERSION
+  && auth.protocolVersion === QUILT_PROTOCOL_VERSION
+  && typeof auth.quiltId === 'string'
+  && UUID_PATTERN.test(auth.quiltId)
+  && typeof auth.clientId === 'string'
+  && auth.clientId.length > 0
+  && typeof auth.entryAttemptId === 'string'
+  && UUID_PATTERN.test(auth.entryAttemptId)
+  && Number.isSafeInteger(auth.canonicalGeneration)
+  && Number(auth.canonicalGeneration) > 0
+
+export const buildClientUpgradeRequiredSocketError = (): Error & { data: Record<string, unknown> } => {
+  const error = new Error('This client version is no longer supported.') as Error & { data: Record<string, unknown> }
+  error.data = {
+    code: 'client_upgrade_required',
+    message: 'This client version is no longer supported.',
+    minimumSchemaVersion: SCHEMA_VERSION,
+    minimumProtocolVersion: QUILT_PROTOCOL_VERSION,
+  }
+  return error
+}
+
 // ─── Connection Middleware ───────────────────────────────────────────────────
+
+io.use(createSocketAuth(verifyAccessToken, resolveOrProvisionPrincipal))
+
+io.use((socket, next) => {
+  const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
+  if (!isSupportedCanonicalConnectionAuth(auth)) {
+    emitQuiltTelemetry({
+      schemaVersion: 1,
+      eventId: crypto.randomUUID(),
+      attemptId: typeof auth?.entryAttemptId === 'string' && UUID_PATTERN.test(auth.entryAttemptId) ? auth.entryAttemptId : crypto.randomUUID(),
+      occurredAt: new Date().toISOString(),
+      quiltId: typeof auth?.quiltId === 'string' && UUID_PATTERN.test(auth.quiltId) ? auth.quiltId : '00000000-0000-4000-8000-000000000000',
+      canonicalGeneration: Number.isSafeInteger(auth?.canonicalGeneration) && Number(auth?.canonicalGeneration) > 0 ? Number(auth.canonicalGeneration) : 1,
+      cohort: 'global',
+      name: 'canonical_old_client_rejected',
+      outcome: 'rejected',
+      transport: 'socket',
+      ...(typeof auth?.schemaVersion === 'string' ? { requestedSchemaVersion: auth.schemaVersion } : {}),
+      ...(typeof auth?.protocolVersion === 'number' ? { requestedProtocolVersion: auth.protocolVersion } : {}),
+    })
+    return next(buildClientUpgradeRequiredSocketError())
+  }
+
+  socket.data.quiltId = auth.quiltId
+  socket.data.clientId = auth.clientId
+  socket.data.schemaVersion = SCHEMA_VERSION
+  socket.data.protocolVersion = QUILT_PROTOCOL_VERSION
+  socket.data.canonicalGeneration = auth.canonicalGeneration
+  socket.data.entryAttemptId = auth.entryAttemptId
+
+  next()
+})
 
 io.use((socket, next) => {
   const now = Date.now()
   pruneSocketAuthRateLimitBuckets(now)
-
   const addressHeader = socket.handshake.headers['x-forwarded-for']
   const forwardedFor = typeof addressHeader === 'string' ? addressHeader.split(',')[0]?.trim() : undefined
   const rateLimitKey = forwardedFor || socket.handshake.address || socket.conn.remoteAddress || 'unknown'
-
   const currentBucket = socketAuthRateLimitBuckets.get(rateLimitKey)
-
   if (!currentBucket || currentBucket.resetAt <= now) {
-    socketAuthRateLimitBuckets.set(rateLimitKey, {
-      count: 1,
-      resetAt: now + SOCKET_AUTH_RATE_LIMIT_WINDOW_MS,
-    })
+    socketAuthRateLimitBuckets.set(rateLimitKey, { count: 1, resetAt: now + SOCKET_AUTH_RATE_LIMIT_WINDOW_MS })
   } else if (currentBucket.count >= SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS) {
     const retryAfterSeconds = Math.max(1, Math.ceil((currentBucket.resetAt - now) / 1_000))
-    writeLog('warn', 'socket_auth_rate_limited', {
-      rateLimitKey,
-      retryAfterSeconds,
-      windowMs: SOCKET_AUTH_RATE_LIMIT_WINDOW_MS,
-      maxAttempts: SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS,
-    })
     return next(new Error(`Too many connection attempts. Retry after ${retryAfterSeconds}s.`))
   } else {
     currentBucket.count += 1
     socketAuthRateLimitBuckets.set(rateLimitKey, currentBucket)
   }
 
-  next()
-})
-
-io.use(createSocketAuth(verifyAccessToken, resolveOrProvisionPrincipal))
-
-io.use((socket, next) => {
-
-  const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
-
-  writeLog('debug', 'socket_auth_received', {
-    authType: typeof auth,
-    hasSessionId: Boolean(auth?.sessionId),
-    hasClientId: Boolean(auth?.clientId),
-  })
-
-  if (!auth || !auth.sessionId || !auth.clientId) {
-    const errorMsg = 'Missing sessionId or clientId in auth payload'
-    writeLog('warn', 'socket_auth_validation_failed', {
-      authType: typeof auth,
-      hasSessionId: Boolean(auth?.sessionId),
-      hasClientId: Boolean(auth?.clientId),
-    })
-    return next(new Error(errorMsg))
-  }
-
-  // Store per-socket metadata
-  socket.data.sessionId = auth.sessionId
-  socket.data.clientId = auth.clientId
-  socket.data.protocolVersion = auth.protocolVersion === 2 ? 2 : 1
-  socket.data.enableProtocolV1Compatibility = auth.enableProtocolV1Compatibility === true
-
   writeLog('info', 'socket_connecting', {
-    clientId: auth.clientId,
-    sessionId: auth.sessionId,
+    clientId: socket.data.clientId,
+    quiltId: socket.data.quiltId,
   })
-
   next()
 })
 
 // ─── Connection Handlers ─────────────────────────────────────────────────────
 
 io.on('connection', (socket) => {
-  const { sessionId, clientId } = socket.data
-  registerClientSocket(sessionId, clientId, socket.id)
-  let selectedProtocolVersion: 1 | 2 = 1
-  let canaryTelemetryEnabled = false
+  const { quiltId, clientId } = socket.data
+  const sessionId = quiltId
+  let selectedProtocolVersion: 1 | 2 = 2
+  let canaryTelemetryEnabled = true
   let dualReadEnabled = false
   let selectedQuiltId: string | undefined
   let selectedPrincipalId: string | undefined
-  let legacyMutationAuthorized = false
+  let presenceLeaseActive = false
+  let presenceHeartbeat: NodeJS.Timeout | null = null
+  let canonicalTargetValidation: NodeJS.Timeout | null = null
+  let safetyViolationDetected = false
+  const canonicalTerminalKeys = new Set<string>()
   let quiltRoomIds = new Set<string>()
     let quiltAdapterRoomIds = new Set<string>()
   let roomChurnWindowStartedAt = Date.now()
@@ -2072,74 +2329,55 @@ io.on('connection', (socket) => {
 
   const initializeConnection = async (): Promise<void> => {
     const joinedAt = Date.now()
-    const deliveryContext = await loadQuiltDeliveryContext({
-      sessionId,
-      principalId: socket.data.principalId,
-    })
-
-    if (socket.data.protocolVersion === 2) {
-      if (deliveryContext?.topology.protocolVersion === 2) {
-        const rollout = resolveQuiltRollout({
-          quiltId: deliveryContext.topology.quiltId,
-          principalId: deliveryContext.principalId,
-        }, quiltCanaryConfig)
-        if (rollout.protocolV2Enabled) {
-          selectedProtocolVersion = 2
-          selectedQuiltId = deliveryContext.topology.quiltId
-          selectedPrincipalId = deliveryContext.principalId
-          canaryTelemetryEnabled = rollout.canary
-          dualReadEnabled = rollout.dualReadEnabled
-          socket.emit('quilt_protocol', {
-            selectedProtocolVersion: 2,
-            v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
-            mutationEnabled: isProtocolV2MutationEnabled,
-            canaryTelemetryEnabled,
-            topology: deliveryContext.topology,
-            limits: QUILT_PROTOCOL_LIMITS,
-          })
-          return
-        }
-      }
-    }
-
-    const legacyAccess = resolveLegacySocketAccess(deliveryContext)
-    if (!legacyAccess.allowed) {
+    const canonicalDescriptor = await discoverCanonicalWorld()
+    if (!canonicalDescriptor || canonicalDescriptor.quiltId !== quiltId || canonicalDescriptor.generation !== socket.data.canonicalGeneration) {
+      recordCanonicalSafetyTelemetry('target_invalidated', {
+        attemptId: socket.data.entryAttemptId,
+        quiltId,
+        canonicalGeneration: socket.data.canonicalGeneration,
+        cohort: 'global',
+        requestId: socket.id,
+      })
       throw new Error('Resource not found.')
     }
-    legacyMutationAuthorized = legacyAccess.mutationAllowed
-
-    socket.emit('quilt_protocol', {
-      selectedProtocolVersion: 1,
-      v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
-      mutationEnabled: isLegacyMutationCompatibilityEnabled && legacyMutationAuthorized,
+    const deliveryContext = await loadQuiltDeliveryContext({
+      quiltId,
+      principalId: socket.data.principalId,
     })
-
-    socket.join(sessionId)
-    const connectionState = await initializeParticipantPresence(sessionId, clientId, joinedAt)
-    const sessionState = getSessionState(sessionId)
-    sessionState.canvasConfig = cloneCanvasConfig(connectionState.snapshot.canvasConfig)
-    sessionState.session = connectionState.snapshot.session
-    sessionState.session.boundsPolicy = sessionState.canvasConfig.boundsPolicy
-    sessionState.lastOpSeq = connectionState.snapshot.lastOpSeq
-    sessionState.clients = new Map(connectionState.snapshot.clients.map((client) => [client.clientId, client]))
-
-    writeLog('info', 'socket_joined', {
-      clientId,
-      sessionId,
-      roomSize: io.sockets.adapter.rooms.get(sessionId)?.size ?? 0,
-    })
-
-    socket.emit('session_snapshot', {
-      ...connectionState.snapshot,
-      session: {
-        ...connectionState.snapshot.session,
-        boundsPolicy: sessionState.canvasConfig.boundsPolicy,
-      },
-      canvasConfig: sessionState.canvasConfig,
-      realtimeCapabilities: getRealtimeCapabilities(sessionId),
-    })
-
-    socket.to(sessionId).emit('client_joined', { client: connectionState.joinedClient })
+    if (!deliveryContext || deliveryContext.topology.protocolVersion !== 2) throw new Error('Resource not found.')
+    if (deliveryContext.principalId !== socket.data.principalId) {
+      recordCanonicalSafetyTelemetry('descriptor_leak', {
+        attemptId: socket.data.entryAttemptId,
+        quiltId,
+        canonicalGeneration: socket.data.canonicalGeneration,
+        cohort: 'global',
+        requestId: socket.id,
+      })
+      throw new Error('Resource not found.')
+    }
+    selectedQuiltId = deliveryContext.topology.quiltId
+    selectedPrincipalId = deliveryContext.principalId
+    const presenceRoom = quiltPresenceRoomName(selectedQuiltId)
+    await socket.join(presenceRoom)
+    const presence = await acquireQuiltPresenceLease({ socketId: socket.id, quiltId: selectedQuiltId, principalId: selectedPrincipalId, clientId, now: joinedAt, ttlMs: QUILT_PRESENCE_LEASE_TTL_MS })
+    presenceLeaseActive = true
+    presenceHeartbeat = setInterval(() => { void renewQuiltPresenceLease(socket.id, Date.now(), QUILT_PRESENCE_LEASE_TTL_MS) }, QUILT_PRESENCE_HEARTBEAT_MS)
+    canonicalTargetValidation = setInterval(() => {
+      void discoverCanonicalWorld().then((descriptor) => {
+        if (safetyViolationDetected || (descriptor?.quiltId === quiltId && descriptor.generation === socket.data.canonicalGeneration)) return
+        safetyViolationDetected = true
+        recordCanonicalSafetyTelemetry('target_invalidated', {
+          attemptId: socket.data.entryAttemptId,
+          quiltId,
+          canonicalGeneration: socket.data.canonicalGeneration,
+          cohort: 'global',
+          requestId: socket.id,
+        })
+        socket.disconnect(true)
+      }).catch((error) => writeLog('error', 'canonical_target_validation_failed', { quiltId, socketId: socket.id, error }))
+    }, CANONICAL_TARGET_VALIDATION_INTERVAL_MS)
+    socket.emit('quilt_protocol', { selectedProtocolVersion: 2, v1CompatibilityEnabled: false, mutationEnabled: isProtocolV2MutationEnabled, canaryTelemetryEnabled, topology: deliveryContext.topology, limits: QUILT_PROTOCOL_LIMITS })
+    if (presence.isFirstLease) socket.to(presenceRoom).emit('client_joined', { client: { clientId: presence.clientId, joinedAt: presence.joinedAt } })
   }
 
   void initializeConnection().catch((error) => {
@@ -2153,6 +2391,7 @@ io.on('connection', (socket) => {
 
   // ── Event Handlers ────────────────────────────────────────────────────────
 
+  if (registerRetiredCanvasHandlers) {
   socket.on('place_tile', async (payload, ack) => {
     writeLog('debug', 'place_tile_received', {
       sessionId,
@@ -2360,6 +2599,7 @@ io.on('connection', (socket) => {
       invokeAckSafely(ack, { removed: false })
     }
   })
+  }
 
   const rejectQuiltMutation = <T extends QuiltPlaceTileAck | QuiltRemoveTileAck>(
     ack: unknown,
@@ -2401,6 +2641,7 @@ io.on('connection', (socket) => {
         quiltId: payload.quiltId,
         operationId: payload.operationId,
         principalId: selectedPrincipalId,
+        placedBy: clientId,
         expectedPatchRevisions: payload.expectedPatchRevisions,
         payload: payload.tile,
       })
@@ -2423,7 +2664,7 @@ io.on('connection', (socket) => {
         tile: result.tile,
       })
       if (result.idempotent) return
-      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: selectedPrincipalId })
+      const deliveryContext = await loadQuiltDeliveryContext({ quiltId, principalId: selectedPrincipalId })
       if (!deliveryContext) return
       for (const [patchId, revision] of Object.entries(result.patchRevisions)) {
         const eventId = result.eventIds[patchId]
@@ -2488,7 +2729,7 @@ io.on('connection', (socket) => {
         idempotent: result.idempotent,
       })
       if (result.idempotent) return
-      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: selectedPrincipalId })
+      const deliveryContext = await loadQuiltDeliveryContext({ quiltId, principalId: selectedPrincipalId })
       if (!deliveryContext) return
       for (const [patchId, revision] of Object.entries(result.patchRevisions)) {
         const eventId = result.eventIds[patchId]
@@ -2514,6 +2755,7 @@ io.on('connection', (socket) => {
     }
   })
 
+  if (registerRetiredCanvasHandlers) {
   socket.on('pointer_move', (payload) => {
     if (selectedProtocolVersion === 2) return
     if (!isPointerMovePayload(payload)) {
@@ -2798,13 +3040,26 @@ io.on('connection', (socket) => {
       })
     }
   })
+  }
 
   socket.on('quilt_client_runtime_metrics', (payload) => {
     recordQuiltClientRuntimeMetrics(payload, {
       canaryTelemetryEnabled,
-      quiltId: selectedQuiltId,
-      principalId: selectedPrincipalId,
+      quiltId: socket.data.quiltId,
+      entryAttemptId: socket.data.entryAttemptId,
+      canonicalGeneration: socket.data.canonicalGeneration,
+      cohort: 'global',
     })
+  })
+
+  socket.on('canonical_telemetry', (payload: CanonicalClientTelemetry) => {
+    const terminalKey = `${payload?.name}:${payload?.attemptId}`
+    if (canonicalTerminalKeys.has(terminalKey)) return
+    if (recordCanonicalClientTelemetry(payload, {
+      quiltId: socket.data.quiltId,
+      canonicalGeneration: socket.data.canonicalGeneration,
+      cohort: 'global',
+    })) canonicalTerminalKeys.add(terminalKey)
   })
 
   socket.on('subscribe_quilt_area', async (payload, ack) => {
@@ -2823,7 +3078,7 @@ io.on('connection', (socket) => {
     }
 
     try {
-      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: socket.data.principalId })
+      const deliveryContext = await loadQuiltDeliveryContext({ quiltId, principalId: socket.data.principalId })
       if (!deliveryContext || deliveryContext.topology.quiltId !== payload.quiltId) {
         invokeAckSafely<SubscribeQuiltAreaAck>(ack, {
           outcomes: payload.rooms.map((room) => ({
@@ -3041,12 +3296,42 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', async () => {
     const remainingSockets = unregisterClientSocket(sessionId, clientId, socket.id)
+    if (presenceHeartbeat) {
+      clearInterval(presenceHeartbeat)
+      presenceHeartbeat = null
+    }
+    if (canonicalTargetValidation) {
+      clearInterval(canonicalTargetValidation)
+      canonicalTargetValidation = null
+    }
 
     writeLog('info', 'socket_disconnected', {
       clientId,
       sessionId,
       remainingSockets,
     })
+
+    if (selectedProtocolVersion === 2 && selectedQuiltId && selectedPrincipalId && presenceLeaseActive) {
+      try {
+        const presence = await releaseQuiltPresenceLease({
+          socketId: socket.id,
+          quiltId: selectedQuiltId,
+          principalId: selectedPrincipalId,
+          now: Date.now(),
+        })
+        if (presence.isLastLease) {
+          io.to(quiltPresenceRoomName(selectedQuiltId)).emit('client_left', { clientId: presence.clientId })
+        }
+      } catch (error) {
+        writeLog('error', 'quilt_presence_release_failed', {
+          quiltId: selectedQuiltId,
+          principalId: selectedPrincipalId,
+          socketId: socket.id,
+          error,
+        })
+      }
+      return
+    }
 
     if (remainingSockets > 0) {
       writeLog('debug', 'socket_disconnected_presence_deferred', {
@@ -3085,10 +3370,20 @@ io.on('connection', (socket) => {
 // ─── Graceful Shutdown ───────────────────────────────────────────────────────
 
 const retentionJob = process.env.NODE_ENV === 'test' ? null : startRetentionJob()
+const presenceLeaseReaper = process.env.NODE_ENV === 'test' ? null : setInterval(() => {
+  void reapExpiredQuiltPresenceLeases(Date.now())
+    .then((departures) => {
+      for (const departure of departures) {
+        io.to(quiltPresenceRoomName(departure.quiltId)).emit('client_left', { clientId: departure.clientId })
+      }
+    })
+    .catch((error) => writeLog('error', 'quilt_presence_reap_failed', { error }))
+}, QUILT_PRESENCE_HEARTBEAT_MS)
 
 async function shutdown(signal: string): Promise<void> {
   writeLog('info', 'shutdown_signal_received', { signal })
   retentionJob?.stop()
+  if (presenceLeaseReaper) clearInterval(presenceLeaseReaper)
 
   await new Promise<void>((resolve) => io.close(() => resolve()))
 

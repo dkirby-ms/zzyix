@@ -14,8 +14,13 @@ type MockSocket = {
   id: string
   on: ReturnType<typeof vi.fn>
   off: ReturnType<typeof vi.fn>
+  emit: ReturnType<typeof vi.fn>
   connect: ReturnType<typeof vi.fn>
   disconnect: ReturnType<typeof vi.fn>
+  io: {
+    on: ReturnType<typeof vi.fn>
+    off: ReturnType<typeof vi.fn>
+  }
 }
 
 const registeredHandler = <T extends (...args: any[]) => any>(socket: MockSocket, eventName: string): T => {
@@ -24,12 +29,20 @@ const registeredHandler = <T extends (...args: any[]) => any>(socket: MockSocket
   return call[1] as T
 }
 
+const registeredManagerHandler = <T extends (...args: any[]) => any>(socket: MockSocket, eventName: string): T => {
+  const call = socket.io.on.mock.calls.find(([event]) => event === eventName)
+  if (!call) throw new Error(`Missing manager handler for ${eventName}`)
+  return call[1] as T
+}
+
 const createMockSocket = (): MockSocket => ({
   id: 'socket-1',
   on: vi.fn(),
   off: vi.fn(),
+  emit: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
+  io: { on: vi.fn(), off: vi.fn() },
 })
 
 const accessTokenProvider = vi.fn(async () => 'access-token')
@@ -98,6 +111,32 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(socket.on).toHaveBeenCalledWith('client_joined', callbacks.onClientJoined)
     expect(socket.on).toHaveBeenCalledWith('client_left', callbacks.onClientLeft)
     expect(socket.on).toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
+  })
+
+  it('emits bounded reconnect recovery and exhaustion terminals', () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+    renderAuthenticatedSocket(['http://localhost:3001', 'session-1', 'client-1', vi.fn(), vi.fn(), vi.fn()])
+
+    const disconnect = registeredHandler<(reason: string) => void>(socket, 'disconnect')
+    const connect = registeredHandler<() => void>(socket, 'connect')
+    const reconnectAttempt = registeredManagerHandler<() => void>(socket, 'reconnect_attempt')
+    const reconnectFailed = registeredManagerHandler<() => void>(socket, 'reconnect_failed')
+
+    disconnect('transport close')
+    reconnectAttempt()
+    reconnectAttempt()
+    connect()
+    expect(socket.emit).toHaveBeenCalledWith('canonical_telemetry', expect.objectContaining({
+      name: 'canonical_reconnect', outcome: 'recovered', attempts: 2,
+    }))
+
+    disconnect('transport close')
+    reconnectAttempt()
+    reconnectFailed()
+    expect(socket.emit).toHaveBeenCalledWith('canonical_telemetry', expect.objectContaining({
+      name: 'canonical_reconnect', outcome: 'exhausted', attempts: 1,
+    }))
   })
 
   it('subscribes chunk events when chunk streaming is enabled', () => {
@@ -243,7 +282,10 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(ioMock).toHaveBeenCalledWith('http://localhost:3001', expect.objectContaining({
       auth: expect.any(Function),
       autoConnect: false,
-      reconnection: false,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5_000,
     }))
 
     const protocol = registeredHandler<(payload: { selectedProtocolVersion: 1 | 2 }) => void>(socket, 'quilt_protocol')
@@ -268,6 +310,32 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(onTileRemoved).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects v1 negotiation when canonical entry requires v2', () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+    const onProtocolMismatch = vi.fn()
+    const parameters: unknown[] = [
+      'http://localhost:3001',
+      'canonical-session',
+      'client-1',
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    ]
+    while (parameters.length < 23) parameters.push(undefined)
+    parameters[21] = accessTokenProvider
+    parameters[23] = true
+    parameters[24] = onProtocolMismatch
+    const invokeHook = useSocketConnection as unknown as (...args: unknown[]) => ReturnType<typeof useSocketConnection>
+    renderHook(() => invokeHook(...parameters))
+
+    const protocol = registeredHandler<(payload: { selectedProtocolVersion: 1 | 2 }) => void>(socket, 'quilt_protocol')
+    protocol({ selectedProtocolVersion: 1 })
+
+    expect(socket.disconnect).toHaveBeenCalledTimes(1)
+    expect(onProtocolMismatch).toHaveBeenCalledTimes(1)
+  })
+
   it('supplies the current token through Socket.IO auth without putting it in the URL', async () => {
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)
@@ -287,8 +355,12 @@ describe('useSocketConnection collaboration subscriptions', () => {
 
     expect(callback).toHaveBeenCalledWith(expect.objectContaining({
       token: 'access-token',
-      sessionId: 'session-1',
+      quiltId: 'session-1',
       clientId: 'client-1',
+      schemaVersion: '2.0.0',
+      protocolVersion: 2,
+      canonicalGeneration: 1,
+      entryAttemptId: expect.any(String),
     }))
     expect(ioMock.mock.calls[0]?.[0]).toBe('https://api.example.test')
     expect(ioMock.mock.calls[0]?.[0]).not.toContain('access-token')
@@ -317,5 +389,31 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(acquireAccessToken).toHaveBeenCalledTimes(1)
     expect(acquireAccessToken).toHaveBeenCalledWith({ forceRefresh: true })
     expect(onAuthLoss).toHaveBeenCalledWith('authentication_failed', expect.any(Error))
+  })
+
+  it('advances the connection epoch after an ordinary reconnect', () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+    const onConnectionEpoch = vi.fn()
+    const parameters: unknown[] = [
+      'https://api.example.test',
+      'session-1',
+      'client-1',
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    ]
+    while (parameters.length < 26) parameters.push(undefined)
+    parameters[21] = accessTokenProvider
+    parameters[25] = onConnectionEpoch
+    const invokeHook = useSocketConnection as unknown as (...args: unknown[]) => ReturnType<typeof useSocketConnection>
+    renderHook(() => invokeHook(...parameters))
+
+    const connect = registeredHandler<() => void>(socket, 'connect')
+    connect()
+    connect()
+
+    expect(onConnectionEpoch).toHaveBeenNthCalledWith(1, 1)
+    expect(onConnectionEpoch).toHaveBeenNthCalledWith(2, 2)
   })
 })

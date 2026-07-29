@@ -1,13 +1,11 @@
-import type { CanvasSizePreset, CreateSessionResponse, OwnershipCommandResponse } from '../../../server/src/contracts'
+import type {
+  CanonicalPatchNavigation,
+  CanonicalWorldDescriptor,
+  EligibleCanonicalPatchesResponse,
+  OwnershipCommandResponse,
+} from '../../../server/src/contracts'
 
-const SESSION_STORAGE_KEY = 'zzyix_session_id'
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
-
-export type CreateSessionOptions = {
-  canvasPreset: CanvasSizePreset
-}
-
-export type CreatedSession = CreateSessionResponse
 
 export type ChunkId = `${number}:${number}`
 
@@ -19,56 +17,6 @@ export const parseChunkId = (chunkId: ChunkId): { x: number; y: number } => {
     x: Number(rawX),
     y: Number(rawY),
   }
-}
-
-export type SessionSummary = {
-  id: string
-  displayName: string
-  connectedUserCount: number
-  canvasSize: {
-    width: number
-    height: number
-  }
-}
-
-type ListSessionsResponse = {
-  sessions: Array<{
-    id: string
-    displayName?: string
-    connectedUserCount?: number
-    participantCount?: number
-    canvasSize?: {
-      width?: number
-      height?: number
-    }
-  }>
-}
-
-export const getStoredSessionId = (): string | null => sessionStorage.getItem(SESSION_STORAGE_KEY)
-
-export const setStoredSessionId = (sessionId: string): void => {
-  sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId)
-}
-
-export const clearStoredSessionId = (): void => {
-  sessionStorage.removeItem(SESSION_STORAGE_KEY)
-}
-
-export const createSession = async (
-  authenticatedFetch: typeof fetch,
-  apiOrigin: string,
-  options?: CreateSessionOptions,
-): Promise<CreatedSession> => {
-  const response = await authenticatedFetch(`${apiOrigin}/sessions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(options ?? {}),
-  })
-  if (!response.ok) throw new Error(`Failed to create session: ${response.status}`)
-
-  return response.json() as Promise<CreatedSession>
 }
 
 export const claimPatch = async (
@@ -87,44 +35,56 @@ export const claimPatch = async (
   }
 }
 
-export const listSessions = async (authenticatedFetch: typeof fetch, apiOrigin: string): Promise<SessionSummary[]> => {
-  const response = await authenticatedFetch(`${apiOrigin}/sessions`, { method: 'GET' })
-  if (!response.ok) throw new Error(`Failed to list sessions: ${response.status}`)
+export const discoverCanonicalWorld = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+): Promise<CanonicalWorldDescriptor> => {
+  const response = await authenticatedFetch(`${apiOrigin}/quilts/canonical`, { method: 'GET' })
+  if (!response.ok) throw new Error(`Canonical world is unavailable (${response.status})`)
 
-  const data = (await response.json()) as ListSessionsResponse
-  const sessions = Array.isArray(data.sessions) ? data.sessions : []
+  const descriptor = await response.json() as Partial<CanonicalWorldDescriptor>
+  if (descriptor.protocolVersion !== 2 || typeof descriptor.quiltId !== 'string' || descriptor.quiltId === '') {
+    throw new Error('Canonical world descriptor is invalid')
+  }
 
-  return sessions
-    .filter((session): session is ListSessionsResponse['sessions'][number] => typeof session.id === 'string' && session.id.length > 0)
-    .map((session) => {
-      const connectedUserCount = Number.isFinite(session.connectedUserCount)
-        ? Number(session.connectedUserCount)
-        : Number.isFinite(session.participantCount)
-          ? Number(session.participantCount)
-          : 0
-
-      const width = Number.isFinite(session.canvasSize?.width) ? Number(session.canvasSize?.width) : 0
-      const height = Number.isFinite(session.canvasSize?.height) ? Number(session.canvasSize?.height) : 0
-
-      return {
-        id: session.id,
-        displayName: session.displayName?.trim() ? session.displayName : `Canvas ${session.id.slice(0, 8)}`,
-        connectedUserCount,
-        canvasSize: {
-          width,
-          height,
-        },
-      }
-    })
+  return descriptor as CanonicalWorldDescriptor
 }
 
-export const ensureSession = async (authenticatedFetch: typeof fetch, apiOrigin: string): Promise<string> => {
-  const stored = getStoredSessionId()
-  if (stored) return stored
+export const discoverEligibleCanonicalPatches = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+): Promise<EligibleCanonicalPatchesResponse> => {
+  const response = await authenticatedFetch(`${apiOrigin}/quilts/canonical/patches/eligible`, { method: 'GET' })
+  if (!response.ok) throw new Error(`Eligible patches are unavailable (${response.status})`)
+  return response.json() as Promise<EligibleCanonicalPatchesResponse>
+}
 
-  const created = await createSession(authenticatedFetch, apiOrigin)
-  setStoredSessionId(created.session.id)
-  return created.session.id
+export const resolveCanonicalPatchNavigation = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+  quiltId: string,
+  patchId: string,
+): Promise<CanonicalPatchNavigation> => {
+  const response = await authenticatedFetch(
+    `${apiOrigin}/quilts/${encodeURIComponent(quiltId)}/patches/${encodeURIComponent(patchId)}/navigation`,
+    { method: 'GET' },
+  )
+  if (!response.ok) throw new Error(`Patch navigation is unavailable (${response.status})`)
+  return response.json() as Promise<CanonicalPatchNavigation>
+}
+
+export const getCanonicalPatchLink = (): { quiltId: string; patchId: string } | null => {
+  const params = new URLSearchParams(window.location.search)
+  const quiltId = params.get('quilt')
+  const patchId = params.get('patch')
+  return quiltId && patchId ? { quiltId, patchId } : null
+}
+
+export const setCanonicalPatchLink = (navigation: CanonicalPatchNavigation): void => {
+  const url = new URL(window.location.href)
+  url.searchParams.set('quilt', navigation.quiltId)
+  url.searchParams.set('patch', navigation.patchId)
+  window.history.replaceState(window.history.state, '', url)
 }
 
 export const ensureClientId = (): string => {

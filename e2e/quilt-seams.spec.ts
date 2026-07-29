@@ -7,6 +7,7 @@ import type {
   ServerToClientEvents,
   SubscribeQuiltAreaAck,
 } from '../apps/server/src/contracts'
+import { resetSharedCanvasState } from './support/testState'
 
 const SERVER_URL = process.env.E2E_SERVER_URL ?? 'http://127.0.0.1:3101'
 const OIDC_ISSUER = 'http://127.0.0.1:3199/'
@@ -41,9 +42,17 @@ const issueToken = async (subject: string): Promise<string> => {
   return (await response.json() as { access_token: string }).access_token
 }
 
-const connect = async (canvasId: string, token: string): Promise<{ socket: TestSocket; protocol: QuiltProtocolHandshake }> => {
+const connect = async (quiltId: string, token: string): Promise<{ socket: TestSocket; protocol: QuiltProtocolHandshake }> => {
   const socket: TestSocket = io(SERVER_URL, {
-    auth: { token, sessionId: canvasId, clientId: `seam-${crypto.randomUUID()}`, protocolVersion: 2 },
+    auth: {
+      token,
+      quiltId,
+      clientId: `seam-${crypto.randomUUID()}`,
+      schemaVersion: '2.0.0',
+      protocolVersion: 2,
+      canonicalGeneration: 1,
+      entryAttemptId: crypto.randomUUID(),
+    },
     transports: ['websocket'],
     reconnection: false,
     autoConnect: false,
@@ -68,20 +77,19 @@ const subscribe = (socket: TestSocket, quiltId: string, rooms: Array<{ requestId
 test('canonical room aliases stay deduplicated across one-axis seams, corners, repeated laps, and reconnect', async ({ request }, testInfo) => {
   const setup = await request.post(`${SERVER_URL}/test/quilt/setup`, {
     headers: { 'x-zzyix-test-token': TOKEN },
-    data: { externalSubject: `e2e-seam-owner-${crypto.randomUUID()}` },
+    data: { externalSubject: `e2e-seam-owner-${crypto.randomUUID()}`, claimEnabled: true },
   })
   expect(setup.ok()).toBeTruthy()
-  const { canvasId, quiltId, externalSubject } = await setup.json() as {
-    canvasId: string
+  const { quiltId, externalSubject } = await setup.json() as {
     quiltId: string
     externalSubject: string
   }
   const ownerToken = await issueToken(externalSubject)
-  const { socket, protocol } = await connect(canvasId, ownerToken)
+  const { socket, protocol } = await connect(quiltId, ownerToken)
 
   expect(protocol.selectedProtocolVersion).toBe(2)
   expect(protocol.topology?.topology).toBe('toroidal')
-  expect(protocol.mutationEnabled).toBe(false)
+  expect(protocol.mutationEnabled).toBe(true)
 
   const snapshotPromise = once<QuiltScopedSnapshotPayload>(socket, 'quilt_patch_snapshot')
   const aliases = await subscribe(socket, quiltId, [
@@ -109,7 +117,7 @@ test('canonical room aliases stay deduplicated across one-axis seams, corners, r
   })
 
   socket.disconnect()
-  const { socket: reconnected } = await connect(canvasId, await issueToken(externalSubject))
+  const { socket: reconnected } = await connect(quiltId, await issueToken(externalSubject))
   const recovered = await subscribe(reconnected, quiltId, [
     { requestId: 'reconnect-alias', row: -20_000, column: 20_000 },
   ], aliases.acceptedCursors)
@@ -117,12 +125,10 @@ test('canonical room aliases stay deduplicated across one-axis seams, corners, r
   reconnected.disconnect()
 })
 
-test('client traversal stays finite across deterministic seams and multiple laps', async ({ page }, testInfo) => {
+test('client traversal stays finite across deterministic seams and multiple laps', async ({ page, request }, testInfo) => {
+  await resetSharedCanvasState(request, { createCanonicalWorld: true })
   await page.addInitScript((subject) => localStorage.setItem('zzyix:e2e-subject', subject), `e2e-quilt-traversal-${crypto.randomUUID()}`)
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
-  await page.getByRole('button', { name: 'Create Canvas' }).click()
-  await page.getByRole('button', { name: 'Claim Patch' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
 
   const gridOff = await page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState())
@@ -133,8 +139,8 @@ test('client traversal stays finite across deterministic seams and multiple laps
   expect(initial?.grid.enabled).toBe(true)
   expect(initial?.grid.patternId).toBeDefined()
 
-  const worldWidth = 62.4
-  const worldHeight = 40.8
+  const worldWidth = 998.4
+  const worldHeight = 652.8
   const traversal = [
     { x: worldWidth - 0.1, y: worldHeight / 2 },
     { x: worldWidth + 0.1, y: worldHeight / 2 },

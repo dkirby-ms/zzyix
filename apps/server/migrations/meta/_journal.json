@@ -50,6 +50,20 @@
       "when": 1785282520642,
       "tag": "0006_authentication_authorization",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785360374754,
+      "tag": "0007_canonical_world",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785361486397,
+      "tag": "0008_nostalgic_maximus",
+      "breakpoints": true
     }
   ]
 }

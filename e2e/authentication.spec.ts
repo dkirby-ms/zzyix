@@ -1,10 +1,15 @@
 import { decodeJwt } from 'jose'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { io } from 'socket.io-client'
+import { resetSharedCanvasState } from './support/testState'
 
 const SERVER_URL = 'http://127.0.0.1:3101'
 const TOKEN_URL = 'http://127.0.0.1:3199/token'
 const TEST_RESET_TOKEN = process.env.E2E_RESET_TOKEN ?? 'zzyix-e2e-token'
+
+test.beforeEach(async ({ request }) => {
+  await resetSharedCanvasState(request, { createCanonicalWorld: true })
+})
 
 const requestAccessToken = async (request: APIRequestContext, subject: string): Promise<string> => {
   const response = await request.post(TOKEN_URL, { data: { subject } })
@@ -34,12 +39,8 @@ test('signs in, creates a session, claims its patch, and places through the prod
   await page.goto('/')
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
-
-  await page.getByRole('button', { name: 'Create Canvas' }).click()
-  await expect(page.getByRole('button', { name: 'Claim Patch' })).toBeVisible()
-  await page.getByRole('button', { name: 'Claim Patch' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
+  await page.getByRole('button', { name: /^Claim / }).first().click()
   const canvas = page.locator('canvas')
   await canvas.hover()
   await canvas.click()
@@ -51,7 +52,7 @@ test('signs in, creates a session, claims its patch, and places through the prod
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Mosaic Atelier' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
+  await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
 })
 
 test('renews after signed token expiry and keeps protected state available', async ({ page }) => {
@@ -73,9 +74,6 @@ test('renews after signed token expiry and keeps protected state available', asy
     localStorage.setItem('zzyix:e2e-token-lifetime-seconds', '4')
   }, `e2e-renewal-${crypto.randomUUID()}`)
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
-  await page.getByRole('button', { name: 'Create Canvas' }).click()
-  await page.getByRole('button', { name: 'Claim Patch' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
   await expect.poll(() => tokenRequests, {
     message: 'startup token acquisition should settle before measuring renewal',
@@ -114,9 +112,6 @@ test('clears protected browser state when forced token renewal fails', async ({ 
     localStorage.setItem('zzyix:e2e-token-lifetime-seconds', '2')
   }, `e2e-failed-renewal-${crypto.randomUUID()}`)
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
-  await page.getByRole('button', { name: 'Create Canvas' }).click()
-  await page.getByRole('button', { name: 'Claim Patch' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
   rejectRenewal = true
 
@@ -202,5 +197,5 @@ test('keeps protected content hidden when no authenticated session exists', asyn
   await page.reload()
 
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Canonical patch navigation' })).toHaveCount(0)
 })

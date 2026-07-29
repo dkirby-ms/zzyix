@@ -376,6 +376,17 @@ const ViewportReporter = ({
   return null
 }
 
+const CameraPositionController = ({ position }: { position: { x: number; y: number } }) => {
+  const { camera } = useThree()
+
+  useEffect(() => {
+    camera.position.x = position.x
+    camera.position.y = position.y
+  }, [camera, position.x, position.y])
+
+  return null
+}
+
 const SceneContents = ({
   tiles,
   activeShape,
@@ -523,6 +534,7 @@ const SceneContents = ({
         maxPolarAngle={Math.PI / 2}
         target={[cameraPan.x, cameraPan.y, 0]}
       />
+      <CameraPositionController position={cameraPan} />
     </>
   )
 }
@@ -553,10 +565,12 @@ export const MosaicScene = ({
   const centerX = (resolvedBounds.minX + resolvedBounds.maxX) / 2
   const centerY = (resolvedBounds.minY + resolvedBounds.maxY) / 2
   const maxDimension = Math.max(width, height)
-  const initialZoom = Math.max(
-    cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom,
-    Math.min(cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom, 58 * (10.4 / Math.max(10.4, maxDimension))),
-  )
+  const initialZoom = topology
+    ? Math.min(cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom, 58)
+    : Math.max(
+        cameraPolicy?.minZoom ?? DEFAULT_CAMERA_POLICY.minZoom,
+        Math.min(cameraPolicy?.maxZoom ?? DEFAULT_CAMERA_POLICY.maxZoom, 58 * (10.4 / Math.max(10.4, maxDimension))),
+      )
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {

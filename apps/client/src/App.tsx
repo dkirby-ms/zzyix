@@ -29,22 +29,21 @@ import { ensureClientId } from './network/session'
 import { derivePlacementBounds } from './domain/placementSolver'
 import {
   claimPatch,
-  createSession,
-  getStoredSessionId,
-  listSessions,
-  setStoredSessionId,
-  type CreateSessionOptions,
-  type CreatedSession,
-  type SessionSummary,
+  discoverCanonicalWorld,
+  discoverEligibleCanonicalPatches,
+  getCanonicalPatchLink,
+  resolveCanonicalPatchNavigation,
+  setCanonicalPatchLink,
 } from './network/session'
 import { resolveCanvasDebug } from './config/debugFlags'
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
+import type { AuthLossReason } from './network/authenticatedFetch'
 import { StatusIndicator } from './ui/StatusIndicator'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
   BoundsPolicy,
-  CanvasSizePreset,
+  CanonicalPatchNavigation,
   ClientJoinedPayload,
   ClientLeftPayload,
   PlaceTileAck,
@@ -71,12 +70,12 @@ import type {
   QuiltRemoveTileRequest,
   QuiltScopedSnapshotPayload,
   QuiltTopologyHandshake,
+  CanonicalWorldDescriptor,
 } from '../../server/src/contracts'
 import { decomposeWrappedViewport } from '../../server/src/domain/quiltTopology'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
 import { GridOverlayControls } from './ui/GridOverlayControls'
-import { LobbyScreen } from './ui/LobbyScreen'
 import { AppHeader } from './ui/AppHeader'
 import { palettes } from './ui/palettes'
 import { resolvePaletteColorSelection } from './ui/palettes'
@@ -421,16 +420,14 @@ function ProtectedApp() {
     panSensitivity: 0.02,
   })
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [mode, setMode] = useState<'lobby' | 'canvas'>('lobby')
-  const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [lobbyLoading, setLobbyLoading] = useState(false)
-  const [lobbyError, setLobbyError] = useState<string | null>(null)
-  const [creatingSession, setCreatingSession] = useState(false)
-  const [claimingPatch, setClaimingPatch] = useState(false)
-  const [pendingClaim, setPendingClaim] = useState<CreatedSession | null>(null)
-  const [selectedCanvasPreset, setSelectedCanvasPreset] = useState<CanvasSizePreset>('expanded')
-  const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
-  const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
+  const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
+  const [canonicalError, setCanonicalError] = useState<string | null>(null)
+  const [canonicalDescriptor, setCanonicalDescriptor] = useState<CanonicalWorldDescriptor | null>(null)
+  const [canonicalPatches, setCanonicalPatches] = useState<CanonicalPatchNavigation[]>([])
+  const [canonicalNavigationError, setCanonicalNavigationError] = useState<string | null>(null)
+  const [canonicalNavigationLoading, setCanonicalNavigationLoading] = useState(false)
+  const [canonicalClaimingPatchId, setCanonicalClaimingPatchId] = useState<string | null>(null)
+  const [focusedCanonicalPatch, setFocusedCanonicalPatch] = useState<CanonicalPatchNavigation | null>(null)
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
@@ -438,6 +435,7 @@ function ProtectedApp() {
   const [quiltProtocol, setQuiltProtocol] = useState<QuiltProtocolHandshake | null>(null)
   const [quiltCache, setQuiltCache] = useState<QuiltCacheState>(createQuiltCache)
   const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
+  const [connectionEpoch, setConnectionEpoch] = useState(0)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
   const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
   const activeTileRef = useRef(activeTileUiState.activeTile)
@@ -472,6 +470,7 @@ function ProtectedApp() {
   })
   const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const clientId = useMemo(() => ensureClientId(), [])
+  const entryAttemptId = useMemo(() => crypto.randomUUID(), [])
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
@@ -537,88 +536,152 @@ function ProtectedApp() {
     selectedGridPatternId,
   ])
 
-  const loadSessions = useCallback(async (): Promise<void> => {
-    setLobbyLoading(true)
-    setLobbyError(null)
+  const clearProtectedWorldState = useCallback((): void => {
+    setSessionId(null)
+    setCanonicalDescriptor(null)
+    setCanonicalPatches([])
+    setCanonicalNavigationError(null)
+    setCanonicalNavigationLoading(false)
+    setCanonicalClaimingPatchId(null)
+    setFocusedCanonicalPatch(null)
+    setRealtimeCapabilities(null)
+    setQuiltProtocol(null)
+    setQuiltCache(createQuiltCache())
+    setSequencedState(createInitialSequencedTilesState())
+    quiltCursorsRef.current = {}
+    subscribedChunkIdsRef.current = new Set()
+    lastChunkViewportRef.current = null
+    setActiveChunkIds([])
+    setCollaborators({})
+    setWorldBounds(DEFAULT_WORLD_BOUNDS)
+    setConnectionEpoch(0)
+  }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    clearProtectedWorldState()
+    setCanonicalError(null)
+
+    setMode('canonical-loading')
+    const enterCanonicalWorld = async (): Promise<void> => {
+      try {
+        const descriptor = await discoverCanonicalWorld(auth.authenticatedFetch, auth.apiOrigin)
+        if (!cancelled) {
+          setCanonicalDescriptor(descriptor)
+          setSessionId(descriptor.quiltId)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          clearProtectedWorldState()
+          setCanonicalError(error instanceof Error ? error.message : 'Canonical world is unavailable')
+          setMode('canonical-unavailable')
+        }
+      }
+    }
+    void enterCanonicalWorld()
+    return () => { cancelled = true }
+  }, [auth.apiOrigin, auth.authenticatedFetch, clearProtectedWorldState])
+
+  const focusCanonicalPatch = useCallback((navigation: CanonicalPatchNavigation): void => {
+    setFocusedCanonicalPatch(navigation)
+    setCameraPan({ x: navigation.centerX, y: navigation.centerY })
+    setCanonicalPatchLink(navigation)
+  }, [])
+
+  const loadCanonicalPatches = useCallback(async (): Promise<void> => {
+    setCanonicalNavigationLoading(true)
+    setCanonicalNavigationError(null)
     try {
-      const listedSessions = await listSessions(auth.authenticatedFetch, auth.apiOrigin)
-      setSessions(listedSessions)
+      const result = await discoverEligibleCanonicalPatches(auth.authenticatedFetch, auth.apiOrigin)
+      setCanonicalPatches(result.patches)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to load canvases'
-      setLobbyError(message)
+      setCanonicalPatches([])
+      setCanonicalNavigationError(error instanceof Error ? error.message : 'Eligible patches are unavailable')
     } finally {
-      setLobbyLoading(false)
+      setCanonicalNavigationLoading(false)
     }
   }, [auth.apiOrigin, auth.authenticatedFetch])
 
   useEffect(() => {
-    setSessionId(null)
-    setMode('lobby')
-    setPreviousSessionId(getStoredSessionId())
-    void loadSessions()
-  }, [loadSessions])
+    if (!canonicalDescriptor?.quiltId) return
 
-  const enterCanvas = useCallback((nextSessionId: string): void => {
-    setStoredSessionId(nextSessionId)
-    setPreviousSessionId(nextSessionId)
-    setSessionId(nextSessionId)
-    setMode('canvas')
-  }, [])
-
-  const returnToLobby = useCallback((): void => {
-    setMode('lobby')
-    setSessionId(null)
-    setRealtimeCapabilities(null)
-    setQuiltProtocol(null)
-    setQuiltCache(createQuiltCache())
-    quiltCursorsRef.current = {}
-    setActiveChunkIds([])
-    setCollaborators({})
-  }, [])
-
-  const handleJoinSession = useCallback((nextSessionId: string): void => {
-    setJoiningSessionId(nextSessionId)
-    try {
-      enterCanvas(nextSessionId)
-    } finally {
-      setJoiningSessionId(null)
+    let cancelled = false
+    const rootPatch: CanonicalPatchNavigation = {
+      quiltId: canonicalDescriptor.quiltId,
+      patchId: canonicalDescriptor.initialPatch.id,
+      row: canonicalDescriptor.initialPatch.row,
+      column: canonicalDescriptor.initialPatch.column,
+      centerX: canonicalDescriptor.originX + (canonicalDescriptor.initialPatch.column + 0.5) * canonicalDescriptor.patchWidth,
+      centerY: canonicalDescriptor.originY + (canonicalDescriptor.initialPatch.row + 0.5) * canonicalDescriptor.patchHeight,
     }
-  }, [enterCanvas])
+    const durableLink = getCanonicalPatchLink()
 
-  const handleCreateSession = useCallback(async (): Promise<void> => {
-    setCreatingSession(true)
-    setLobbyError(null)
+    if (!durableLink || durableLink.quiltId !== canonicalDescriptor.quiltId) {
+      focusCanonicalPatch(rootPatch)
+    } else {
+      void resolveCanonicalPatchNavigation(
+        auth.authenticatedFetch,
+        auth.apiOrigin,
+        durableLink.quiltId,
+        durableLink.patchId,
+      ).then((navigation) => {
+        if (!cancelled) focusCanonicalPatch(navigation)
+      }).catch(() => {
+        if (!cancelled) focusCanonicalPatch(rootPatch)
+      })
+    }
 
+    void loadCanonicalPatches()
+    return () => { cancelled = true }
+  }, [
+    auth.apiOrigin,
+    auth.authenticatedFetch,
+    canonicalDescriptor,
+    focusCanonicalPatch,
+    loadCanonicalPatches,
+  ])
+
+  useEffect(() => {
+    if (connectionEpoch <= 1 || !canonicalDescriptor) return
+
+    let cancelled = false
+    void discoverCanonicalWorld(auth.authenticatedFetch, auth.apiOrigin)
+      .then((descriptor) => {
+        if (cancelled || descriptor.generation === canonicalDescriptor.generation) return
+        clearProtectedWorldState()
+        setCanonicalDescriptor(descriptor)
+        setSessionId(descriptor.quiltId)
+        setMode('canonical-loading')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        clearProtectedWorldState()
+        setCanonicalError(error instanceof Error ? error.message : 'Canonical world is unavailable')
+        setMode('canonical-unavailable')
+      })
+
+    return () => { cancelled = true }
+  }, [
+    auth.apiOrigin,
+    auth.authenticatedFetch,
+    canonicalDescriptor,
+    clearProtectedWorldState,
+    connectionEpoch,
+  ])
+
+  const handleCanonicalClaim = useCallback(async (navigation: CanonicalPatchNavigation): Promise<void> => {
+    setCanonicalClaimingPatchId(navigation.patchId)
+    setCanonicalNavigationError(null)
     try {
-      const createOptions: CreateSessionOptions = {
-        canvasPreset: selectedCanvasPreset,
-      }
-      const created = await createSession(auth.authenticatedFetch, auth.apiOrigin, createOptions)
-      setPendingClaim(created)
+      await claimPatch(auth.authenticatedFetch, auth.apiOrigin, navigation.patchId)
+      focusCanonicalPatch(navigation)
+      await loadCanonicalPatches()
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create canvas'
-      setLobbyError(message)
+      setCanonicalNavigationError(error instanceof Error ? error.message : 'Failed to claim patch')
     } finally {
-      setCreatingSession(false)
+      setCanonicalClaimingPatchId(null)
     }
-  }, [auth.apiOrigin, auth.authenticatedFetch, selectedCanvasPreset])
-
-  const handleClaimPatch = useCallback(async (): Promise<void> => {
-    if (!pendingClaim) return
-    setClaimingPatch(true)
-    setLobbyError(null)
-    try {
-      await claimPatch(auth.authenticatedFetch, auth.apiOrigin, pendingClaim.claimTarget.patchId)
-      const claimedSessionId = pendingClaim.session.id
-      setPendingClaim(null)
-      enterCanvas(claimedSessionId)
-    } catch (error) {
-      setLobbyError(error instanceof Error ? error.message : 'Failed to claim canvas patch')
-    } finally {
-      setClaimingPatch(false)
-    }
-  }, [auth.apiOrigin, auth.authenticatedFetch, enterCanvas, pendingClaim])
+  }, [auth.apiOrigin, auth.authenticatedFetch, focusCanonicalPatch, loadCanonicalPatches])
 
   const triggerInvalidPulse = useCallback((): void => {
     setInvalidPulse(true)
@@ -656,7 +719,19 @@ function ProtectedApp() {
       minY: 0,
       maxY: payload.topology.patchRows * payload.topology.patchHeight,
     })
+    setMode('canvas')
   }, [])
+
+  const onCanonicalProtocolMismatch = useCallback((): void => {
+    clearProtectedWorldState()
+    setCanonicalError('This canvas does not support the required protocol version.')
+    setMode('canonical-unavailable')
+  }, [clearProtectedWorldState])
+
+  const onSocketAuthLoss = useCallback((reason: AuthLossReason, error?: unknown): void => {
+    clearProtectedWorldState()
+    auth.handleAuthLoss(reason, error)
+  }, [auth, clearProtectedWorldState])
 
   const onQuiltPatchSnapshot = useCallback((payload: QuiltScopedSnapshotPayload): void => {
     quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
@@ -974,7 +1049,7 @@ function ProtectedApp() {
 
   const socketRef = useSocketConnection(
     auth.apiOrigin,
-    sessionId,
+    canonicalDescriptor,
     clientId,
     onSnapshot,
     onTilePlaced,
@@ -995,7 +1070,11 @@ function ProtectedApp() {
     onQuiltPatchEvent,
     onQuiltPatchResyncRequired,
     auth.acquireAccessToken,
-    auth.handleAuthLoss,
+    onSocketAuthLoss,
+    true,
+    onCanonicalProtocolMismatch,
+    setConnectionEpoch,
+    entryAttemptId,
   )
 
   const connectionState = useConnectionStatus(socketRef)
@@ -1007,6 +1086,9 @@ function ProtectedApp() {
       const socket = socketActionRef.current
       if (!socket?.connected) return
       socket.emit('quilt_client_runtime_metrics', {
+        sampleId: crypto.randomUUID(),
+        entryAttemptId,
+        canonicalGeneration: canonicalDescriptor?.generation ?? 0,
         quiltId: quiltProtocol.topology!.quiltId,
         retainedPatchCount: Object.keys(quiltCache.patches).length,
         retainedTileCount: visibleTiles.length,
@@ -1015,7 +1097,7 @@ function ProtectedApp() {
     }, 10_000)
 
     return () => window.clearInterval(intervalId)
-  }, [quiltCache.patches, quiltProtocol, visibleTiles.length])
+  }, [canonicalDescriptor?.generation, entryAttemptId, quiltCache.patches, quiltProtocol, visibleTiles.length])
 
   const onViewportChanged = useCallback((payload: {
     center: { x: number; y: number }
@@ -1093,14 +1175,28 @@ function ProtectedApp() {
       chunkIds: entry.chunks,
     }))
 
+    const resubscribeAttemptId = crypto.randomUUID()
+    const resubscribeStartedAt = performance.now()
     socket.emit('subscribe_quilt_area', {
       quiltId: topology.quiltId,
       rooms,
       cursors: selectQuiltCursors(quiltCache),
     }, (ack) => {
       quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
+      const acceptedRooms = ack.outcomes.filter((outcome) => outcome.status === 'accepted').length
+      const resyncRequired = ack.outcomes.filter((outcome) => outcome.status === 'accepted' && outcome.cursor === undefined).length
+      socket.emit('canonical_telemetry', {
+        name: 'canonical_resubscribe',
+        attemptId: resubscribeAttemptId,
+        outcome: ack.outcomes.every((outcome) => outcome.status === 'accepted') ? 'completed' : 'failed',
+        durationMs: performance.now() - resubscribeStartedAt,
+        requestedRooms: rooms.length,
+        acceptedRooms,
+        rejectedRooms: ack.outcomes.length - acceptedRooms,
+        resyncRequired,
+      })
     })
-  }, [activeChunkIds, quiltCache, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
+  }, [activeChunkIds, connectionEpoch, quiltCache, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
 
   useEffect(() => {
     const socket = socketActionRef.current
@@ -1520,9 +1616,7 @@ function ProtectedApp() {
         ...sceneMetricsRef.current,
       },
     }),
-    joinSession: (nextSessionId) => {
-      handleJoinSession(nextSessionId)
-    },
+    joinSession: () => {},
     setActiveTile: (patch) => {
       dispatchActiveTileUi({ type: 'patch-active-tile', patch })
     },
@@ -1611,6 +1705,74 @@ function ProtectedApp() {
         }
       }
 
+      if (isQuiltV2) {
+        const topology = quiltProtocol?.topology
+        const tileId = createServerTileId()
+        const quiltTile = { ...result.placed, id: tileId, placedBy: clientId }
+        const patchIds = topology ? findAffectedCachedPatchIds(quiltCache, quiltTile, topology) : null
+        if (!quiltProtocol?.mutationEnabled || !topology || !patchIds || patchIds.length === 0) {
+          triggerInvalidPulse()
+          return { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' as const }
+        }
+        const revisions = expectedPatchRevisions(quiltCache, patchIds)
+        if (Object.keys(revisions).length !== patchIds.length) {
+          triggerInvalidPulse()
+          return { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' as const }
+        }
+        if (input.expectedRevisionOverride !== undefined) {
+          for (const patchId of patchIds) revisions[patchId] = input.expectedRevisionOverride
+        }
+
+        setQuiltCache((previous) => setQuiltOptimisticTile(previous, patchIds, quiltTile, crypto.randomUUID()))
+        const ack = await new Promise<QuiltPlaceTileAck>((resolve) => {
+          socket.emit('quilt_place_tile', {
+            quiltId: topology.quiltId,
+            operationId: crypto.randomUUID(),
+            expectedPatchRevisions: revisions,
+            tile: {
+              tileId,
+              shape: quiltTile.shape,
+              color: quiltTile.color,
+              material: quiltTile.material,
+              transform: quiltTile.transform,
+            },
+          }, resolve)
+        })
+
+        setQuiltCache((previous) => {
+          const cleared = clearQuiltOptimisticTile(previous, tileId)
+          if (ack.status === 'rejected') return cleared
+          return patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, {
+            ...ack.tile,
+            placedBy: clientId,
+          }, {
+            patchId,
+            opSeq: ack.patchRevisions[patchId],
+            revision: ack.patchRevisions[patchId],
+            eventId: ack.eventIds[patchId],
+          }), cleared)
+        })
+
+        if (ack.status === 'rejected') {
+          if (ack.code === 'STALE_REVISION') {
+            clientTelemetryRef.current.resyncEvents += 1
+            setQuiltSubscriptionEpoch((previous) => previous + 1)
+          }
+          triggerInvalidPulse()
+          return {
+            placed: null,
+            rejected: true,
+            reason: ack.code === 'STALE_REVISION' ? 'STALE_REVISION' as const : 'PLACEMENT_REJECTED' as const,
+          }
+        }
+        return {
+          placed: ack.tile,
+          rejected: false,
+          opSeq: Math.max(...Object.values(ack.patchRevisions)),
+          newRevision: Math.max(...Object.values(ack.patchRevisions)),
+        }
+      }
+
       const payload: PlaceTilePayload = {
         tileId: createServerTileId(),
         shape: tempTile.shape,
@@ -1645,13 +1807,14 @@ function ProtectedApp() {
     connectionState.status,
     emitPointerMove,
     emitSelectionUpdate,
-    handleJoinSession,
     gridOverlayEnabled,
+    isQuiltV2,
     mode,
     placeFromState,
     resolveGhostFromPointer,
     sequencedState.revision,
     quiltCache,
+    quiltProtocol,
     selectedGridPatternId,
     visibleTiles,
     sessionId,
@@ -1660,31 +1823,19 @@ function ProtectedApp() {
     updatePointer,
   ])
 
-  const content = mode === 'lobby' ? (
-    <main className="lobby-shell">
-      <div className="backdrop-gradient" />
-      <LobbyScreen
-        sessions={sessions}
-        loading={lobbyLoading}
-        error={lobbyError}
-        previousSessionId={previousSessionId}
-        creating={creatingSession}
-        claiming={claimingPatch}
-        pendingClaim={pendingClaim}
-        joiningSessionId={joiningSessionId}
-        onRefresh={() => void loadSessions()}
-        selectedCanvasPreset={selectedCanvasPreset}
-        onCanvasPresetChange={setSelectedCanvasPreset}
-        onCreate={() => void handleCreateSession()}
-        onClaim={() => void handleClaimPatch()}
-        onJoin={handleJoinSession}
-      />
+  const content = mode === 'canonical-loading' ? (
+    <main className="auth-shell" aria-live="polite">Loading the canonical canvas...</main>
+  ) : mode === 'canonical-unavailable' ? (
+    <main className="auth-shell" role="alert">
+      <section className="auth-panel">
+        <h1>Canvas unavailable</h1>
+        <p>{canonicalError ?? 'The canonical canvas is temporarily unavailable.'}</p>
+      </section>
     </main>
   ) : (
     <main className={invalidPulse ? 'app-shell invalid-pulse' : 'app-shell'}>
       <div className="backdrop-gradient" />
       <AppHeader
-        onReturnToLobby={returnToLobby}
         connectionState={connectionState.status}
         collaboratorCount={activeCollaborators.length}
         canUndo={mutationControlsEnabled && visibleTiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
@@ -1707,6 +1858,54 @@ function ProtectedApp() {
                 </span>
               ))}
             </div>
+          )}
+          {auth.canonicalEntryEnabled && canonicalDescriptor && (
+            <section className="canonical-navigation" aria-label="Canonical patch navigation">
+              <div className="canonical-navigation-heading">
+                <div>
+                  <h2>Canonical Quilt</h2>
+                  <p>
+                    {focusedCanonicalPatch
+                      ? `Patch ${focusedCanonicalPatch.row}, ${focusedCanonicalPatch.column}`
+                      : 'Choose a patch to focus'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => focusCanonicalPatch({
+                    quiltId: canonicalDescriptor.quiltId,
+                    patchId: canonicalDescriptor.initialPatch.id,
+                    row: canonicalDescriptor.initialPatch.row,
+                    column: canonicalDescriptor.initialPatch.column,
+                    centerX: canonicalDescriptor.originX + (canonicalDescriptor.initialPatch.column + 0.5) * canonicalDescriptor.patchWidth,
+                    centerY: canonicalDescriptor.originY + (canonicalDescriptor.initialPatch.row + 0.5) * canonicalDescriptor.patchHeight,
+                  })}
+                >
+                  Root
+                </button>
+              </div>
+              {canonicalNavigationError && <p className="canonical-navigation-error">{canonicalNavigationError}</p>}
+              {canonicalNavigationLoading ? (
+                <p className="canonical-navigation-empty">Finding eligible patches...</p>
+              ) : canonicalPatches.length > 0 ? (
+                <div className="canonical-patch-list">
+                  {canonicalPatches.slice(0, 8).map((patch) => (
+                    <button
+                      key={patch.patchId}
+                      type="button"
+                      onClick={() => void handleCanonicalClaim(patch)}
+                      disabled={canonicalClaimingPatchId !== null}
+                    >
+                      {canonicalClaimingPatchId === patch.patchId
+                        ? 'Claiming...'
+                        : `Claim ${patch.row}, ${patch.column}`}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="canonical-navigation-empty">No patches are currently eligible.</p>
+              )}
+            </section>
           )}
           <GridOverlayControls
             enabled={gridOverlayEnabled}

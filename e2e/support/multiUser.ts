@@ -133,6 +133,11 @@ const callCanvasApi = async <TArg, TResult = void>(
   })
 }
 
+const positionsMatch = (
+  actual: { x: number; y: number },
+  expected: { x: number; y: number },
+): boolean => Math.abs(actual.x - expected.x) < 1e-6 && Math.abs(actual.y - expected.y) < 1e-6
+
 const tileMatches = (tile: CanvasTileSnapshot, expectation: TileExpectation): boolean => {
   if (expectation.id !== undefined && tile.id !== expectation.id) {
     return false
@@ -156,7 +161,7 @@ const tileMatches = (tile: CanvasTileSnapshot, expectation: TileExpectation): bo
     return false
   }
   if (expectation.position !== undefined) {
-    if (tile.position.x !== expectation.position.x || tile.position.y !== expectation.position.y) {
+    if (!positionsMatch(tile.position, expectation.position)) {
       return false
     }
   }
@@ -170,16 +175,22 @@ const waitForState = async (
   message: string,
 ): Promise<CanvasStateSnapshot> => {
   let match: CanvasStateSnapshot | undefined
+  let lastState: CanvasStateSnapshot | undefined
 
-  await expect.poll(async () => {
-    const state = await readCanvasState(page)
-    if (predicate(state)) {
-      match = state
-      return true
-    }
+  try {
+    await expect.poll(async () => {
+      const state = await readCanvasState(page)
+      lastState = state
+      if (predicate(state)) {
+        match = state
+        return true
+      }
 
-    return false
-  }, { message }).toBe(true)
+      return false
+    }, { message }).toBe(true)
+  } catch (error) {
+    throw new Error(`${message}\nLast canvas state: ${JSON.stringify(lastState)}`, { cause: error })
+  }
 
   return match as CanvasStateSnapshot
 }
@@ -232,8 +243,9 @@ const createCanvasUser = (
   page,
   open: async () => {
     await page.goto(clientUrl)
-    await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
     await waitForCanvasApi(page)
+    await waitForState(page, (state) => state.mode === 'canvas', `${name} should enter the canonical canvas`)
+    await waitForState(page, (state) => state.connectionStatus === 'connected', `${name} should connect to the canonical canvas`)
   },
   joinSession: async (sessionId: string) => {
     await callCanvasApi(page, 'joinSession', sessionId)
@@ -268,8 +280,7 @@ const createCanvasUser = (
         && tile.shape === placingTileState.shape
         && tile.color === placingTileState.color
         && tile.material === placingTileState.material
-        && tile.position.x === position.x
-        && tile.position.y === position.y),
+        && positionsMatch(tile.position, position)),
       `${name} should place a settled server tile`,
     )
 
@@ -280,8 +291,7 @@ const createCanvasUser = (
       && tile.shape === placingTileState.shape
       && tile.color === placingTileState.color
       && tile.material === placingTileState.material
-      && tile.position.x === position.x
-      && tile.position.y === position.y)
+      && positionsMatch(tile.position, position))
     expect(placedTile, `${name} should expose the newly placed authoritative tile`).toBeTruthy()
 
     return placedTile as CanvasTileSnapshot
@@ -365,7 +375,6 @@ const createSessionFactory = (
       const page = await context.newPage()
       const user = createCanvasUser(context, page, `user-${index + 1}`, clientUrl)
       await user.open()
-      await user.joinSession(sessionId)
       users.push(user)
     }
   } catch (error) {
