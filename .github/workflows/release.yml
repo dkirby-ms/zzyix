@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   release:
-    name: Release (${{ matrix.app }})
+    name: Release
     if: >-
       ${{ github.event_name == 'workflow_dispatch' || (
         github.event.workflow_run.conclusion == 'success' &&
@@ -22,10 +22,6 @@ jobs:
         github.event.workflow_run.head_branch == 'main'
       ) }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        app: [client, server]
 
     permissions:
       contents: write
@@ -37,7 +33,7 @@ jobs:
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: main
 
       - name: Set Up Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
@@ -48,19 +44,36 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Check If ${{ matrix.app }} Changed
-        id: changed
+      - name: Check If client Changed
+        id: client_changed
         run: |
           set -euo pipefail
           chmod +x ./scripts/should-release-app.sh
-          ./scripts/should-release-app.sh "${{ matrix.app }}" >> "$GITHUB_OUTPUT"
+          ./scripts/should-release-app.sh client >> "$GITHUB_OUTPUT"
 
-      - name: Release ${{ matrix.app }}
-        if: steps.changed.outputs.release == 'true'
+      - name: Release client
+        if: steps.client_changed.outputs.release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release:${{ matrix.app }}
+        run: npm run release:client
 
-      - name: Skip Message
-        if: steps.changed.outputs.release != 'true'
-        run: echo "No app-specific changes detected for ${{ matrix.app }} since last release tag."
+      - name: Skip client Release
+        if: steps.client_changed.outputs.release != 'true'
+        run: echo "No client-specific changes detected since the last client release tag."
+
+      - name: Check If server Changed
+        id: server_changed
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/should-release-app.sh
+          ./scripts/should-release-app.sh server >> "$GITHUB_OUTPUT"
+
+      - name: Release server
+        if: steps.server_changed.outputs.release == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:server
+
+      - name: Skip server Release
+        if: steps.server_changed.outputs.release != 'true'
+        run: echo "No server-specific changes detected since the last server release tag."
