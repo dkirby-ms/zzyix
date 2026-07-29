@@ -129,6 +129,31 @@ describe('AuthSessionProvider', () => {
     expect(request.headers.get('Authorization')).toBe('Bearer access-token')
   })
 
+  it('does not bootstrap repeatedly when MSAL returns equivalent account objects', async () => {
+    const instance = createInstance()
+    instance.getActiveAccount.mockImplementation(() => ({ ...account }))
+    useMsalMock.mockReturnValue({ instance, accounts: [account], inProgress: 'none' })
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      profile: { displayName: 'Ada' },
+      capabilities: {
+        createSession: true,
+        claimPatch: false,
+        transferPatch: false,
+        deleteAccount: true,
+        mutateProtocolV2: false,
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    render(
+      <AuthSessionProvider config={config}>
+        <SessionProbe />
+      </AuthSessionProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('authenticated'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+  })
+
   it('uses runtime scope for login, account logout, and coalesced forced renewal', async () => {
     let resolveRenewal: ((result: AuthenticationResult) => void) | undefined
     const instance = createInstance()

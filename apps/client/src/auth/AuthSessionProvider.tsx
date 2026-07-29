@@ -18,7 +18,10 @@ export const AuthSessionProvider = ({ config, children }: { config: RuntimeAuthC
   const [principal, setPrincipal] = useState<MeResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const renewalRef = useRef<Promise<string> | null>(null)
-  const account = instance.getActiveAccount() ?? accounts[0] ?? null
+  const account = useMemo(
+    () => instance.getActiveAccount() ?? accounts[0] ?? null,
+    [accounts, instance],
+  )
 
   const handleAuthLoss = useCallback((reason: AuthLossReason, _error?: unknown): void => {
     setPrincipal(null)

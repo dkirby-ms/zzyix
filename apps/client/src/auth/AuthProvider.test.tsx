@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -79,6 +80,23 @@ describe('AuthProvider', () => {
     expect(instance.setActiveAccount).toHaveBeenCalledWith(account)
     expect(screen.getByTestId('msal-provider')).toBeInTheDocument()
     expect(screen.getByTestId('session-provider')).toBeInTheDocument()
+  })
+
+  it('processes the redirect once when StrictMode reruns effects', async () => {
+    const account = { homeAccountId: 'home' }
+    instance.handleRedirectPromise.mockResolvedValue({ account })
+
+    render(
+      <StrictMode>
+        <AuthProvider><span>protected child</span></AuthProvider>
+      </StrictMode>,
+    )
+
+    await screen.findByText('protected child')
+    expect(publicClientApplicationMock).toHaveBeenCalledTimes(1)
+    expect(instance.initialize).toHaveBeenCalledTimes(1)
+    expect(instance.handleRedirectPromise).toHaveBeenCalledTimes(1)
+    expect(instance.setActiveAccount).toHaveBeenCalledWith(account)
   })
 
   it('fails closed when runtime authentication initialization fails', async () => {
