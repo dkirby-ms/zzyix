@@ -5,7 +5,12 @@ description: High-level release notes and notable changes by version.
 
 ## Changelog
 
-All notable changes to this project should be documented in this file.
+Cross-cutting repository changes can be documented in this file.
+
+Published app release histories are tracked separately:
+
+* [Client changelog](CHANGELOG.client.md)
+* [Server changelog](CHANGELOG.server.md)
 
 ## Unreleased
 
