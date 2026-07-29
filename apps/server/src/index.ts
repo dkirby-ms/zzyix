@@ -40,6 +40,14 @@ import type {
   QuiltRoomRequest,
   SubscribeQuiltAreaAck,
   QuiltClientRuntimeMetrics,
+  MeResponse,
+  AccountDeletionResponse,
+  OwnershipCommandResponse,
+  QuiltMutationRejectCode,
+  QuiltPlaceTileAck,
+  QuiltPlaceTileRequest,
+  QuiltRemoveTileAck,
+  QuiltRemoveTileRequest,
 } from './contracts.js'
 import {
   closeDatabaseBundle,
@@ -57,13 +65,38 @@ import {
   persistSnapshotIfNeeded,
   persistTilePlacement,
   persistTileRemoval,
+  loadPrincipalProfile,
+  createProtectedSession,
+  abandonPatch,
+  acceptOwnershipTransfer,
+  cancelOwnershipTransfer,
+  claimPatch,
+  createOwnershipTransfer,
+  recoverPrincipalDeletion,
+  requestPrincipalDeletion,
+  persistQuiltTilePlacement,
+  persistQuiltTileRemoval,
 } from './db/index.js'
 import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
-import type { SessionSummaryRecord } from './db/repository.js'
-import type { PatchDeliveryOperation } from './db/repository.js'
+import { ResourceNotFoundError, type SessionSummaryRecord } from './db/repository.js'
+import type { PatchDeliveryOperation, QuiltDeliveryContext } from './db/repository.js'
 import { defaultBounds, validatePlacement } from './domain/placementSolver.js'
 import { startRetentionJob } from './jobs/retention.js'
-import { resolveQuiltRooms, type PatchRoomAccess } from './realtime/quiltRooms.js'
+import { buildPatchRoomAccess, resolveQuiltRooms } from './realtime/quiltRooms.js'
+import { loadAuthenticationConfig } from './auth/config.js'
+import { createTokenVerifier, type TokenVerifier } from './auth/tokenVerifier.js'
+import { validateProductionRolloutGates } from './startup/rolloutGates.js'
+import { redactTelemetry } from './logging/redact.js'
+import { resolveDeletionPendingPrincipal, resolveOrProvisionPrincipal } from './auth/principalContext.js'
+import {
+  buildMeResponse,
+  createHttpAuth,
+  getPrincipalContext,
+  sendAuthenticationError,
+  sendResourceNotFound,
+} from './auth/httpAuth.js'
+import { AuthenticationError } from './auth/errors.js'
+import { createSocketAuth } from './auth/socketAuth.js'
 import {
   decideLegacyRetirement,
   loadLegacyRetirementGates,
@@ -186,6 +219,9 @@ const isLegacyMutationCompatibilityEnabled = parseBooleanFlag(
   process.env.FEATURE_LEGACY_MUTATION_COMPATIBILITY_ENABLED,
   true,
 )
+const isProtocolV2MutationEnabled = process.env.NODE_ENV === 'test'
+  && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
+  && parseBooleanFlag(process.env.FEATURE_PROTOCOL_V2_MUTATION_ENABLED, false)
 const quiltCanaryConfig = loadQuiltCanaryConfig()
 const legacyRetirementGates = loadLegacyRetirementGates()
 const legacyRetirementDecision = decideLegacyRetirement(legacyRetirementGates)
@@ -198,22 +234,6 @@ const QUILT_PROTOCOL_LIMITS: QuiltProtocolLimits = {
   maxPayloadBytes: Number(process.env.QUILT_V2_MAX_PAYLOAD_BYTES ?? 256 * 1024),
   source: 'canary-default',
 }
-
-export const buildPatchRoomAccess = (patch: {
-  id: string
-  state: PatchRoomAccess['state']
-  isMember: boolean
-}): PatchRoomAccess => ({
-  patchId: patch.id,
-  state: patch.state,
-  publishesExistence: patch.state !== 'deleted' && patch.state !== 'deletion_requested',
-  publicFine: false,
-  publicAggregate: patch.state === 'active' || patch.state === 'unclaimed' || patch.state === 'suspended',
-  principalFine: patch.isMember && patch.state !== 'deleted' && patch.state !== 'deletion_requested',
-  principalAggregate: patch.isMember && patch.state !== 'deleted',
-  principalPresence: patch.isMember && patch.state === 'active',
-  principalEvents: patch.isMember && patch.state !== 'deleted' && patch.state !== 'deletion_requested',
-})
 
 export const isQuiltRoomRequest = (value: unknown): value is QuiltRoomRequest => {
   if (!isObjectRecord(value)) return false
@@ -267,6 +287,24 @@ export const recordQuiltClientRuntimeMetrics = (
     },
   })
   return true
+}
+
+export const resolveLegacySocketAccess = (context: QuiltDeliveryContext | null): {
+  allowed: boolean
+  mutationAllowed: boolean
+} => {
+  if (!context || context.patches.length === 0) return { allowed: false, mutationAllowed: false }
+  const access = context.patches.map(buildPatchRoomAccess)
+  return {
+    allowed: access.every((patch) =>
+      patch.publishesExistence
+      && patch.principalFine
+      && patch.principalAggregate
+      && patch.principalPresence
+      && patch.principalEvents,
+    ),
+    mutationAllowed: context.patches.every((patch) => patch.isOwner),
+  }
 }
 
 const getRealtimeCapabilities = (sessionId: string): RealtimeCapabilities => {
@@ -614,7 +652,7 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
   }
 
   const timestamp = new Date().toISOString()
-  const contextSuffix = context ? ` ${serializeLogValue(context)}` : ''
+  const contextSuffix = context ? ` ${serializeLogValue(redactTelemetry(context))}` : ''
   const line = `[${timestamp}] [${level.toUpperCase()}] ${message}${contextSuffix}`
 
   if (level === 'error') {
@@ -921,6 +959,37 @@ export const isRemoveTilePayload = (payload: unknown): payload is RemoveTilePayl
 
   return true
 }
+
+const isPatchRevisionMap = (value: unknown): value is Record<string, number> =>
+  isObjectRecord(value)
+  && Object.keys(value).length > 0
+  && Object.entries(value).every(([patchId, revision]) =>
+    UUID_PATTERN.test(patchId)
+    && Number.isSafeInteger(revision)
+    && Number(revision) >= 0,
+  )
+
+export const isQuiltPlaceTileRequest = (payload: unknown): payload is QuiltPlaceTileRequest =>
+  isObjectRecord(payload)
+  && !('principalId' in payload)
+  && typeof payload.quiltId === 'string'
+  && UUID_PATTERN.test(payload.quiltId)
+  && typeof payload.operationId === 'string'
+  && UUID_PATTERN.test(payload.operationId)
+  && isPatchRevisionMap(payload.expectedPatchRevisions)
+  && isPlaceTilePayload(payload.tile)
+  && payload.tile.expectedRevision === undefined
+
+export const isQuiltRemoveTileRequest = (payload: unknown): payload is QuiltRemoveTileRequest =>
+  isObjectRecord(payload)
+  && !('principalId' in payload)
+  && typeof payload.quiltId === 'string'
+  && UUID_PATTERN.test(payload.quiltId)
+  && typeof payload.operationId === 'string'
+  && UUID_PATTERN.test(payload.operationId)
+  && isPatchRevisionMap(payload.expectedPatchRevisions)
+  && typeof payload.tileId === 'string'
+  && UUID_PATTERN.test(payload.tileId)
 
 const isPointerMovePayload = (payload: unknown): payload is { position: { x: number; y: number } } => {
   if (!isObjectRecord(payload)) {
@@ -1323,6 +1392,57 @@ const testControlToken = (process.env.E2E_RESET_TOKEN ?? TEST_CONTROL_DEFAULT_TO
 
 app.use(express.json())
 
+let configuredTokenVerifier: TokenVerifier | undefined
+const configureAuthentication = (): void => {
+  configuredTokenVerifier ??= createTokenVerifier(loadAuthenticationConfig())
+}
+const verifyAccessToken: TokenVerifier = (token) => {
+  configureAuthentication()
+  if (!configuredTokenVerifier) throw new Error('Authentication verifier is unavailable')
+  return configuredTokenVerifier(token)
+}
+const requireHttpPrincipal = createHttpAuth(verifyAccessToken, resolveOrProvisionPrincipal)
+const requireDeletionPendingPrincipal = createHttpAuth(verifyAccessToken, resolveDeletionPendingPrincipal)
+
+export const ownershipRequest = (value: unknown, fields: string[]): value is Record<string, string> =>
+  isObjectRecord(value)
+  && typeof value.operationId === 'string'
+  && UUID_PATTERN.test(value.operationId)
+  && fields.every((field) => typeof value[field] === 'string' && UUID_PATTERN.test(value[field]))
+
+const sendInvalidOwnershipRequest = (res: express.Response): void => {
+  res.status(400).json({
+    code: 'invalid_request',
+    message: 'The request payload is invalid.',
+    requestId: res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID(),
+  })
+}
+
+export const sendOwnershipResult = (
+  res: express.Response,
+  result: { succeeded?: boolean; claimed?: boolean; idempotent: boolean; transferId?: string; revision?: number },
+): void => {
+  const succeeded = result.succeeded ?? result.claimed ?? false
+  if (!succeeded) {
+    res.status(409).json({
+      code: 'ownership_command_denied',
+      message: 'The ownership command could not be completed.',
+      requestId: res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID(),
+    })
+    return
+  }
+  res.status(200).json({
+    status: 'succeeded', idempotent: result.idempotent,
+    ...(result.transferId ? { transferId: result.transferId } : {}),
+    ...(result.revision !== undefined ? { revision: result.revision } : {}),
+  } satisfies OwnershipCommandResponse)
+}
+
+app.use((_req, res, next) => {
+  res.setHeader('x-request-id', crypto.randomUUID())
+  next()
+})
+
 // CORS middleware for HTTP endpoints
 app.use((req, res, next) => {
   const configuredOrigin = resolveCorsOrigin(process.env.CORS_ORIGIN)
@@ -1339,7 +1459,7 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Credentials', 'true')
   }
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.header('Access-Control-Allow-Headers', 'Content-Type')
+  res.header('Access-Control-Allow-Headers', 'Authorization, Content-Type')
 
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200)
@@ -1377,9 +1497,79 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', version: '0.0.0' })
 })
 
-app.get('/sessions', async (_req, res) => {
+app.get('/me', requireHttpPrincipal, async (req, res) => {
+  const principal = getPrincipalContext(req)
+  const profile = await loadPrincipalProfile(principal.principalId)
+  const response: MeResponse = buildMeResponse(profile)
+  res.status(200).json(response)
+})
+
+app.post('/ownership/claims', requireHttpPrincipal, async (req, res) => {
+  if (!ownershipRequest(req.body, ['patchId'])) return sendInvalidOwnershipRequest(res)
+  const principalId = getPrincipalContext(req).principalId
+  sendOwnershipResult(res, await claimPatch({
+    operationId: req.body.operationId, patchId: req.body.patchId, principalId,
+    requestId: res.getHeader('x-request-id')?.toString(),
+  }))
+})
+
+app.post('/ownership/transfers', requireHttpPrincipal, async (req, res) => {
+  if (!ownershipRequest(req.body, ['patchId', 'recipientPrincipalId'])) return sendInvalidOwnershipRequest(res)
+  sendOwnershipResult(res, await createOwnershipTransfer({
+    operationId: req.body.operationId, patchId: req.body.patchId,
+    senderPrincipalId: getPrincipalContext(req).principalId,
+    recipientPrincipalId: req.body.recipientPrincipalId,
+  }))
+})
+
+app.post('/ownership/transfers/accept', requireHttpPrincipal, async (req, res) => {
+  if (!ownershipRequest(req.body, ['transferId'])) return sendInvalidOwnershipRequest(res)
+  sendOwnershipResult(res, await acceptOwnershipTransfer({
+    operationId: req.body.operationId, transferId: req.body.transferId,
+    recipientPrincipalId: getPrincipalContext(req).principalId,
+  }))
+})
+
+app.post('/ownership/transfers/cancel', requireHttpPrincipal, async (req, res) => {
+  if (!ownershipRequest(req.body, ['transferId'])) return sendInvalidOwnershipRequest(res)
+  sendOwnershipResult(res, await cancelOwnershipTransfer({
+    operationId: req.body.operationId, transferId: req.body.transferId,
+    actorPrincipalId: getPrincipalContext(req).principalId,
+  }))
+})
+
+app.post('/ownership/abandon', requireHttpPrincipal, async (req, res) => {
+  if (!ownershipRequest(req.body, ['patchId'])) return sendInvalidOwnershipRequest(res)
+  sendOwnershipResult(res, await abandonPatch({
+    operationId: req.body.operationId, patchId: req.body.patchId,
+    principalId: getPrincipalContext(req).principalId,
+  }))
+})
+
+app.post('/account/deletion', requireHttpPrincipal, async (req, res) => {
+  if (!ownershipRequest(req.body, [])) return sendInvalidOwnershipRequest(res)
+  const result = await requestPrincipalDeletion({
+    operationId: req.body.operationId, principalId: getPrincipalContext(req).principalId,
+  })
+  if (!result.succeeded) return sendOwnershipResult(res, result)
+  res.status(200).json({
+    status: 'deletion_pending', idempotent: result.idempotent,
+    ...(result.recoveryDeadline ? { recoveryDeadline: result.recoveryDeadline.toISOString() } : {}),
+  } satisfies AccountDeletionResponse)
+})
+
+app.post('/account/deletion/recover', requireDeletionPendingPrincipal, async (req, res) => {
+  if (!ownershipRequest(req.body, [])) return sendInvalidOwnershipRequest(res)
+  const result = await recoverPrincipalDeletion({
+    operationId: req.body.operationId, principalId: getPrincipalContext(req).principalId,
+  })
+  if (!result.succeeded) return sendOwnershipResult(res, result)
+  res.status(200).json({ status: 'active', idempotent: result.idempotent } satisfies AccountDeletionResponse)
+})
+
+app.get('/sessions', requireHttpPrincipal, async (req, res) => {
   try {
-    const summaries = await listSessionSummaries()
+    const summaries = await listSessionSummaries(getPrincipalContext(req).principalId)
     const response = buildListSessionsResponse(summaries)
 
     res.status(200).json(response)
@@ -1390,7 +1580,7 @@ app.get('/sessions', async (_req, res) => {
 })
 
 // Session creation endpoint
-app.post('/sessions', sessionCreateRateLimit, async (req, res) => {
+app.post('/sessions', requireHttpPrincipal, sessionCreateRateLimit, async (req, res) => {
   if (!isCreateSessionRequest(req.body ?? {})) {
     res.status(400).json({ error: 'Invalid session creation payload' })
     return
@@ -1403,7 +1593,7 @@ app.post('/sessions', sessionCreateRateLimit, async (req, res) => {
     sessions.set(sessionId, sessionState)
 
     // Initialize canvas in database to satisfy foreign key constraints
-    await loadSessionRecord(sessionId, canvasConfig)
+    await createProtectedSession(sessionId, canvasConfig)
 
     writeLog('info', 'session_created', {
       sessionId,
@@ -1426,6 +1616,7 @@ app.post('/sessions', sessionCreateRateLimit, async (req, res) => {
 type TestResetRequest = {
   createSession?: boolean
   canvasPreset?: CanvasSizePreset
+  ownerExternalSubject?: string
 }
 
 const isTestResetRequest = (value: unknown): value is TestResetRequest => {
@@ -1438,6 +1629,10 @@ const isTestResetRequest = (value: unknown): value is TestResetRequest => {
   }
 
   if (value.canvasPreset !== undefined && !isCanvasSizePreset(value.canvasPreset)) {
+    return false
+  }
+
+  if (value.ownerExternalSubject !== undefined && typeof value.ownerExternalSubject !== 'string') {
     return false
   }
 
@@ -1489,6 +1684,7 @@ if (isTestControlEnabled) {
 
     const createSessionForRun = req.body?.createSession ?? false
     const canvasPreset = req.body?.canvasPreset
+    const ownerExternalSubject = req.body?.ownerExternalSubject
 
     try {
       await resetAuthoritativeState()
@@ -1502,7 +1698,34 @@ if (isTestControlEnabled) {
       const canvasConfig = resolveCanvasConfigFromPreset(canvasPreset)
       const sessionState = createAuthoritativeSessionState(sessionId, Date.now(), canvasConfig)
       sessions.set(sessionId, sessionState)
-      await loadSessionRecord(sessionId, canvasConfig)
+      await createProtectedSession(sessionId, canvasConfig)
+
+      if (ownerExternalSubject) {
+        const providerNamespace = process.env.AUTH_TRUSTED_ISSUER
+        if (!providerNamespace) throw new Error('AUTH_TRUSTED_ISSUER is required to seed a test owner')
+        const principalId = crypto.randomUUID()
+        await getDatabaseBundle().db.transaction(async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO principals (id, kind)
+            VALUES (${principalId}, 'human')
+          `)
+          await tx.execute(sql`
+            INSERT INTO external_principal_mappings (provider_namespace, external_subject, principal_id)
+            VALUES (${providerNamespace}, ${ownerExternalSubject}, ${principalId})
+          `)
+          await tx.execute(sql`
+            UPDATE patches
+            SET owner_principal_id = ${principalId}, state = 'active'
+            WHERE quilt_id = (SELECT id FROM quilts WHERE legacy_canvas_id = ${sessionId})
+          `)
+          await tx.execute(sql`
+            INSERT INTO patch_memberships (patch_id, principal_id, role)
+            SELECT id, ${principalId}, 'owner'
+            FROM patches
+            WHERE quilt_id = (SELECT id FROM quilts WHERE legacy_canvas_id = ${sessionId})
+          `)
+        })
+      }
 
       res.status(200).json({
         reset: true,
@@ -1527,6 +1750,10 @@ if (isTestControlEnabled) {
     const quiltId = crypto.randomUUID()
     const patchId = crypto.randomUUID()
     const principalId = crypto.randomUUID()
+    const externalSubject = typeof req.body?.externalSubject === 'string'
+      ? req.body.externalSubject
+      : 'e2e-owner'
+    const providerNamespace = process.env.AUTH_TRUSTED_ISSUER
     const tileId = crypto.randomUUID()
     try {
       await getDatabaseBundle().db.transaction(async (tx) => {
@@ -1539,11 +1766,27 @@ if (isTestControlEnabled) {
           INSERT INTO principals (id, kind)
           VALUES (${principalId}, 'human')
         `)
+        if (providerNamespace) {
+          await tx.execute(sql`
+            INSERT INTO external_principal_mappings (provider_namespace, external_subject, principal_id)
+            VALUES (${providerNamespace}, ${externalSubject}, ${principalId})
+          `)
+        }
         await tx.execute(sql`
           INSERT INTO patches (id, quilt_id, row, "column", state, revision)
           VALUES (${patchId}, ${quiltId}, 0, 0, 'active', 0)
         `)
         await tx.execute(sql`UPDATE patches SET owner_principal_id = ${principalId} WHERE id = ${patchId}`)
+        await tx.execute(sql`
+          INSERT INTO patch_visibility_policies (
+            patch_id, existence, fine_data, aggregate_data, presence, search,
+            durable_events, claim_enabled, policy_version
+          )
+          VALUES (
+            ${patchId}, 'authenticated', 'authenticated', 'authenticated', 'authenticated',
+            'authenticated', 'authenticated', false, 1
+          )
+        `)
         await tx.execute(sql`
           INSERT INTO tiles (
             id, canvas_id, quilt_id, anchor_patch_id, shape, color, material,
@@ -1559,7 +1802,7 @@ if (isTestControlEnabled) {
           VALUES (${tileId}, ${patchId}, 0, 0)
         `)
       })
-      res.status(200).json({ canvasId, quiltId, patchId, principalId })
+      res.status(200).json({ canvasId, quiltId, patchId, externalSubject })
     } catch (error) {
       writeLog('error', 'test_quilt_setup_failed', { error })
       res.status(500).json({ error: 'Failed to seed quilt' })
@@ -1653,6 +1896,30 @@ if (isTestControlEnabled) {
   })
 }
 
+app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
+  if (error instanceof AuthenticationError) {
+    sendAuthenticationError(res, requestId, error)
+    return
+  }
+  if (error instanceof ResourceNotFoundError) {
+    sendResourceNotFound(res, requestId)
+    return
+  }
+
+  writeLog('error', 'http_request_failed', {
+    method: req.method,
+    path: req.originalUrl,
+    requestId,
+    error,
+  })
+  res.status(500).json({
+    code: 'internal_error',
+    message: 'The request could not be completed.',
+    requestId,
+  })
+})
+
 // ─── Initialize Socket.IO ────────────────────────────────────────────────────
 
 const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
@@ -1717,6 +1984,13 @@ io.use((socket, next) => {
     socketAuthRateLimitBuckets.set(rateLimitKey, currentBucket)
   }
 
+  next()
+})
+
+io.use(createSocketAuth(verifyAccessToken, resolveOrProvisionPrincipal))
+
+io.use((socket, next) => {
+
   const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
 
   writeLog('debug', 'socket_auth_received', {
@@ -1740,12 +2014,6 @@ io.use((socket, next) => {
   socket.data.clientId = auth.clientId
   socket.data.protocolVersion = auth.protocolVersion === 2 ? 2 : 1
   socket.data.enableProtocolV1Compatibility = auth.enableProtocolV1Compatibility === true
-  const testPrincipalId = (auth as Record<string, unknown>).testPrincipalId
-  socket.data.principalId = process.env.E2E_TEST_MODE === 'true'
-    && typeof testPrincipalId === 'string'
-    && UUID_PATTERN.test(testPrincipalId)
-    ? testPrincipalId
-    : undefined
 
   writeLog('info', 'socket_connecting', {
     clientId: auth.clientId,
@@ -1765,6 +2033,7 @@ io.on('connection', (socket) => {
   let dualReadEnabled = false
   let selectedQuiltId: string | undefined
   let selectedPrincipalId: string | undefined
+  let legacyMutationAuthorized = false
   let quiltRoomIds = new Set<string>()
     let quiltAdapterRoomIds = new Set<string>()
   let roomChurnWindowStartedAt = Date.now()
@@ -1781,9 +2050,12 @@ io.on('connection', (socket) => {
 
   const initializeConnection = async (): Promise<void> => {
     const joinedAt = Date.now()
+    const deliveryContext = await loadQuiltDeliveryContext({
+      sessionId,
+      principalId: socket.data.principalId,
+    })
 
     if (socket.data.protocolVersion === 2) {
-      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: socket.data.principalId })
       if (deliveryContext?.topology.protocolVersion === 2) {
         const rollout = resolveQuiltRollout({
           quiltId: deliveryContext.topology.quiltId,
@@ -1798,7 +2070,7 @@ io.on('connection', (socket) => {
           socket.emit('quilt_protocol', {
             selectedProtocolVersion: 2,
             v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
-            mutationEnabled: false,
+            mutationEnabled: isProtocolV2MutationEnabled,
             canaryTelemetryEnabled,
             topology: deliveryContext.topology,
             limits: QUILT_PROTOCOL_LIMITS,
@@ -1808,10 +2080,16 @@ io.on('connection', (socket) => {
       }
     }
 
+    const legacyAccess = resolveLegacySocketAccess(deliveryContext)
+    if (!legacyAccess.allowed) {
+      throw new Error('Resource not found.')
+    }
+    legacyMutationAuthorized = legacyAccess.mutationAllowed
+
     socket.emit('quilt_protocol', {
       selectedProtocolVersion: 1,
       v1CompatibilityEnabled: socket.data.enableProtocolV1Compatibility,
-      mutationEnabled: isLegacyMutationCompatibilityEnabled,
+      mutationEnabled: isLegacyMutationCompatibilityEnabled && legacyMutationAuthorized,
     })
 
     socket.join(sessionId)
@@ -1869,7 +2147,7 @@ io.on('connection', (socket) => {
       return
     }
 
-    if (selectedProtocolVersion === 2 || !isLegacyMutationCompatibilityEnabled) {
+    if (selectedProtocolVersion === 2 || !isLegacyMutationCompatibilityEnabled || !legacyMutationAuthorized) {
       invokeAckSafely(ack, {
         placed: null,
         rejected: true,
@@ -1982,7 +2260,12 @@ io.on('connection', (socket) => {
       payload,
     })
 
-    if (selectedProtocolVersion === 2 || !isRemoveTilePayload(payload) || !isValidTileId(payload.tileId)) {
+    if (
+      selectedProtocolVersion === 2
+      || !legacyMutationAuthorized
+      || !isRemoveTilePayload(payload)
+      || !isValidTileId(payload.tileId)
+    ) {
       invokeAckSafely(ack, { removed: false })
       return
     }
@@ -2051,6 +2334,159 @@ io.on('connection', (socket) => {
         error,
       })
       invokeAckSafely(ack, { removed: false })
+    }
+  })
+
+  const rejectQuiltMutation = <T extends QuiltPlaceTileAck | QuiltRemoveTileAck>(
+    ack: unknown,
+    operationId: string,
+    code: QuiltMutationRejectCode,
+  ): void => invokeAckSafely<T>(ack, {
+    status: 'rejected',
+    operationId,
+    code,
+    message: code === 'THROTTLED' ? 'Mutation temporarily unavailable.' : 'Mutation was not accepted.',
+    requestId: crypto.randomUUID(),
+  } as T)
+
+  const canonicalMutationRoomId = (
+    quiltId: string,
+    patchId: string,
+    kind: 'fine' | 'events',
+    deliveryContext: NonNullable<Awaited<ReturnType<typeof loadQuiltDeliveryContext>>>,
+  ): string | undefined => {
+    const patch = deliveryContext.patches.find((candidate) => candidate.id === patchId)
+    return patch ? `quilt:${quiltId}:patch:${patch.row}:${patch.column}:${kind}` : undefined
+  }
+
+  socket.on('quilt_place_tile', async (payload, ack) => {
+    const operationId = isObjectRecord(payload) && typeof payload.operationId === 'string'
+      ? payload.operationId
+      : crypto.randomUUID()
+    if (!isProtocolV2MutationEnabled || selectedProtocolVersion !== 2) {
+      rejectQuiltMutation<QuiltPlaceTileAck>(ack, operationId, 'MUTATION_DISABLED')
+      return
+    }
+    if (!isQuiltPlaceTileRequest(payload) || payload.quiltId !== selectedQuiltId || !selectedPrincipalId) {
+      rejectQuiltMutation<QuiltPlaceTileAck>(ack, operationId, 'INVALID_FOOTPRINT')
+      return
+    }
+
+    try {
+      const result = await persistQuiltTilePlacement({
+        quiltId: payload.quiltId,
+        operationId: payload.operationId,
+        principalId: selectedPrincipalId,
+        expectedPatchRevisions: payload.expectedPatchRevisions,
+        payload: payload.tile,
+      })
+      if (!result.committed) {
+        const code: QuiltMutationRejectCode = result.reason === 'UNAUTHORIZED'
+          ? 'UNAUTHORIZED'
+          : result.reason === 'STALE_REVISION' || result.reason === 'OUT_OF_ORDER_REVISION'
+            ? 'STALE_REVISION'
+            : 'COLLISION'
+        rejectQuiltMutation<QuiltPlaceTileAck>(ack, payload.operationId, code)
+        return
+      }
+
+      invokeAckSafely<QuiltPlaceTileAck>(ack, {
+        status: 'accepted',
+        operationId: result.operationId,
+        eventIds: result.eventIds,
+        patchRevisions: result.patchRevisions,
+        idempotent: result.idempotent,
+        tile: result.tile,
+      })
+      if (result.idempotent) return
+      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: selectedPrincipalId })
+      if (!deliveryContext) return
+      for (const [patchId, revision] of Object.entries(result.patchRevisions)) {
+        const eventId = result.eventIds[patchId]
+        for (const kind of ['fine', 'events'] as const) {
+          const roomId = canonicalMutationRoomId(payload.quiltId, patchId, kind, deliveryContext)
+          if (!roomId) continue
+          for (const chunkId of result.patchChunkIds[patchId] ?? []) {
+            io.to(quiltChunkRoomName(roomId, chunkId as ChunkId)).emit('quilt_patch_event', {
+              quiltId: payload.quiltId,
+              canonicalRoomId: roomId,
+              patchId,
+              eventId,
+              opSeq: revision,
+              revision,
+              operation: { tile: result.tile, placedBy: clientId, opSeq: revision, revision },
+            })
+          }
+        }
+      }
+    } catch (error) {
+      writeLog('error', 'quilt_place_tile_failed', { sessionId, operationId, error })
+      rejectQuiltMutation<QuiltPlaceTileAck>(ack, operationId, 'RESOURCE_UNAVAILABLE')
+    }
+  })
+
+  socket.on('quilt_remove_tile', async (payload, ack) => {
+    const operationId = isObjectRecord(payload) && typeof payload.operationId === 'string'
+      ? payload.operationId
+      : crypto.randomUUID()
+    if (!isProtocolV2MutationEnabled || selectedProtocolVersion !== 2) {
+      rejectQuiltMutation<QuiltRemoveTileAck>(ack, operationId, 'MUTATION_DISABLED')
+      return
+    }
+    if (!isQuiltRemoveTileRequest(payload) || payload.quiltId !== selectedQuiltId || !selectedPrincipalId) {
+      rejectQuiltMutation<QuiltRemoveTileAck>(ack, operationId, 'INVALID_FOOTPRINT')
+      return
+    }
+
+    try {
+      const result = await persistQuiltTileRemoval({
+        quiltId: payload.quiltId,
+        operationId: payload.operationId,
+        principalId: selectedPrincipalId,
+        expectedPatchRevisions: payload.expectedPatchRevisions,
+        tileId: payload.tileId,
+      })
+      if (!result.committed) {
+        const code: QuiltMutationRejectCode = result.reason === 'UNAUTHORIZED'
+          ? 'UNAUTHORIZED'
+          : result.reason === 'STALE_REVISION' || result.reason === 'OUT_OF_ORDER_REVISION'
+            ? 'STALE_REVISION'
+            : 'RESOURCE_UNAVAILABLE'
+        rejectQuiltMutation<QuiltRemoveTileAck>(ack, payload.operationId, code)
+        return
+      }
+
+      invokeAckSafely<QuiltRemoveTileAck>(ack, {
+        status: 'accepted',
+        operationId: result.operationId,
+        eventIds: result.eventIds,
+        patchRevisions: result.patchRevisions,
+        idempotent: result.idempotent,
+      })
+      if (result.idempotent) return
+      const deliveryContext = await loadQuiltDeliveryContext({ sessionId, principalId: selectedPrincipalId })
+      if (!deliveryContext) return
+      for (const [patchId, revision] of Object.entries(result.patchRevisions)) {
+        const eventId = result.eventIds[patchId]
+        for (const kind of ['fine', 'events'] as const) {
+          const roomId = canonicalMutationRoomId(payload.quiltId, patchId, kind, deliveryContext)
+          if (!roomId) continue
+          for (const chunkId of result.patchChunkIds[patchId] ?? []) {
+            io.to(quiltChunkRoomName(roomId, chunkId as ChunkId)).emit('quilt_patch_event', {
+              quiltId: payload.quiltId,
+              canonicalRoomId: roomId,
+              patchId,
+              eventId,
+              opSeq: revision,
+              revision,
+              operation: { tileId: result.tileId, removedBy: clientId, opSeq: revision, revision },
+            })
+          }
+        }
+      }
+    } catch (error) {
+      writeLog('error', 'quilt_remove_tile_failed', { sessionId, operationId, error })
+      rejectQuiltMutation<QuiltRemoveTileAck>(ack, operationId, 'RESOURCE_UNAVAILABLE')
     }
   })
 
@@ -2400,7 +2836,8 @@ io.on('connection', (socket) => {
       const budgetFailures = new Map<string, string>()
       for (const room of resolution.accepted) {
         const snapshot = await loadPatchDeliverySnapshot(room.patchId, {
-          principalId: deliveryContext.principalId,
+          principalId: socket.data.principalId,
+          surface: room.kind === 'aggregate' ? 'aggregateData' : 'fineData',
           dualReadEnabled,
           canary: canaryTelemetryEnabled,
           chunkIds: room.chunkIds,
@@ -2427,7 +2864,11 @@ io.on('connection', (socket) => {
           && suppliedCursor.opSeq < cursor.opSeq
           && haveEqualChunkScope(suppliedCursor.chunkIds, room.chunkIds)
         ) {
-          const operations = await loadPatchDeliveryOperationsAfter(room.patchId, suppliedCursor.opSeq)
+          const operations = await loadPatchDeliveryOperationsAfter(
+            room.patchId,
+            suppliedCursor.opSeq,
+            socket.data.principalId,
+          )
           const isContiguous = operations.length > 0
             && operations[0]?.opSeq === suppliedCursor.opSeq + 1
             && operations.at(-1)?.opSeq === cursor.opSeq
@@ -2649,6 +3090,8 @@ process.on('SIGINT', () => {
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 if (process.env.NODE_ENV !== 'test') {
+  validateProductionRolloutGates()
+  configureAuthentication()
   writeLog('info', 'server_startup_begin', {
     host: HOST,
     port: PORT,

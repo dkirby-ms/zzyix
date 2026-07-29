@@ -110,11 +110,11 @@ playwright*.config.ts
 
 ## Implementation Checklist
 
-### [ ] Implementation Phase 1: Provider and Release Prerequisites
+### [x] Implementation Phase 1: Provider and Release Prerequisites
 
 <!-- parallelizable: false -->
 
-* [ ] Step 1.1: Validate External ID and fix the public configuration contract
+* [x] Step 1.1: Validate External ID and fix the public configuration contract
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 12-40)
 * [x] Step 1.2: Repair migration metadata and establish release-owned migration execution
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 41-65)
@@ -125,89 +125,89 @@ playwright*.config.ts
 * [x] Step 1.5: Resolve Phase 1 release-contract review findings
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 1, Step 1.5)
 
-### [ ] Implementation Phase 2: Identity Persistence and Verification
+### [x] Implementation Phase 2: Identity Persistence and Verification
 
 <!-- parallelizable: false -->
 
-* [ ] Step 2.1: Add principal lifecycle, mapping, audit, ownership, and visibility schema
+* [x] Step 2.1: Add principal lifecycle, mapping, audit, ownership, and visibility schema
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 99-123)
-* [ ] Step 2.2: Implement verified-token and principal-context boundaries
+* [x] Step 2.2: Implement verified-token and principal-context boundaries
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 124-147)
-* [ ] Step 2.3: Implement transactional principal resolution and lifecycle enforcement
+* [x] Step 2.3: Implement transactional principal resolution and lifecycle enforcement
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 148-165)
-* [ ] Step 2.4: Validate identity phase
+* [x] Step 2.4: Validate identity phase
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 166-172)
 
-### [ ] Implementation Phase 3: Protected HTTP, Socket, and Visibility Boundaries
+### [x] Implementation Phase 3: Protected HTTP, Socket, and Visibility Boundaries
 
 <!-- parallelizable: false -->
 
-* [ ] Step 3.1: Protect HTTP resources and expose safe principal context
+* [x] Step 3.1: Protect HTTP resources and expose safe principal context
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 177-195)
-* [ ] Step 3.2: Authenticate Socket.IO and enforce expiry
+* [x] Step 3.2: Authenticate Socket.IO and enforce expiry
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 196-214)
-* [ ] Step 3.3: Centralize persisted visibility policy
+* [x] Step 3.3: Centralize persisted visibility policy
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 215-235)
-* [ ] Step 3.4: Validate protected-boundary phase
+* [x] Step 3.4: Validate protected-boundary phase
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 236-242)
 
-### [ ] Implementation Phase 4: Client Authentication Lifecycle
+### [x] Implementation Phase 4: Client Authentication Lifecycle
 
 <!-- parallelizable: false -->
 
-* [ ] Step 4.1: Add MSAL provider and authenticated network client
+* [x] Step 4.1: Add MSAL provider and authenticated network client
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 247-269)
-* [ ] Step 4.2: Renew sockets once and clear protected state on auth loss
+* [x] Step 4.2: Renew sockets once and clear protected state on auth loss
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 270-290)
-* [ ] Step 4.3: Validate client authentication phase
+* [x] Step 4.3: Validate client authentication phase
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 291-297)
 
-### [ ] Implementation Phase 5: Claims and Ownership Lifecycle
+### [x] Implementation Phase 5: Claims and Ownership Lifecycle
 
 <!-- parallelizable: false -->
 
-* [ ] Step 5.1: Implement atomic claims and quotas
+* [x] Step 5.1: Implement atomic claims and quotas
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 302-320)
-* [ ] Step 5.2: Implement accepted transfer and abandonment
+* [x] Step 5.2: Implement accepted transfer and abandonment
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 321-340)
-* [ ] Step 5.3: Implement recoverable account deletion and restricted operational recovery
+* [x] Step 5.3: Implement recoverable account deletion and restricted operational recovery
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 341-371)
-* [ ] Step 5.4: Validate ownership phase
+* [x] Step 5.4: Validate ownership phase
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 372-378)
 
-### [ ] Implementation Phase 6: Authenticated Protocol-V2 Mutations
+### [x] Implementation Phase 6: Authenticated Protocol-V2 Mutations
 
 <!-- parallelizable: false -->
 
-* [ ] Step 6.1: Define dedicated placement and removal contracts
+* [x] Step 6.1: Define dedicated placement and removal contracts
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 383-399)
-* [ ] Step 6.2: Wire owner-only placement and implement quilt removal
+* [x] Step 6.2: Wire owner-only placement and implement quilt removal
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 400-419)
-* [ ] Step 6.3: Reconcile optimistic client state by patch revisions
+* [x] Step 6.3: Reconcile optimistic client state by patch revisions
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 420-437)
-* [ ] Step 6.4: Validate mutation phase while retaining the rollout flag
+* [x] Step 6.4: Validate mutation phase while retaining the rollout flag
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 438-447)
 
-### [ ] Implementation Phase 7: Deployment, Authenticated E2E, and Rollout
+### [x] Implementation Phase 7: Deployment, Authenticated E2E, and Rollout
 
 <!-- parallelizable: false -->
 
-* [ ] Step 7.1: Replace identity bypasses with a local test OIDC issuer
+* [x] Step 7.1: Replace identity bypasses with a local test OIDC issuer
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 452-475)
-* [ ] Step 7.2: Configure production identity, telemetry, and fail-closed gates
+* [x] Step 7.2: Configure production identity, telemetry, and fail-closed gates
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 476-496)
-* [ ] Step 7.3: Split owner-only and delegated E2E gates before mutation enablement
+* [x] Step 7.3: Split owner-only and delegated E2E gates before mutation enablement
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 497-512)
 
-### [ ] Implementation Phase 8: Final Validation
+### [x] Implementation Phase 8: Final Validation
 
 <!-- parallelizable: false -->
 
-* [ ] Step 8.1: Run focused and full project validation
+* [x] Step 8.1: Run focused and full project validation
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 517-527)
-* [ ] Step 8.2: Rehearse security and rollout failure cases
+* [x] Step 8.2: Rehearse security and rollout failure cases
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 528-531)
-* [ ] Step 8.3: Fix minor issues and report blockers
+* [x] Step 8.3: Fix minor issues and report blockers
   * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 532-536)
 
 ## Planning Log

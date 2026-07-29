@@ -4,13 +4,34 @@ import App from './App'
 import { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from './domain/collaboratorUtils'
 import { resolvePaletteColorSelection } from './ui/palettes'
 import type { SessionSummary } from './network/session'
+import type { MeResponse } from '../../server/src/contracts'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
-const { createSessionMock, listSessionsMock, useSocketConnectionMock, resolveCanvasDebugMock } = vi.hoisted(() => ({
+const { createSessionMock, listSessionsMock, useSocketConnectionMock, resolveCanvasDebugMock, authSessionState } = vi.hoisted(() => ({
   createSessionMock: vi.fn<() => Promise<string>>(),
   listSessionsMock: vi.fn<() => Promise<SessionSummary[]>>(),
   useSocketConnectionMock: vi.fn(() => ({ current: null })),
   resolveCanvasDebugMock: vi.fn(() => false),
+  authSessionState: {
+    status: 'authenticated',
+    principal: {
+      profile: { displayName: 'Ada' },
+      capabilities: {
+        createSession: true,
+        claimPatch: false,
+        transferPatch: false,
+        deleteAccount: true,
+        mutateProtocolV2: false as const,
+      },
+    } as MeResponse | null,
+    error: null as string | null,
+    apiOrigin: 'http://localhost:3001',
+    authenticatedFetch: vi.fn<typeof fetch>(),
+    acquireAccessToken: vi.fn(async () => 'access-token'),
+    login: vi.fn(async () => undefined),
+    logout: vi.fn(async () => undefined),
+    handleAuthLoss: vi.fn(),
+  },
 }))
 
 const sessionState = {
@@ -36,6 +57,10 @@ vi.mock('./network/session', () => ({
 
 vi.mock('./network/useSocketConnection', () => ({
   useSocketConnection: useSocketConnectionMock,
+}))
+
+vi.mock('./auth/useAuthSession', () => ({
+  useAuthSession: () => authSessionState,
 }))
 
 vi.mock('./config/debugFlags', () => ({
@@ -136,6 +161,21 @@ vi.mock('./render/MosaicScene', () => ({
 
 describe('App lobby-first behavior', () => {
   beforeEach(() => {
+    authSessionState.status = 'authenticated'
+    authSessionState.principal = {
+      profile: { displayName: 'Ada' },
+      capabilities: {
+        createSession: true,
+        claimPatch: false,
+        transferPatch: false,
+        deleteAccount: true,
+        mutateProtocolV2: false,
+      },
+    }
+    authSessionState.error = null
+    authSessionState.login.mockClear()
+    authSessionState.logout.mockClear()
+    authSessionState.handleAuthLoss.mockClear()
     sessionState.storedSessionId = 'session-1'
     listSessionsMock.mockReset()
     createSessionMock.mockReset()
@@ -195,9 +235,75 @@ describe('App lobby-first behavior', () => {
     })
 
     expect(createSessionMock).toHaveBeenCalledTimes(1)
-    expect(createSessionMock).toHaveBeenCalledWith({ canvasPreset: 'vast' })
+    expect(createSessionMock).toHaveBeenCalledWith(
+      authSessionState.authenticatedFetch,
+      authSessionState.apiOrigin,
+      { canvasPreset: 'vast' },
+    )
     const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[] | undefined
     expect(lastSocketCall?.[1]).toBe('created-session-1')
+  })
+
+  it('unmounts all protected state and transport data before rendering sign-in after auth loss', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+    const { rerender } = render(<App />)
+
+    await screen.findByRole('button', { name: 'Join' })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+    await screen.findByTestId('mosaic-scene')
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onSnapshot = socketCall[3] as (payload: any) => void
+    const onPointerUpdate = socketCall[8] as (payload: any) => void
+    act(() => {
+      onSnapshot({
+        session: {
+          id: 'session-1',
+          tiles: [{
+            id: 'tile-1',
+            shape: 'square',
+            color: '#000000',
+            material: 'ceramic',
+            transform: { position: { x: 0, y: 0 }, rotation: 0 },
+          }],
+          boundsPolicy: { mode: 'bounded', bounds: { minX: 0, maxX: 10, minY: 0, maxY: 6 } },
+        },
+        clients: [{ clientId: 'remote-client', pointer: { x: 1, y: 1 } }],
+        lastOpSeq: 1,
+        revision: 1,
+      })
+      onPointerUpdate({ clientId: 'remote-client', position: { x: 2, y: 2 } })
+    })
+
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '1')
+    expect(screen.getByLabelText('Active collaborators')).toBeInTheDocument()
+
+    authSessionState.status = 'signed_out'
+    authSessionState.principal = null
+    rerender(<App />)
+
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.queryByTestId('mosaic-scene')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Active collaborators')).not.toBeInTheDocument()
+    expect(screen.queryByText('Choose a Canvas')).not.toBeInTheDocument()
+
+    authSessionState.status = 'authenticated'
+    authSessionState.principal = {
+      profile: { displayName: 'Ada' },
+      capabilities: {
+        createSession: true,
+        claimPatch: false,
+        transferPatch: false,
+        deleteAccount: true,
+        mutateProtocolV2: false,
+      },
+    }
+    rerender(<App />)
+
+    await screen.findByText('Choose a Canvas')
+    expect(screen.queryByTestId('mosaic-scene')).not.toBeInTheDocument()
+    const lastSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    expect(lastSocketCall[1]).toBeNull()
   })
 
   it('seeds collaborators from snapshot and reconciles pointer/join/leave events', async () => {

@@ -9,7 +9,7 @@ const TEST_DATABASE_URL = process.env.E2E_DATABASE_URL ?? 'postgresql://postgres
 
 export default defineConfig({
   testDir: './e2e',
-  testIgnore: ['quilt-reconnect.spec.ts'],
+  testIgnore: ['quilt-reconnect.spec.ts', 'support/**/*.test.ts'],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -17,11 +17,24 @@ export default defineConfig({
   reporter: process.env.CI ? 'line' : [['html', { open: 'never' }]],
   use: {
     baseURL: CLIENT_URL,
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: CLIENT_URL,
+        localStorage: [{ name: 'zzyix:e2e-authenticated', value: 'true' }],
+      }],
+    },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
   webServer: [
+    {
+      command: 'NODE_ENV=test E2E_TEST_MODE=true TEST_OIDC_PORT=3199 node --import tsx/esm e2e/support/testOidcIssuer.ts',
+      url: 'http://127.0.0.1:3199/.well-known/openid-configuration',
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
     {
       command: [
         'E2E_TEST_MODE=true',
@@ -29,6 +42,12 @@ export default defineConfig({
         `E2E_SERVER_URL=${SERVER_URL}`,
         `DATABASE_URL=${TEST_DATABASE_URL}`,
         'NODE_ENV=test',
+        'AUTH_TEST_ISSUER=true',
+        'AUTH_TRUSTED_ISSUER=http://127.0.0.1:3199/',
+        'AUTH_API_AUDIENCE=api://zzyix-e2e',
+        'AUTH_REQUIRED_SCOPE=quilt.access',
+        'AUTH_JWKS_URI=http://127.0.0.1:3199/jwks',
+        'AUTH_ACCEPTED_ALGORITHM=RS256',
         'FEATURE_MULTI_REPLICA_READY=true',
         'FEATURE_QUILT_PROTOCOL_V2_ENABLED=true',
         'LOG_LEVEL=info',
@@ -45,6 +64,7 @@ export default defineConfig({
       command: [
         `VITE_SERVER_URL=${SERVER_URL}`,
         'VITE_E2E_TEST_MODE=true',
+        'VITE_TEST_OIDC_ISSUER=http://127.0.0.1:3199/',
         'npm run dev --workspace=apps/client -- --host 127.0.0.1 --port 4173 --strictPort',
       ].join(' '),
       url: CLIENT_URL,

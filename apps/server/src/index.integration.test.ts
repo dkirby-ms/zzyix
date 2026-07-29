@@ -2,22 +2,28 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   applyPlaceTile,
   buildChunkAggregate,
-  buildPatchRoomAccess,
   buildListSessionsResponse,
   createAuthoritativeSessionState,
   finalizeParticipantPresence,
   getSessionState,
   initializeParticipantPresence,
   isQuiltClientRuntimeMetrics,
+  isQuiltPlaceTileRequest,
+  isQuiltRemoveTileRequest,
   isQuiltRoomRequest,
   isPlaceTilePayload,
+  ownershipRequest,
   isSelectionUpdatePayload,
   registerClientSocket,
   recordQuiltClientRuntimeMetrics,
+  resolveLegacySocketAccess,
   haveEqualChunkScope,
   selectScopedReplayOperations,
   unregisterClientSocket,
+  sendOwnershipResult,
 } from './index.js'
+import { buildPatchRoomAccess } from './realtime/quiltRooms.js'
+import type { PersistedVisibilityPolicy } from './domain/authorizationPolicy.js'
 import type { PatchDeliveryOperation } from './db/repository.js'
 import { vec2 } from './domain/math2d.js'
 import { configureQuiltTelemetry } from './migration/quiltTelemetry.js'
@@ -28,6 +34,39 @@ const nextSessionId = (): string => {
   sessionCounter += 1
   return `integration-session-${sessionCounter}`
 }
+
+describe('ownership HTTP contracts', () => {
+  it('requires UUID operation and resource identifiers', () => {
+    expect(ownershipRequest({
+      operationId: '10000000-0000-4000-8000-000000000001',
+      patchId: '20000000-0000-4000-8000-000000000001',
+    }, ['patchId'])).toBe(true)
+    expect(ownershipRequest({ operationId: 'not-an-id', patchId: 'also-not-an-id' }, ['patchId'])).toBe(false)
+  })
+
+  it('returns the same stable safe error for distinct internal denials', () => {
+    const response = () => {
+      const json = vi.fn()
+      const status = vi.fn(() => ({ json }))
+      return {
+        response: { status, getHeader: vi.fn(() => 'request-1') } as never,
+        json,
+      }
+    }
+    const quota = response()
+    const unavailable = response()
+
+    sendOwnershipResult(quota.response, { succeeded: false, idempotent: false })
+    sendOwnershipResult(unavailable.response, { claimed: false, idempotent: false })
+
+    expect(quota.json).toHaveBeenCalledWith({
+      code: 'ownership_command_denied',
+      message: 'The ownership command could not be completed.',
+      requestId: 'request-1',
+    })
+    expect(unavailable.json).toHaveBeenCalledWith(quota.json.mock.calls[0][0])
+  })
+})
 
 describe('authoritative snapshot reconciliation', () => {
   it('builds snapshot payload from canonical server tiles for first connect', () => {
@@ -885,30 +924,52 @@ describe('multi-client collaboration', () => {
 })
 
 describe('protocol-v2 authorization boundary', () => {
+  const authenticatedPolicy: PersistedVisibilityPolicy = {
+    existence: 'authenticated',
+    fineData: 'authenticated',
+    aggregateData: 'authenticated',
+    presence: 'authenticated',
+    search: 'authenticated',
+    durableEvents: 'authenticated',
+    claimEnabled: false,
+    policyVersion: 1,
+  }
+
   it('does not infer fine, presence, or event visibility from transport identity', () => {
     const anonymousPatch = buildPatchRoomAccess({
       id: 'patch-1',
       state: 'active',
       isMember: false,
+      policy: authenticatedPolicy,
     })
 
     expect(anonymousPatch).toMatchObject({
       publicFine: false,
-      publicAggregate: true,
-      principalFine: false,
-      principalPresence: false,
-      principalEvents: false,
+      publicAggregate: false,
+      principalFine: true,
+      principalPresence: true,
+      principalEvents: true,
     })
   })
 
   it('grants member surfaces according to lifecycle without bypassing deletion', () => {
-    expect(buildPatchRoomAccess({ id: 'patch-1', state: 'active', isMember: true })).toMatchObject({
+    expect(buildPatchRoomAccess({
+      id: 'patch-1',
+      state: 'active',
+      isMember: true,
+      policy: authenticatedPolicy,
+    })).toMatchObject({
       principalFine: true,
       principalAggregate: true,
       principalPresence: true,
       principalEvents: true,
     })
-    expect(buildPatchRoomAccess({ id: 'patch-1', state: 'deleted', isMember: true })).toMatchObject({
+    expect(buildPatchRoomAccess({
+      id: 'patch-1',
+      state: 'deleted',
+      isMember: true,
+      policy: authenticatedPolicy,
+    })).toMatchObject({
       publishesExistence: false,
       principalFine: false,
       principalAggregate: false,
@@ -921,6 +982,72 @@ describe('protocol-v2 authorization boundary', () => {
     expect(isQuiltRoomRequest({ requestId: 'fine:0:0', kind: 'fine', row: 0, column: 0 })).toBe(true)
     expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'owner', row: 0, column: 0 })).toBe(false)
     expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'fine', row: '0', column: 0 })).toBe(false)
+  })
+
+  it('validates dedicated protocol-v2 mutations with complete patch revisions', () => {
+    const request = {
+      quiltId: '20000000-0000-4000-8000-000000000001',
+      operationId: '10000000-0000-4000-8000-000000000001',
+      expectedPatchRevisions: { 'f0000000-0000-4000-8000-000000000001': 4 },
+      tile: {
+        tileId: '40000000-0000-4000-8000-000000000001',
+        shape: 'square',
+        color: '#abc',
+        material: 'ceramic',
+        transform: { position: { x: 1, y: 2 }, rotation: 0 },
+      },
+    }
+
+    expect(isQuiltPlaceTileRequest(request)).toBe(true)
+    expect(isQuiltPlaceTileRequest({ ...request, expectedPatchRevisions: {} })).toBe(false)
+    expect(isQuiltPlaceTileRequest({ ...request, principalId: 'client-controlled' })).toBe(false)
+    expect(isQuiltRemoveTileRequest({
+      quiltId: request.quiltId,
+      operationId: request.operationId,
+      expectedPatchRevisions: request.expectedPatchRevisions,
+      tileId: request.tile.tileId,
+    })).toBe(true)
+    expect(isQuiltRemoveTileRequest({
+      quiltId: request.quiltId,
+      operationId: request.operationId,
+      expectedPatchRevisions: { unknown: 0 },
+      tileId: request.tile.tileId,
+    })).toBe(false)
+  })
+
+  it('fails the monolithic legacy protocol closed unless every exposed patch surface is visible', () => {
+    const baseContext = {
+      topology: {
+        quiltId: 'quilt-1',
+        protocolVersion: 2,
+        topology: 'toroidal' as const,
+        patchRows: 1,
+        patchColumns: 1,
+        patchWidth: 10,
+        patchHeight: 10,
+      },
+      principalId: 'principal-1',
+      patches: [{
+        id: 'patch-1',
+        row: 0,
+        column: 0,
+        state: 'active' as const,
+        revision: 0,
+        isMember: true,
+        isOwner: true,
+        policy: authenticatedPolicy,
+      }],
+    }
+
+    expect(resolveLegacySocketAccess(baseContext)).toEqual({ allowed: true, mutationAllowed: true })
+    expect(resolveLegacySocketAccess({
+      ...baseContext,
+      patches: [{ ...baseContext.patches[0], policy: { ...authenticatedPolicy, presence: 'hidden' }, isMember: false }],
+    })).toEqual({ allowed: false, mutationAllowed: true })
+    expect(resolveLegacySocketAccess({
+      ...baseContext,
+      patches: [{ ...baseContext.patches[0], isOwner: false }],
+    })).toEqual({ allowed: true, mutationAllowed: false })
   })
 
   it('accepts finite normal-operation client runtime measurements', () => {

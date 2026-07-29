@@ -1,4 +1,4 @@
-import type { QuiltPatchCursor } from '../../../server/src/contracts'
+import type { QuiltPatchCursor, QuiltPatchRevisionMap } from '../../../server/src/contracts'
 import type { TileInstance } from './placementSolver'
 
 export type QuiltCachePinReason = 'optimistic' | 'undo' | 'selection'
@@ -22,7 +22,7 @@ export type QuiltCachePatch = {
 export type QuiltCacheState = {
   patches: Record<string, QuiltCachePatch>
   tiles: Record<string, TileInstance>
-  optimistic: Record<string, { patchId: string; tile: TileInstance }>
+  optimistic: Record<string, { operationId: string; patchIds: string[]; tile: TileInstance }>
   undo: Record<string, QuiltCacheUndoMetadata>
   selections: Record<string, string>
   pins: Record<string, QuiltCachePinReason[]>
@@ -60,6 +60,9 @@ export const mergeQuiltPatchSnapshot = (
     accessedAt?: number
   },
 ): QuiltCacheState => {
+  const currentPatch = state.patches[input.patchId]
+  if (currentPatch && input.cursor.revision < currentPatch.cursor.revision) return state
+
   const tiles = { ...state.tiles }
   input.tiles.forEach((tile) => {
     tiles[tile.id] = tile
@@ -92,6 +95,7 @@ export const applyQuiltPatchPlacement = (
 ): QuiltCacheState => {
   const patch = state.patches[patchId]
   if (!patch) return state
+  if (cursor.revision <= patch.cursor.revision) return state
 
   const next = {
     ...state,
@@ -117,6 +121,7 @@ export const applyQuiltPatchRemoval = (
 ): QuiltCacheState => {
   const patch = state.patches[patchId]
   if (!patch) return state
+  if (cursor.revision <= patch.cursor.revision) return state
 
   const next = {
     ...state,
@@ -157,12 +162,16 @@ export const unpinQuiltTile = (
 
 export const setQuiltOptimisticTile = (
   state: QuiltCacheState,
-  patchId: string,
+  patchIds: string | string[],
   tile: TileInstance,
+  operationId: string = tile.id,
 ): QuiltCacheState => pinQuiltTile({
   ...state,
   tiles: { ...state.tiles, [tile.id]: tile },
-  optimistic: { ...state.optimistic, [tile.id]: { patchId, tile } },
+  optimistic: {
+    ...state.optimistic,
+    [tile.id]: { operationId, patchIds: unique(Array.isArray(patchIds) ? patchIds : [patchIds]), tile },
+  },
 }, tile.id, 'optimistic')
 
 export const clearQuiltOptimisticTile = (
@@ -173,6 +182,27 @@ export const clearQuiltOptimisticTile = (
   delete optimistic[tileId]
   return unpinQuiltTile({ ...state, optimistic }, tileId, 'optimistic')
 }
+
+export const reconcileQuiltMutationRevisions = (
+  state: QuiltCacheState,
+  patchRevisions: QuiltPatchRevisionMap,
+  eventIds: Record<string, string>,
+): QuiltCacheState => ({
+  ...state,
+  patches: Object.fromEntries(Object.entries(state.patches).map(([patchId, patch]) => {
+    const revision = patchRevisions[patchId]
+    if (revision === undefined || revision < patch.cursor.revision) return [patchId, patch]
+    return [patchId, {
+      ...patch,
+      cursor: {
+        ...patch.cursor,
+        opSeq: Math.max(patch.cursor.opSeq, revision),
+        revision,
+        eventId: eventIds[patchId] ?? patch.cursor.eventId,
+      },
+    }]
+  })),
+})
 
 export const setQuiltUndoMetadata = (
   state: QuiltCacheState,
@@ -219,7 +249,7 @@ export const evictQuiltCache = (
       if (patch.tileIds.includes(tileId)) pinnedPatchIds.add(patch.patchId)
     })
   })
-  Object.values(state.optimistic).forEach((operation) => pinnedPatchIds.add(operation.patchId))
+  Object.values(state.optimistic).forEach((operation) => operation.patchIds.forEach((patchId) => pinnedPatchIds.add(patchId)))
   Object.values(state.undo).forEach((metadata) => pinnedPatchIds.add(metadata.patchId))
 
   const retained = Object.values(state.patches)

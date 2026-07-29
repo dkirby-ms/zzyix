@@ -51,6 +51,14 @@ Configure these GitHub environment variables for each deployment environment:
 	`RS256` unless the tenant registration requires another reviewed algorithm
 * `SERVER_CORS_ORIGIN`: Exact deployed client origin
 * `MIGRATION_JOB_NAME`: Environment-specific Container Apps migration job name
+* `AUTH_TELEMETRY_GATE_APPROVED`: Confirms dashboards and alerts cover request,
+	socket, operation, replica, policy version, and outcome signals
+* `AUTH_ROLLBACK_GATE_APPROVED`: Confirms the release has an approved rollback
+	owner and trigger
+* `AUTH_RETENTION_POLICY_APPROVED`: Confirms privacy and legal approval for
+	authorization audit and pseudonymous attribution retention
+* `AUTH_DELETION_COMPLETION_POLICY_APPROVED`: Confirms approved deletion
+	completion behavior when ownership remains blocked
 
 The corresponding client values are `AUTH_AUTHORITY`, `AUTH_CLIENT_ID`,
 `AUTH_API_SCOPE`, `AUTH_API_ORIGIN`, `AUTH_REDIRECT_URI`, and
@@ -70,6 +78,17 @@ The trusted issuer must match tokens exactly. Do not derive it from email,
 display name, tenant branding, or the requested authority. The API audience and
 delegated scope must match the exposed API registration. Test issuer keys and
 settings must never be configured in production.
+
+Production startup and CD both require every operational approval above. A
+missing or false value stops rollout before a new application revision starts.
+Migration failure also stops deployment because the release-owned migration job
+must complete successfully before the server step runs.
+
+Structured server telemetry is recursively redacted at the logging boundary.
+Do not add raw bearer tokens, authorization headers, provider subjects, or email
+addresses to logs or general telemetry. Internal request, socket, operation,
+principal, replica, policy-version, and outcome identifiers remain available for
+correlation.
 
 Target-subscription administrators must confirm that the subscription can host
 an External ID external tenant and approve tenant branding, domain, and enabled
@@ -104,6 +123,28 @@ negotiate v1. `FEATURE_QUILT_DUAL_READ_ENABLED=true` enables migration dual
 reads globally. Otherwise, dual reads run only for selected canary pairs.
 
 Protocol v1 remains available only through explicit compatibility settings. V2 connections suppress session-wide durable mutation events. Toroidal mutation stays disabled until authentication maps an external identity to a stable internal principal; `clientId`, socket identity, and attribution fields are not principals.
+
+### Mutation acceptance gates
+
+The initial owner-only gate covers authenticated owner placement and removal,
+denied non-owner mutation, stale revision rejection, canonical aliases, scoped
+post-commit fanout, expiry renewal, and two-replica reconnect convergence. Run:
+
+```bash
+npm run test:e2e:owner-only
+npm run test:e2e:multi-replica
+```
+
+Delegated-capability and moderator acceptance remains deferred. The
+`test:e2e:delegated` command intentionally fails so automation cannot treat that
+work as complete.
+
+Production CD always writes `FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false`.
+Changing that default requires separate reviewed workflow work after the
+owner-only gate, migration rehearsal, telemetry, retention, deletion, and
+rollback approvals are recorded. Runtime startup additionally requires
+`AUTH_OWNER_E2E_GATE_APPROVED`, `AUTH_MIGRATION_REHEARSAL_APPROVED`, and
+`AUTH_MUTATION_ROLLBACK_APPROVED` whenever mutation is requested.
 
 Rollout notes:
 - Keep `FEATURE_CHUNK_STREAMING_ENABLED=false` to hard-disable chunk streaming and preserve legacy session snapshot + tile events.

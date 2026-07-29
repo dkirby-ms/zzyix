@@ -3,7 +3,9 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   ClientToServerEvents,
   QuiltPatchEventPayload,
+  QuiltPlaceTileAck,
   QuiltProtocolHandshake,
+  QuiltRemoveTileAck,
   QuiltScopedSnapshotPayload,
   ServerToClientEvents,
   SubscribeQuiltAreaAck,
@@ -11,6 +13,7 @@ import type {
 
 const REPLICA_A = 'http://127.0.0.1:3201'
 const REPLICA_B = 'http://127.0.0.1:3202'
+const OIDC_ISSUER = 'http://127.0.0.1:3299/'
 const TOKEN = process.env.E2E_RESET_TOKEN ?? 'zzyix-e2e-token'
 type TestSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
@@ -22,9 +25,37 @@ const once = <T>(socket: TestSocket, event: keyof ServerToClientEvents): Promise
   })
 })
 
-const connect = async (url: string, canvasId: string, principalId?: string): Promise<{ socket: TestSocket; protocol: QuiltProtocolHandshake }> => {
+const onceMatching = <T>(
+  socket: TestSocket,
+  event: keyof ServerToClientEvents,
+  predicate: (payload: T) => boolean,
+): Promise<T> => new Promise((resolve, reject) => {
+  const timeout = setTimeout(() => {
+    socket.off(event, listener as never)
+    reject(new Error(`Timed out waiting for matching ${event}`))
+  }, 10_000)
+  const listener = (payload: T): void => {
+    if (!predicate(payload)) return
+    clearTimeout(timeout)
+    socket.off(event, listener as never)
+    resolve(payload)
+  }
+  socket.on(event, listener as never)
+})
+
+const issueToken = async (subject: string): Promise<string> => {
+  const response = await fetch(new URL('token', OIDC_ISSUER), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ subject }),
+  })
+  expect(response.ok).toBe(true)
+  return (await response.json() as { access_token: string }).access_token
+}
+
+const connect = async (url: string, canvasId: string, token: string): Promise<{ socket: TestSocket; protocol: QuiltProtocolHandshake }> => {
   const socket: TestSocket = io(url, {
-    auth: { sessionId: canvasId, clientId: randomClientId(), protocolVersion: 2, testPrincipalId: principalId },
+    auth: { token, sessionId: canvasId, clientId: randomClientId(), protocolVersion: 2 },
     transports: ['websocket'],
     reconnection: false,
     autoConnect: false,
@@ -44,36 +75,53 @@ const randomClientId = (): string => `e2e-${Date.now()}-${Math.random()}`
 test('reconnects through another replica with cursor convergence and an attachment payload above 8 KB', async ({ request }) => {
   const setup = await request.post(`${REPLICA_A}/test/quilt/setup`, {
     headers: { 'x-zzyix-test-token': TOKEN },
+    data: { externalSubject: `e2e-reconnect-owner-${crypto.randomUUID()}` },
   })
   expect(setup.ok()).toBeTruthy()
-  const { canvasId, quiltId, patchId, principalId } = await setup.json() as {
+  const { canvasId, quiltId, patchId, externalSubject } = await setup.json() as {
     canvasId: string
     quiltId: string
     patchId: string
-    principalId: string
+    externalSubject: string
   }
+  const deniedToken = await issueToken('e2e-denied-member')
+  const ownerToken = await issueToken(externalSubject)
 
-  const { socket: first, protocol: firstProtocol } = await connect(REPLICA_A, canvasId)
+  const { socket: first, protocol: firstProtocol } = await connect(REPLICA_A, canvasId, deniedToken)
   expect(firstProtocol.selectedProtocolVersion).toBe(2)
-  const forbidden = await new Promise<SubscribeQuiltAreaAck>((resolve) => first.emit('subscribe_quilt_area', {
+  const denied = await new Promise<QuiltPlaceTileAck>((resolve) => first.emit('quilt_place_tile', {
     quiltId,
-    rooms: [{ requestId: 'fine', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0'] }],
+    operationId: crypto.randomUUID(),
+    expectedPatchRevisions: { [patchId]: 0 },
+    tile: {
+      tileId: crypto.randomUUID(),
+      shape: 'square',
+      color: '#ff0000',
+      material: 'ceramic',
+      transform: { position: { x: 5, y: 5 }, rotation: 0, mirrored: false },
+    },
   }, resolve))
-  expect(forbidden.outcomes).toEqual([{ requestId: 'fine', status: 'forbidden', reason: 'NOT_VISIBLE' }])
+  expect(denied).toMatchObject({ status: 'rejected', code: 'UNAUTHORIZED' })
   first.disconnect()
 
-  const { socket: second, protocol: secondProtocol } = await connect(REPLICA_B, canvasId, principalId)
+  const { socket: second, protocol: secondProtocol } = await connect(REPLICA_B, canvasId, ownerToken)
   expect(secondProtocol.topology?.topology).toBe('toroidal')
-  const aggregateSnapshotPromise = once<QuiltScopedSnapshotPayload>(second, 'quilt_patch_snapshot')
+  expect(secondProtocol.mutationEnabled).toBe(true)
+  const aggregateSnapshotPromise = onceMatching<QuiltScopedSnapshotPayload>(
+    second,
+    'quilt_patch_snapshot',
+    (payload) => payload.payloadMode === 'aggregate',
+  )
   const subscription = await new Promise<SubscribeQuiltAreaAck>((resolve) => second.emit('subscribe_quilt_area', {
     quiltId,
     rooms: [
+      { requestId: 'fine-events', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0'] },
       { requestId: 'aggregate-a', kind: 'aggregate', row: 0, column: 0, chunkIds: ['0:0'] },
       { requestId: 'aggregate-alias', kind: 'aggregate', row: 1, column: 2, chunkIds: ['0:0'] },
     ],
   }, resolve))
   expect(subscription.outcomes.every((outcome) => outcome.status === 'accepted')).toBe(true)
-  expect(Object.keys(subscription.acceptedCursors)).toHaveLength(1)
+  expect(Object.keys(subscription.acceptedCursors)).toHaveLength(2)
   const aggregateSnapshot = await aggregateSnapshotPromise
   expect(aggregateSnapshot.payloadMode).toBe('aggregate')
   expect(aggregateSnapshot.tiles).toEqual([])
@@ -85,6 +133,50 @@ test('reconnects through another replica with cursor convergence and an attachme
       byMaterial: { ceramic: 1 },
     },
   }])
+
+  const mutationEventPromise = once<QuiltPatchEventPayload>(second, 'quilt_patch_event')
+  const placementOperationId = crypto.randomUUID()
+  const placement = await new Promise<QuiltPlaceTileAck>((resolve) => second.emit('quilt_place_tile', {
+    quiltId,
+    operationId: placementOperationId,
+    expectedPatchRevisions: { [patchId]: 0 },
+    tile: {
+      tileId: crypto.randomUUID(),
+      shape: 'square',
+      color: '#abcdef',
+      material: 'glass',
+      transform: { position: { x: 2, y: 2 }, rotation: 0, mirrored: false },
+    },
+  }, resolve))
+  expect(placement).toMatchObject({ status: 'accepted', operationId: placementOperationId })
+  if (placement.status !== 'accepted') throw new Error('Owner placement should be accepted')
+  const mutationEvent = await mutationEventPromise
+  expect(mutationEvent.operation).toMatchObject({ tile: { id: placement.tile.id } })
+
+  const stale = await new Promise<QuiltPlaceTileAck>((resolve) => second.emit('quilt_place_tile', {
+    quiltId,
+    operationId: crypto.randomUUID(),
+    expectedPatchRevisions: { [patchId]: 0 },
+    tile: {
+      tileId: crypto.randomUUID(),
+      shape: 'square',
+      color: '#fedcba',
+      material: 'stone',
+      transform: { position: { x: 4, y: 4 }, rotation: 0, mirrored: false },
+    },
+  }, resolve))
+  expect(stale).toMatchObject({ status: 'rejected', code: 'STALE_REVISION' })
+
+  const removalEventPromise = once<QuiltPatchEventPayload>(second, 'quilt_patch_event')
+  const removal = await new Promise<QuiltRemoveTileAck>((resolve) => second.emit('quilt_remove_tile', {
+    quiltId,
+    operationId: crypto.randomUUID(),
+    expectedPatchRevisions: placement.patchRevisions,
+    tileId: placement.tile.id,
+  }, resolve))
+  expect(removal).toMatchObject({ status: 'accepted' })
+  const removalEvent = await removalEventPromise
+  expect(removalEvent.operation).toMatchObject({ tileId: placement.tile.id })
 
   const eventPromise = once<QuiltPatchEventPayload>(second, 'quilt_patch_event')
   const attachment = 'x'.repeat(9 * 1024)
@@ -109,10 +201,14 @@ test('reconnects through another replica with cursor convergence and an attachme
   expect(published.attachmentBytes).toBeGreaterThan(8 * 1024)
   second.disconnect()
 
-  const { socket: reconnected, protocol: reconnectProtocol } = await connect(REPLICA_B, canvasId, principalId)
+  const { socket: reconnected, protocol: reconnectProtocol } = await connect(REPLICA_A, canvasId, await issueToken(externalSubject))
   expect(reconnectProtocol.selectedProtocolVersion).toBe(2)
   const eventRoomId = `quilt:${quiltId}:patch:0:0:events`
-  const recoveredEventPromise = once<QuiltPatchEventPayload>(reconnected, 'quilt_patch_event')
+  const recoveredEventPromise = onceMatching<QuiltPatchEventPayload>(
+    reconnected,
+    'quilt_patch_event',
+    (payload) => payload.eventId === published.eventId,
+  )
   const recovered = await new Promise<SubscribeQuiltAreaAck>((resolve) => reconnected.emit('subscribe_quilt_area', {
     quiltId,
     rooms: [{ requestId: 'events-reconnect', kind: 'events', row: 0, column: 0, chunkIds: ['0:0'] }],

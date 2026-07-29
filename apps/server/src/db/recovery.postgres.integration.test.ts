@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { canvases, patches, principals, quilts, tileSpatialRefs, tiles } from './schema.js'
+import { eq } from 'drizzle-orm'
+import { canvases, patches, patchVisibilityPolicies, principals, quilts, tileSpatialRefs, tiles } from './schema.js'
 import {
+  createProtectedSession,
   loadPatchDeliverySnapshot,
+  listSessionSummaries,
   persistQuiltTilePlacement,
   pruneRetention,
   reconstructPatchState,
   savePatchSnapshot,
+  ResourceNotFoundError,
 } from './repository.js'
 import { configureQuiltTelemetry } from '../migration/quiltTelemetry.js'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
@@ -14,6 +18,7 @@ import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/p
 const CANVAS_ID = '50000000-0000-4000-8000-000000000001'
 const QUILT_ID = '60000000-0000-4000-8000-000000000001'
 const PRINCIPAL_ID = '70000000-0000-4000-8000-000000000001'
+const NON_MEMBER_PRINCIPAL_ID = '70000000-0000-4000-8000-000000000002'
 const ACTIVE_PATCH_ID = '80000000-0000-4000-8000-000000000001'
 const QUIET_PATCH_ID = '80000000-0000-4000-8000-000000000002'
 
@@ -36,7 +41,10 @@ describe('authoritative patch recovery with retention', () => {
   beforeAll(async () => {
     database = await createPostgresTestDatabase('zzyix_recovery')
     await database.db.insert(canvases).values({ id: CANVAS_ID })
-    await database.db.insert(principals).values({ id: PRINCIPAL_ID, kind: 'human' })
+    await database.db.insert(principals).values([
+      { id: PRINCIPAL_ID, kind: 'human' },
+      { id: NON_MEMBER_PRINCIPAL_ID, kind: 'human' },
+    ])
     await database.db.insert(quilts).values({
       id: QUILT_ID,
       legacyCanvasId: CANVAS_ID,
@@ -64,6 +72,10 @@ describe('authoritative patch recovery with retention', () => {
         ownerPrincipalId: PRINCIPAL_ID,
         state: 'active',
       },
+    ])
+    await database.db.insert(patchVisibilityPolicies).values([
+      { patchId: ACTIVE_PATCH_ID },
+      { patchId: QUIET_PATCH_ID },
     ])
     const active = await persistQuiltTilePlacement({
       quiltId: QUILT_ID,
@@ -121,11 +133,95 @@ describe('authoritative patch recovery with retention', () => {
       chunkY: 0,
     })
 
-    const snapshot = await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, { chunkIds: ['0:0', '1:0'] })
+    const snapshot = await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, {
+      principalId: PRINCIPAL_ID,
+      chunkIds: ['0:0', '1:0'],
+    })
 
     expect(snapshot.tiles.map((tile) => tile.id)).toEqual([tileId])
     expect(snapshot.tilesByChunk['0:0']?.map((tile) => tile.id)).toEqual([tileId])
     expect(snapshot.tilesByChunk['1:0']?.map((tile) => tile.id)).toEqual([tileId])
+  })
+
+  it('makes hidden and unknown patch delivery indistinguishable', async () => {
+    await database.db
+      .update(patchVisibilityPolicies)
+      .set({ fineData: 'hidden' })
+      .where(eq(patchVisibilityPolicies.patchId, ACTIVE_PATCH_ID))
+
+    const hidden = loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, { principalId: NON_MEMBER_PRINCIPAL_ID })
+    const unknown = loadPatchDeliverySnapshot('80000000-0000-4000-8000-000000000099', {
+      principalId: NON_MEMBER_PRINCIPAL_ID,
+    })
+
+    await expect(hidden).rejects.toBeInstanceOf(ResourceNotFoundError)
+    await expect(unknown).rejects.toBeInstanceOf(ResourceNotFoundError)
+
+    await database.db
+      .update(patchVisibilityPolicies)
+      .set({ fineData: 'authenticated' })
+      .where(eq(patchVisibilityPolicies.patchId, ACTIVE_PATCH_ID))
+  })
+
+  it('filters hidden catalog entries while retaining owner visibility', async () => {
+    await database.db
+      .update(patchVisibilityPolicies)
+      .set({ existence: 'hidden' })
+      .where(eq(patchVisibilityPolicies.patchId, ACTIVE_PATCH_ID))
+    await database.db
+      .update(patchVisibilityPolicies)
+      .set({ existence: 'hidden' })
+      .where(eq(patchVisibilityPolicies.patchId, QUIET_PATCH_ID))
+
+    await expect(listSessionSummaries(NON_MEMBER_PRINCIPAL_ID)).resolves.toEqual([])
+    await expect(listSessionSummaries(PRINCIPAL_ID)).resolves.toMatchObject([{ id: CANVAS_ID }])
+
+    await database.db
+      .update(patchVisibilityPolicies)
+      .set({ existence: 'authenticated' })
+      .where(eq(patchVisibilityPolicies.patchId, ACTIVE_PATCH_ID))
+    await database.db
+      .update(patchVisibilityPolicies)
+      .set({ existence: 'authenticated' })
+      .where(eq(patchVisibilityPolicies.patchId, QUIET_PATCH_ID))
+  })
+
+  it('creates new sessions with an unclaimed authenticated policy and mutation disabled', async () => {
+    const sessionId = randomUUID()
+    await createProtectedSession(sessionId, {
+      canvasSize: { width: 10.4, height: 6.8 },
+      boundsPolicy: {
+        mode: 'bounded',
+        bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
+      },
+    })
+
+    const rows = await queryWithConnection<{
+      state: string
+      ownerPrincipalId: string | null
+      existence: string
+      fineData: string
+      claimEnabled: boolean
+    }>(database, `
+      SELECT
+        p.state,
+        p.owner_principal_id AS "ownerPrincipalId",
+        v.existence,
+        v.fine_data AS "fineData",
+        v.claim_enabled AS "claimEnabled"
+      FROM quilts q
+      JOIN patches p ON p.quilt_id = q.id
+      JOIN patch_visibility_policies v ON v.patch_id = p.id
+      WHERE q.legacy_canvas_id = $1
+    `, [sessionId])
+
+    expect(rows).toEqual([{
+      state: 'unclaimed',
+      ownerPrincipalId: null,
+      existence: 'authenticated',
+      fineData: 'authenticated',
+      claimEnabled: false,
+    }])
   })
 
   it('reconstructs from authoritative rows after operation history expires', async () => {
@@ -181,7 +277,7 @@ describe('authoritative patch recovery with retention', () => {
     await blocker.query('LOCK TABLE quilts IN ACCESS EXCLUSIVE MODE')
 
     try {
-      const snapshotPromise = loadPatchDeliverySnapshot(ACTIVE_PATCH_ID)
+      const snapshotPromise = loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, { principalId: PRINCIPAL_ID })
       await expect.poll(async () => {
         const rows = await queryWithConnection<{ waiting: boolean }>(database,
           `SELECT EXISTS (
@@ -233,6 +329,7 @@ describe('authoritative patch recovery with retention', () => {
   it('falls back to legacy canvas rows when a bounded compatibility patch diverges', async () => {
     const pool = database.createConnection()
     await pool.query('DELETE FROM tile_spatial_refs')
+    await pool.query('DELETE FROM authorization_audit_events WHERE patch_id = $1', [QUIET_PATCH_ID])
     await pool.query(
       'UPDATE tiles SET anchor_patch_id = $1 WHERE canvas_id = $2',
       [ACTIVE_PATCH_ID, CANVAS_ID],
@@ -249,10 +346,14 @@ describe('authoritative patch recovery with retention', () => {
     const observer = vi.fn()
     configureQuiltTelemetry(observer)
     try {
-      await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, { dualReadEnabled: false })
+      await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, {
+        principalId: PRINCIPAL_ID,
+        dualReadEnabled: false,
+      })
       expect(observer.mock.calls.some(([event]) => event.name === 'dual_read_parity')).toBe(false)
 
       const snapshot = await loadPatchDeliverySnapshot(ACTIVE_PATCH_ID, {
+        principalId: PRINCIPAL_ID,
         dualReadEnabled: true,
         canary: true,
       })

@@ -11,10 +11,12 @@
     "db:apply": "node dist/db/migrate.js",
     "db:backfill:quilts": "node dist/db/quiltBackfill.js",
     "db:parity:quilts": "node dist/db/quiltParityCli.js",
+    "operations:principal-recovery": "node dist/operations/principalRecoveryCli.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:rollback": "echo 'Rollback uses authored reverse SQL migrations; no automatic rollback command is configured.'",
     "test": "vitest run --coverage",
+    "test:authorization-benchmark": "RUN_AUTHORIZATION_BENCHMARKS=true vitest run src/db/authorization.benchmark.test.ts --reporter=verbose",
     "test:watch": "vitest"
   },
   "dependencies": {
@@ -22,6 +24,7 @@
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.0",
+    "jose": "^6.2.4",
     "node-cron": "^4.2.1",
     "pg": "^8.16.3",
     "socket.io": "^4.8.2"

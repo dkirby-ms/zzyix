@@ -1,19 +1,24 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
+import { and, asc, countDistinct, desc, eq, inArray, isNull, lte, max, or, sql } from 'drizzle-orm'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
 import type { BoundsPolicy, ClientPresence, Session, SessionCanvasConfig, TileInstance } from '../contracts.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
 import {
   canvases,
+  authorizationAuditEvents,
   externalPrincipalMappings,
   idempotencyKeys,
   operationLog,
   participants,
   patchMemberships,
+  patchClaimQuotaRecords,
+  pendingOwnershipTransfers,
   patchOperations,
   patches,
   patchSnapshots,
+  patchVisibilityPolicies,
+  principals,
   quilts,
   snapshots,
   tileSpatialRefs,
@@ -34,6 +39,12 @@ import {
 } from '../domain/quiltTopology.js'
 import { compareLegacyAndPatchTiles, type QuiltParityReport } from './quiltParity.js'
 import { emitQuiltTelemetry } from '../migration/quiltTelemetry.js'
+import {
+  canAccessPatchSurface,
+  isPersistedVisibilityPolicy,
+  type PersistedVisibilityPolicy,
+  type VisibilitySurface,
+} from '../domain/authorizationPolicy.js'
 
 export type AuthoritativeSessionRecord = {
   session: Session
@@ -41,6 +52,13 @@ export type AuthoritativeSessionRecord = {
   clients: ClientPresence[]
   lastOpSeq: number
   revision: number
+}
+
+export class ResourceNotFoundError extends Error {
+  constructor() {
+    super('Resource not found.')
+    this.name = 'ResourceNotFoundError'
+  }
 }
 
 export type PersistedMutationResult =
@@ -130,6 +148,23 @@ export type SessionSummaryRecord = {
   canvasConfig?: SessionCanvasConfig
 }
 
+export const loadPrincipalProfile = async (principalId: string): Promise<{
+  displayName?: string
+  email?: string
+}> => {
+  const { db } = getDatabaseBundle()
+  const [principal] = await db
+    .select({ displayName: principals.displayName, email: principals.email })
+    .from(principals)
+    .where(and(eq(principals.id, principalId), eq(principals.status, 'active')))
+    .limit(1)
+  if (!principal) throw new ResourceNotFoundError()
+  return {
+    ...(principal.displayName ? { displayName: principal.displayName } : {}),
+    ...(principal.email ? { email: principal.email } : {}),
+  }
+}
+
 export type ChunkCoordinate = {
   x: number
   y: number
@@ -150,6 +185,8 @@ export type QuiltPlacementResult =
       committed: true
       idempotent: boolean
       operationId: string
+      eventIds: Record<string, string>
+      patchChunkIds: Record<string, string[]>
       tile: TileInstance
       patchRevisions: Record<string, number>
     }
@@ -158,7 +195,618 @@ export type QuiltPlacementResult =
       reason: 'UNAUTHORIZED' | 'STALE_REVISION' | 'OUT_OF_ORDER_REVISION' | 'PLACEMENT_REJECTED'
     }
 
+export type QuiltRemovalResult =
+  | {
+      committed: true
+      idempotent: boolean
+      operationId: string
+      eventIds: Record<string, string>
+      patchChunkIds: Record<string, string[]>
+      tileId: string
+      patchRevisions: Record<string, number>
+    }
+  | {
+      committed: false
+      reason: 'UNAUTHORIZED' | 'STALE_REVISION' | 'OUT_OF_ORDER_REVISION' | 'RESOURCE_UNAVAILABLE'
+    }
+
+export type PatchClaimResult = {
+  claimed: boolean
+  idempotent: boolean
+  reason?: 'PRINCIPAL_INELIGIBLE' | 'PATCH_UNAVAILABLE' | 'CLAIMS_DISABLED' | 'QUOTA_EXCEEDED'
+  revision?: number
+}
+
 const toMillis = (value: Date): number => value.getTime()
+
+const CLAIM_ATTEMPT_WINDOW_MS = 10 * 60 * 1000
+const CLAIM_SUCCESS_WINDOW_MS = 24 * 60 * 60 * 1000
+const CLAIM_ATTEMPT_LIMIT = 3
+
+export const claimPatch = async (params: {
+  operationId: string
+  principalId: string
+  patchId: string
+  requestId?: string
+  attemptedAt?: Date
+}): Promise<PatchClaimResult> => {
+  const { db } = getDatabaseBundle()
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    const [existing] = await tx
+      .select({ outcome: patchClaimQuotaRecords.outcome, reasonCode: patchClaimQuotaRecords.reasonCode })
+      .from(patchClaimQuotaRecords)
+      .where(eq(patchClaimQuotaRecords.operationId, params.operationId))
+      .limit(1)
+    if (existing) {
+      return {
+        claimed: existing.outcome === 'claimed',
+        idempotent: true,
+        ...(existing.reasonCode ? { reason: existing.reasonCode as PatchClaimResult['reason'] } : {}),
+      }
+    }
+
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.principalId}))`)
+    const [patch] = await tx
+      .select({
+        id: patches.id,
+        quiltId: patches.quiltId,
+        state: patches.state,
+        ownerPrincipalId: patches.ownerPrincipalId,
+        revision: patches.revision,
+      })
+      .from(patches)
+      .where(eq(patches.id, params.patchId))
+      .for('update')
+      .limit(1)
+    const [claimPolicy] = patch
+      ? await tx
+          .select({
+            claimEnabled: patchVisibilityPolicies.claimEnabled,
+            policyVersion: patchVisibilityPolicies.policyVersion,
+          })
+          .from(patchVisibilityPolicies)
+          .where(eq(patchVisibilityPolicies.patchId, patch.id))
+          .limit(1)
+      : []
+
+    const attemptedAt = params.attemptedAt ?? new Date()
+    let reason: PatchClaimResult['reason']
+    const [principal] = await tx
+      .select({ kind: principals.kind, status: principals.status })
+      .from(principals)
+      .where(eq(principals.id, params.principalId))
+      .for('update')
+      .limit(1)
+
+    if (!principal || principal.kind !== 'human' || principal.status !== 'active') {
+      reason = 'PRINCIPAL_INELIGIBLE'
+    } else if (!patch || patch.state !== 'unclaimed' || patch.ownerPrincipalId !== null) {
+      reason = 'PATCH_UNAVAILABLE'
+    } else if (claimPolicy?.claimEnabled !== true) {
+      reason = 'CLAIMS_DISABLED'
+    } else {
+      const [quota] = await tx
+        .select({
+          recentAttempts: sql<number>`count(*) filter (where ${patchClaimQuotaRecords.attemptedAt} >= ${new Date(attemptedAt.getTime() - CLAIM_ATTEMPT_WINDOW_MS)})`,
+          recentSuccesses: sql<number>`count(*) filter (where ${patchClaimQuotaRecords.outcome} = 'claimed' and ${patchClaimQuotaRecords.attemptedAt} >= ${new Date(attemptedAt.getTime() - CLAIM_SUCCESS_WINDOW_MS)})`,
+        })
+        .from(patchClaimQuotaRecords)
+        .where(eq(patchClaimQuotaRecords.principalId, params.principalId))
+      const [activeOwnership] = await tx
+        .select({ id: patches.id })
+        .from(patches)
+        .where(and(
+          eq(patches.quiltId, patch.quiltId),
+          eq(patches.ownerPrincipalId, params.principalId),
+          eq(patches.state, 'active'),
+        ))
+        .limit(1)
+      if (Number(quota?.recentAttempts ?? 0) >= CLAIM_ATTEMPT_LIMIT
+        || Number(quota?.recentSuccesses ?? 0) >= 1
+        || activeOwnership) {
+        reason = 'QUOTA_EXCEEDED'
+      }
+    }
+
+    const outcome = reason ? (reason === 'PATCH_UNAVAILABLE' ? 'conflict' : 'denied') : 'claimed'
+    if (patch) {
+      await tx.insert(patchClaimQuotaRecords).values({
+        operationId: params.operationId,
+        principalId: params.principalId,
+        quiltId: patch.quiltId,
+        patchId: params.patchId,
+        outcome,
+        reasonCode: reason ?? null,
+        attemptedAt,
+      })
+    }
+
+    let revision: number | undefined
+    if (!reason && patch) {
+      revision = patch.revision + 1
+      await tx
+        .update(patches)
+        .set({
+          ownerPrincipalId: params.principalId,
+          state: 'active',
+          revision,
+          updatedAt: attemptedAt,
+        })
+        .where(eq(patches.id, patch.id))
+      await tx.insert(patchMemberships).values({
+        patchId: patch.id,
+        principalId: params.principalId,
+        role: 'owner',
+        createdAt: attemptedAt,
+      })
+    }
+
+    await tx.insert(authorizationAuditEvents).values({
+      eventType: 'patch_claim',
+      attemptedAction: 'claim_patch',
+      outcome: reason ? 'denied' : 'succeeded',
+      reasonCode: reason ?? null,
+      actorPrincipalId: params.principalId,
+      subjectPrincipalId: params.principalId,
+      quiltId: patch?.quiltId ?? null,
+      patchId: patch?.id ?? null,
+      requestId: params.requestId,
+      operationId: params.operationId,
+      sourceChannel: 'http',
+      policyVersion: claimPolicy?.policyVersion ?? null,
+      beforeState: patch ? { state: patch.state, revision: patch.revision } : null,
+      afterState: reason ? null : { state: 'active', revision },
+      createdAt: attemptedAt,
+    })
+
+    return {
+      claimed: !reason,
+      idempotent: false,
+      ...(reason ? { reason } : { revision }),
+    }
+  })
+}
+
+export type OwnershipCommandResult = {
+  succeeded: boolean
+  idempotent: boolean
+  reason?: 'PRINCIPAL_INELIGIBLE' | 'NOT_OWNER' | 'TRANSFER_PENDING' | 'TRANSFER_UNAVAILABLE'
+  transferId?: string
+  revision?: number
+}
+
+const findCompletedAudit = async (
+  tx: DatabaseClient,
+  operationId: string,
+  eventType: string,
+): Promise<boolean> => {
+  const [event] = await tx
+    .select({ id: authorizationAuditEvents.id })
+    .from(authorizationAuditEvents)
+    .where(and(
+      eq(authorizationAuditEvents.operationId, operationId),
+      eq(authorizationAuditEvents.eventType, eventType),
+    ))
+    .limit(1)
+  return Boolean(event)
+}
+
+const insertOwnershipAudit = async (
+  tx: DatabaseClient,
+  params: {
+    eventType: string
+    attemptedAction: string
+    succeeded: boolean
+    reason?: string
+    actorPrincipalId?: string
+    subjectPrincipalId?: string
+    quiltId?: string
+    patchId?: string
+    operationId: string
+    sourceChannel?: 'http' | 'job' | 'operation'
+    beforeState?: Record<string, unknown>
+    afterState?: Record<string, unknown>
+    createdAt: Date
+  },
+): Promise<void> => {
+  await tx.insert(authorizationAuditEvents).values({
+    eventType: params.eventType,
+    attemptedAction: params.attemptedAction,
+    outcome: params.succeeded ? 'succeeded' : 'denied',
+    reasonCode: params.reason ?? null,
+    actorPrincipalId: params.actorPrincipalId ?? null,
+    subjectPrincipalId: params.subjectPrincipalId ?? null,
+    quiltId: params.quiltId ?? null,
+    patchId: params.patchId ?? null,
+    operationId: params.operationId,
+    sourceChannel: params.sourceChannel ?? 'http',
+    beforeState: params.beforeState ?? null,
+    afterState: params.afterState ?? null,
+    createdAt: params.createdAt,
+  })
+}
+
+export const createOwnershipTransfer = async (params: {
+  operationId: string
+  patchId: string
+  senderPrincipalId: string
+  recipientPrincipalId: string
+  createdAt?: Date
+}): Promise<OwnershipCommandResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    const [existing] = await tx
+      .select({ id: pendingOwnershipTransfers.id })
+      .from(pendingOwnershipTransfers)
+      .where(eq(pendingOwnershipTransfers.operationId, params.operationId))
+      .limit(1)
+    if (existing) return { succeeded: true, idempotent: true, transferId: existing.id }
+
+    const [patch] = await tx.select().from(patches).where(eq(patches.id, params.patchId)).for('update').limit(1)
+    const principalIds = [params.senderPrincipalId, params.recipientPrincipalId].sort()
+    const principalRows = await tx
+      .select({ id: principals.id, kind: principals.kind, status: principals.status })
+      .from(principals)
+      .where(inArray(principals.id, principalIds))
+      .orderBy(asc(principals.id))
+      .for('update')
+    const recipient = principalRows.find((principal) => principal.id === params.recipientPrincipalId)
+    const [pending] = patch
+      ? await tx
+          .select({ id: pendingOwnershipTransfers.id })
+          .from(pendingOwnershipTransfers)
+          .where(and(
+            eq(pendingOwnershipTransfers.patchId, patch.id),
+            eq(pendingOwnershipTransfers.status, 'pending'),
+          ))
+          .for('update')
+          .limit(1)
+      : []
+    let reason: OwnershipCommandResult['reason']
+    if (!recipient || recipient.kind !== 'human' || recipient.status !== 'active') reason = 'PRINCIPAL_INELIGIBLE'
+    else if (!patch || patch.state !== 'active' || patch.ownerPrincipalId !== params.senderPrincipalId) reason = 'NOT_OWNER'
+    else if (pending) reason = 'TRANSFER_PENDING'
+
+    const createdAt = params.createdAt ?? new Date()
+    let transferId: string | undefined
+    if (!reason && patch) {
+      transferId = randomUUID()
+      await tx.insert(pendingOwnershipTransfers).values({
+        id: transferId,
+        operationId: params.operationId,
+        patchId: patch.id,
+        senderPrincipalId: params.senderPrincipalId,
+        recipientPrincipalId: params.recipientPrincipalId,
+        expiresAt: new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+        createdAt,
+        updatedAt: createdAt,
+      })
+    }
+    await insertOwnershipAudit(tx, {
+      eventType: 'ownership_transfer_created', attemptedAction: 'create_ownership_transfer',
+      succeeded: !reason, reason, actorPrincipalId: params.senderPrincipalId,
+      subjectPrincipalId: params.recipientPrincipalId, quiltId: patch?.quiltId,
+      patchId: patch?.id, operationId: params.operationId,
+      beforeState: patch ? { ownerPrincipalId: patch.ownerPrincipalId, revision: patch.revision } : undefined,
+      afterState: transferId ? { transferId, status: 'pending' } : undefined, createdAt,
+    })
+    return { succeeded: !reason, idempotent: false, ...(reason ? { reason } : { transferId }) }
+  })
+}
+
+export const acceptOwnershipTransfer = async (params: {
+  operationId: string
+  transferId: string
+  recipientPrincipalId: string
+  acceptedAt?: Date
+}): Promise<OwnershipCommandResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    if (await findCompletedAudit(tx, params.operationId, 'ownership_transfer_accepted')) {
+      return { succeeded: true, idempotent: true }
+    }
+    const [transferReference] = await tx
+      .select({ patchId: pendingOwnershipTransfers.patchId })
+      .from(pendingOwnershipTransfers)
+      .where(eq(pendingOwnershipTransfers.id, params.transferId))
+      .limit(1)
+    const [patch] = transferReference
+      ? await tx.select().from(patches).where(eq(patches.id, transferReference.patchId)).for('update').limit(1)
+      : []
+    const [transfer] = await tx
+      .select()
+      .from(pendingOwnershipTransfers)
+      .where(eq(pendingOwnershipTransfers.id, params.transferId))
+      .for('update')
+      .limit(1)
+    const [recipient] = await tx
+      .select({ kind: principals.kind, status: principals.status })
+      .from(principals)
+      .where(eq(principals.id, params.recipientPrincipalId))
+      .for('update')
+      .limit(1)
+    const [recipientOwnership] = patch
+      ? await tx
+          .select({ id: patches.id })
+          .from(patches)
+          .where(and(
+            eq(patches.quiltId, patch.quiltId),
+            eq(patches.ownerPrincipalId, params.recipientPrincipalId),
+            eq(patches.state, 'active'),
+          ))
+          .orderBy(asc(patches.id))
+          .for('update')
+          .limit(1)
+      : []
+    const acceptedAt = params.acceptedAt ?? new Date()
+    let reason: OwnershipCommandResult['reason']
+    if (!recipient || recipient.kind !== 'human' || recipient.status !== 'active') reason = 'PRINCIPAL_INELIGIBLE'
+    else if (!transfer || transfer.status !== 'pending' || transfer.expiresAt <= acceptedAt
+      || transfer.recipientPrincipalId !== params.recipientPrincipalId) reason = 'TRANSFER_UNAVAILABLE'
+    else if (!patch || patch.state !== 'active' || patch.ownerPrincipalId !== transfer.senderPrincipalId) reason = 'NOT_OWNER'
+    else if (recipientOwnership) reason = 'PRINCIPAL_INELIGIBLE'
+
+    let revision: number | undefined
+    if (!reason && patch && transfer) {
+      revision = patch.revision + 1
+      await tx.update(patches).set({
+        ownerPrincipalId: transfer.recipientPrincipalId,
+        revision,
+        updatedAt: acceptedAt,
+      }).where(eq(patches.id, patch.id))
+      await tx.delete(patchMemberships).where(and(
+        eq(patchMemberships.patchId, patch.id),
+        eq(patchMemberships.principalId, transfer.senderPrincipalId),
+        eq(patchMemberships.role, 'owner'),
+      ))
+      await tx.insert(patchMemberships).values({
+        patchId: patch.id,
+        principalId: transfer.recipientPrincipalId,
+        role: 'owner',
+        createdAt: acceptedAt,
+      }).onConflictDoUpdate({
+        target: [patchMemberships.patchId, patchMemberships.principalId],
+        set: { role: 'owner' },
+      })
+      await tx.update(pendingOwnershipTransfers).set({
+        status: 'accepted', resolvedAt: acceptedAt, updatedAt: acceptedAt,
+      }).where(eq(pendingOwnershipTransfers.id, transfer.id))
+    }
+    await insertOwnershipAudit(tx, {
+      eventType: 'ownership_transfer_accepted', attemptedAction: 'accept_ownership_transfer',
+      succeeded: !reason, reason, actorPrincipalId: params.recipientPrincipalId,
+      subjectPrincipalId: transfer?.senderPrincipalId, quiltId: patch?.quiltId,
+      patchId: patch?.id, operationId: params.operationId,
+      beforeState: patch ? { ownerPrincipalId: patch.ownerPrincipalId, revision: patch.revision } : undefined,
+      afterState: revision ? { ownerPrincipalId: params.recipientPrincipalId, revision } : undefined, createdAt: acceptedAt,
+    })
+    return { succeeded: !reason, idempotent: false, ...(reason ? { reason } : { revision }) }
+  })
+}
+
+export const cancelOwnershipTransfer = async (params: {
+  operationId: string
+  transferId: string
+  actorPrincipalId?: string
+  sourceChannel?: 'http' | 'operation'
+  cancelledAt?: Date
+  operationalContext?: { operatorId: string; supportTicket: string; reason: string }
+}): Promise<OwnershipCommandResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    if (await findCompletedAudit(tx, params.operationId, 'ownership_transfer_cancelled')) {
+      return { succeeded: true, idempotent: true }
+    }
+    const [transfer] = await tx.select().from(pendingOwnershipTransfers)
+      .where(eq(pendingOwnershipTransfers.id, params.transferId)).for('update').limit(1)
+    const [patch] = transfer
+      ? await tx.select().from(patches).where(eq(patches.id, transfer.patchId)).for('update').limit(1)
+      : []
+    const authorized = Boolean(transfer && patch && transfer.status === 'pending'
+      && (!params.actorPrincipalId || patch.ownerPrincipalId === params.actorPrincipalId))
+    const cancelledAt = params.cancelledAt ?? new Date()
+    if (authorized && transfer) {
+      await tx.update(pendingOwnershipTransfers).set({
+        status: 'cancelled', resolvedAt: cancelledAt, updatedAt: cancelledAt,
+      }).where(eq(pendingOwnershipTransfers.id, transfer.id))
+    }
+    await insertOwnershipAudit(tx, {
+      eventType: 'ownership_transfer_cancelled', attemptedAction: 'cancel_ownership_transfer',
+      succeeded: authorized, reason: authorized ? undefined : 'TRANSFER_UNAVAILABLE',
+      actorPrincipalId: params.actorPrincipalId, subjectPrincipalId: transfer?.recipientPrincipalId,
+      quiltId: patch?.quiltId, patchId: patch?.id, operationId: params.operationId,
+      sourceChannel: params.sourceChannel, beforeState: transfer ? { status: transfer.status } : undefined,
+      afterState: authorized ? {
+        status: 'cancelled',
+        ...(params.operationalContext ? { operationalContext: params.operationalContext } : {}),
+      } : undefined,
+      createdAt: cancelledAt,
+    })
+    return { succeeded: authorized, idempotent: false, ...(!authorized ? { reason: 'TRANSFER_UNAVAILABLE' as const } : {}) }
+  })
+}
+
+export const expireOwnershipTransfers = async (expiredAt: Date = new Date()): Promise<number> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    const due = await tx.select().from(pendingOwnershipTransfers)
+      .where(and(eq(pendingOwnershipTransfers.status, 'pending'), lte(pendingOwnershipTransfers.expiresAt, expiredAt)))
+      .orderBy(asc(pendingOwnershipTransfers.id)).for('update')
+    for (const transfer of due) {
+      await tx.update(pendingOwnershipTransfers).set({
+        status: 'expired', resolvedAt: expiredAt, updatedAt: expiredAt,
+      }).where(eq(pendingOwnershipTransfers.id, transfer.id))
+      await insertOwnershipAudit(tx, {
+        eventType: 'ownership_transfer_expired', attemptedAction: 'expire_ownership_transfer',
+        succeeded: true, subjectPrincipalId: transfer.recipientPrincipalId,
+        patchId: transfer.patchId, operationId: transfer.operationId, sourceChannel: 'job',
+        beforeState: { status: 'pending' }, afterState: { status: 'expired' }, createdAt: expiredAt,
+      })
+    }
+    return due.length
+  })
+}
+
+export const abandonPatch = async (params: {
+  operationId: string
+  patchId: string
+  principalId: string
+  abandonedAt?: Date
+}): Promise<OwnershipCommandResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    if (await findCompletedAudit(tx, params.operationId, 'patch_abandoned')) return { succeeded: true, idempotent: true }
+    const [patch] = await tx.select().from(patches).where(eq(patches.id, params.patchId)).for('update').limit(1)
+    const [pending] = patch ? await tx.select({ id: pendingOwnershipTransfers.id }).from(pendingOwnershipTransfers)
+      .where(and(eq(pendingOwnershipTransfers.patchId, patch.id), eq(pendingOwnershipTransfers.status, 'pending')))
+      .for('update').limit(1) : []
+    const succeeded = Boolean(patch && patch.state === 'active'
+      && patch.ownerPrincipalId === params.principalId && !pending)
+    const abandonedAt = params.abandonedAt ?? new Date()
+    let revision: number | undefined
+    if (succeeded && patch) {
+      revision = patch.revision + 1
+      await tx.update(patches).set({ ownerPrincipalId: null, state: 'unclaimed', revision, updatedAt: abandonedAt })
+        .where(eq(patches.id, patch.id))
+      await tx.delete(patchMemberships).where(and(
+        eq(patchMemberships.patchId, patch.id),
+        eq(patchMemberships.principalId, params.principalId),
+        eq(patchMemberships.role, 'owner'),
+      ))
+    }
+    const reason = !succeeded ? (pending ? 'TRANSFER_PENDING' : 'NOT_OWNER') : undefined
+    await insertOwnershipAudit(tx, {
+      eventType: 'patch_abandoned', attemptedAction: 'abandon_patch', succeeded, reason,
+      actorPrincipalId: params.principalId, subjectPrincipalId: params.principalId,
+      quiltId: patch?.quiltId, patchId: patch?.id, operationId: params.operationId,
+      beforeState: patch ? { ownerPrincipalId: patch.ownerPrincipalId, state: patch.state, revision: patch.revision } : undefined,
+      afterState: revision ? { ownerPrincipalId: null, state: 'unclaimed', revision } : undefined, createdAt: abandonedAt,
+    })
+    return { succeeded, idempotent: false, ...(reason ? { reason } : { revision }) }
+  })
+}
+
+export type PrincipalDeletionResult = {
+  succeeded: boolean
+  idempotent: boolean
+  reason?: 'PRINCIPAL_UNAVAILABLE' | 'RECOVERY_WINDOW_EXPIRED' | 'RECOVERY_WINDOW_OPEN' | 'OWNERSHIP_UNRESOLVED' | 'RETENTION_UNAPPROVED'
+  recoveryDeadline?: Date
+}
+
+export const requestPrincipalDeletion = async (params: {
+  operationId: string
+  principalId: string
+  requestedAt?: Date
+}): Promise<PrincipalDeletionResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    const [principal] = await tx.select().from(principals).where(eq(principals.id, params.principalId)).for('update').limit(1)
+    if (principal?.status === 'deletion_pending') {
+      return { succeeded: true, idempotent: true, recoveryDeadline: principal.deletionRecoveryDeadline ?? undefined }
+    }
+    const requestedAt = params.requestedAt ?? new Date()
+    const succeeded = principal?.status === 'active'
+    const recoveryDeadline = new Date(requestedAt.getTime() + 30 * 24 * 60 * 60 * 1000)
+    if (succeeded) await tx.update(principals).set({
+      status: 'deletion_pending', deletionRequestedAt: requestedAt,
+      deletionRecoveryDeadline: recoveryDeadline, updatedAt: requestedAt,
+    }).where(eq(principals.id, params.principalId))
+    await insertOwnershipAudit(tx, {
+      eventType: 'principal_deletion_requested', attemptedAction: 'request_principal_deletion',
+      succeeded, reason: succeeded ? undefined : 'PRINCIPAL_UNAVAILABLE', actorPrincipalId: params.principalId,
+      subjectPrincipalId: params.principalId, operationId: params.operationId,
+      beforeState: principal ? { status: principal.status } : undefined,
+      afterState: succeeded ? { status: 'deletion_pending', recoveryDeadline: recoveryDeadline.toISOString() } : undefined,
+      createdAt: requestedAt,
+    })
+    return { succeeded, idempotent: false, ...(succeeded ? { recoveryDeadline } : { reason: 'PRINCIPAL_UNAVAILABLE' }) }
+  })
+}
+
+export const recoverPrincipalDeletion = async (params: {
+  operationId: string
+  principalId: string
+  actorPrincipalId?: string
+  sourceChannel?: 'http' | 'operation'
+  recoveredAt?: Date
+  beforeState?: Record<string, unknown>
+  afterState?: Record<string, unknown>
+  operationalContext?: { operatorId: string; supportTicket: string; reason: string }
+}): Promise<PrincipalDeletionResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    if (await findCompletedAudit(tx, params.operationId, 'principal_deletion_recovered')) {
+      return { succeeded: true, idempotent: true }
+    }
+    const [principal] = await tx.select().from(principals).where(eq(principals.id, params.principalId)).for('update').limit(1)
+    const recoveredAt = params.recoveredAt ?? new Date()
+    const succeeded = Boolean(principal?.status === 'deletion_pending'
+      && principal.deletionRecoveryDeadline && principal.deletionRecoveryDeadline >= recoveredAt)
+    if (succeeded) await tx.update(principals).set({
+      status: 'active', deletionRequestedAt: null, deletionRecoveryDeadline: null, updatedAt: recoveredAt,
+    }).where(eq(principals.id, params.principalId))
+    const reason = principal?.status === 'deletion_pending' ? 'RECOVERY_WINDOW_EXPIRED' : 'PRINCIPAL_UNAVAILABLE'
+    await insertOwnershipAudit(tx, {
+      eventType: 'principal_deletion_recovered', attemptedAction: 'recover_principal_deletion',
+      succeeded, reason: succeeded ? undefined : reason,
+      actorPrincipalId: params.actorPrincipalId ?? params.principalId, subjectPrincipalId: params.principalId,
+      operationId: params.operationId, sourceChannel: params.sourceChannel,
+      beforeState: params.beforeState ?? (principal ? { status: principal.status } : undefined),
+      afterState: params.afterState ?? (succeeded ? {
+        status: 'active',
+        ...(params.operationalContext ? { operationalContext: params.operationalContext } : {}),
+      } : undefined),
+      createdAt: recoveredAt,
+    })
+    return { succeeded, idempotent: false, ...(!succeeded ? { reason } : {}) }
+  })
+}
+
+export const completePrincipalDeletion = async (params: {
+  operationId: string
+  principalId: string
+  retentionApproved: boolean
+  completedAt?: Date
+}): Promise<PrincipalDeletionResult> => {
+  const { db } = getDatabaseBundle()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+    const [principal] = await tx.select().from(principals).where(eq(principals.id, params.principalId)).for('update').limit(1)
+    if (principal?.status === 'deleted') return { succeeded: true, idempotent: true }
+    const completedAt = params.completedAt ?? new Date()
+    const [ownedPatch] = await tx.select({ id: patches.id }).from(patches)
+      .where(eq(patches.ownerPrincipalId, params.principalId)).orderBy(asc(patches.id)).for('update').limit(1)
+    let reason: PrincipalDeletionResult['reason']
+    if (!principal || principal.status !== 'deletion_pending' || !principal.deletionRecoveryDeadline) reason = 'PRINCIPAL_UNAVAILABLE'
+    else if (principal.deletionRecoveryDeadline > completedAt) reason = 'RECOVERY_WINDOW_OPEN'
+    else if (ownedPatch) reason = 'OWNERSHIP_UNRESOLVED'
+    else if (!params.retentionApproved) reason = 'RETENTION_UNAPPROVED'
+    if (!reason) {
+      await tx.delete(externalPrincipalMappings).where(eq(externalPrincipalMappings.principalId, params.principalId))
+      await tx.update(principals).set({
+        status: 'deleted', displayName: null, email: null,
+        deletionCompletedAt: completedAt, updatedAt: completedAt,
+      }).where(eq(principals.id, params.principalId))
+    }
+    await insertOwnershipAudit(tx, {
+      eventType: 'principal_deletion_completed', attemptedAction: 'complete_principal_deletion',
+      succeeded: !reason, reason, subjectPrincipalId: params.principalId,
+      operationId: params.operationId, sourceChannel: 'job',
+      beforeState: principal ? { status: principal.status, ownsPatch: Boolean(ownedPatch) } : undefined,
+      afterState: reason ? undefined : { status: 'deleted', profileRemoved: true, mappingRemoved: true },
+      createdAt: completedAt,
+    })
+    return { succeeded: !reason, idempotent: false, ...(reason ? { reason } : {}) }
+  })
+}
 
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
 const DEFAULT_CANVAS_CONFIG: SessionCanvasConfig = {
@@ -580,6 +1228,68 @@ export const loadSessionRecord = async (
   }
 }
 
+export const createProtectedSession = async (
+  sessionId: string,
+  canvasConfig: SessionCanvasConfig,
+): Promise<AuthoritativeSessionRecord> => {
+  const { db } = getDatabaseBundle()
+  const now = new Date()
+
+  await db.transaction(async (tx) => {
+    await tx.insert(canvases).values({
+      id: sessionId,
+      canvasConfig,
+      createdAt: now,
+      updatedAt: now,
+    })
+
+    const bounds = canvasConfig.boundsPolicy.mode === 'bounded'
+      ? canvasConfig.boundsPolicy.bounds
+      : { minX: 0, minY: 0 }
+    const [quilt] = await tx
+      .insert(quilts)
+      .values({
+        legacyCanvasId: sessionId,
+        patchRows: 1,
+        patchColumns: 1,
+        patchWidth: canvasConfig.canvasSize.width,
+        patchHeight: canvasConfig.canvasSize.height,
+        originX: bounds.minX,
+        originY: bounds.minY,
+        topology: 'bounded',
+        protocolVersion: 1,
+      })
+      .returning({ id: quilts.id })
+    if (!quilt) throw new Error('Session quilt creation did not return a row')
+
+    const [patch] = await tx
+      .insert(patches)
+      .values({
+        quiltId: quilt.id,
+        row: 0,
+        column: 0,
+        state: 'unclaimed',
+        revision: 0,
+      })
+      .returning({ id: patches.id })
+    if (!patch) throw new Error('Session patch creation did not return a row')
+
+    await tx.insert(patchVisibilityPolicies).values({
+      patchId: patch.id,
+      existence: 'authenticated',
+      fineData: 'authenticated',
+      aggregateData: 'authenticated',
+      presence: 'authenticated',
+      search: 'authenticated',
+      durableEvents: 'authenticated',
+      claimEnabled: false,
+      policyVersion: 1,
+    })
+  })
+
+  return loadSessionRecord(sessionId)
+}
+
 export const listTilesByChunks = async (sessionId: string, chunks: ChunkCoordinate[]): Promise<TileInstance[]> => {
   if (chunks.length === 0) {
     return []
@@ -678,18 +1388,40 @@ export const listActiveParticipants = async (sessionId: string): Promise<ClientP
   return rows.map(mapClient)
 }
 
-export const listSessionSummaries = async (): Promise<SessionSummaryRecord[]> => {
+export const listSessionSummaries = async (principalId?: string): Promise<SessionSummaryRecord[]> => {
   const { db } = getDatabaseBundle()
 
   const rows = await db
     .select({
       id: canvases.id,
-      participantCount: sql<number>`count(${participants.clientId})`,
+      participantCount: countDistinct(participants.clientId),
       canvasConfig: canvases.canvasConfig,
       updatedAt: canvases.updatedAt,
     })
     .from(canvases)
+    .innerJoin(quilts, eq(quilts.legacyCanvasId, canvases.id))
+    .innerJoin(patches, eq(patches.quiltId, quilts.id))
+    .innerJoin(patchVisibilityPolicies, eq(patchVisibilityPolicies.patchId, patches.id))
+    .leftJoin(
+      patchMemberships,
+      principalId
+        ? and(eq(patchMemberships.patchId, patches.id), eq(patchMemberships.principalId, principalId))
+        : sql`false`,
+    )
     .leftJoin(participants, and(eq(participants.canvasId, canvases.id), isNull(participants.leftAt)))
+    .where(and(
+      sql`${patches.state} not in ('deletion_requested', 'deleted')`,
+      principalId
+        ? or(
+            eq(patchVisibilityPolicies.existence, 'authenticated'),
+            eq(patchVisibilityPolicies.existence, 'public'),
+            and(
+              eq(patchVisibilityPolicies.existence, 'hidden'),
+              or(eq(patches.ownerPrincipalId, principalId), eq(patchMemberships.principalId, principalId)),
+            ),
+          )
+        : eq(patchVisibilityPolicies.existence, 'public'),
+    ))
     .groupBy(canvases.id, canvases.updatedAt)
     .orderBy(desc(canvases.updatedAt), asc(canvases.id))
 
@@ -715,25 +1447,38 @@ export const persistQuiltTilePlacement = async (params: {
     return await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
 
-    const [existingOperation] = await tx
-      .select({ patchId: patchOperations.patchId })
+    const existingOperations = await tx
+      .select({
+        patchId: patchOperations.patchId,
+        eventId: patchOperations.eventId,
+        opType: patchOperations.opType,
+        payload: patchOperations.payload,
+      })
       .from(patchOperations)
       .where(eq(patchOperations.operationId, params.operationId))
-      .limit(1)
 
-    if (existingOperation) {
+    if (existingOperations.length > 0) {
       const [tileRow] = await tx.select().from(tiles).where(eq(tiles.id, params.payload.tileId)).limit(1)
       const revisionRows = await tx
         .select({ id: patches.id, revision: patches.revision })
         .from(patches)
-        .where(eq(patches.quiltId, params.quiltId))
-      if (!tileRow) {
-        throw new Error(`Operation ${params.operationId} exists without tile ${params.payload.tileId}`)
+        .where(inArray(patches.id, existingOperations.map((operation) => operation.patchId)))
+      if (
+        !tileRow
+        || existingOperations.some((operation) =>
+          operation.opType !== 'tile_placed'
+          || !isObjectRecord(operation.payload)
+          || operation.payload.tileId !== params.payload.tileId,
+        )
+      ) {
+        return { committed: false, reason: 'PLACEMENT_REJECTED' }
       }
       return {
         committed: true,
         idempotent: true,
         operationId: params.operationId,
+        eventIds: Object.fromEntries(existingOperations.map((operation) => [operation.patchId, operation.eventId])),
+        patchChunkIds: Object.fromEntries(existingOperations.map((operation) => [operation.patchId, []])),
         tile: mapTile(tileRow),
         patchRevisions: Object.fromEntries(revisionRows.map((patch) => [patch.id, patch.revision])),
       }
@@ -790,26 +1535,25 @@ export const persistQuiltTilePlacement = async (params: {
         patchCount: sortedPatchIds.length,
       },
     })
-    const memberships = await tx
-      .select({ patchId: patchMemberships.patchId, role: patchMemberships.role })
-      .from(patchMemberships)
-      .where(and(
-        inArray(patchMemberships.patchId, sortedPatchIds),
-        eq(patchMemberships.principalId, params.principalId),
-      ))
-    const mutationPatchIds = new Set(
-      memberships
-        .filter((membership) => membership.role === 'owner')
-        .map((membership) => membership.patchId),
-    )
+    const [principal] = await tx
+      .select({ kind: principals.kind, status: principals.status })
+      .from(principals)
+      .where(eq(principals.id, params.principalId))
+      .limit(1)
+    const policyRows = await tx.select().from(patchVisibilityPolicies)
+      .where(inArray(patchVisibilityPolicies.patchId, sortedPatchIds))
+    const policiesByPatchId = new Map(policyRows.map((policy) => [policy.patchId, policy]))
 
     for (const patch of lockedPatches) {
       if (!intersectedPatchIdSet.has(patch.id)) {
         continue
       }
       if (
-        patch.state !== 'active'
-        || (patch.ownerPrincipalId !== params.principalId && !mutationPatchIds.has(patch.id))
+        principal?.kind !== 'human'
+        || principal.status !== 'active'
+        || patch.state !== 'active'
+        || patch.ownerPrincipalId !== params.principalId
+        || !isPersistedVisibilityPolicy(policiesByPatchId.get(patch.id))
       ) {
         return { committed: false, reason: 'UNAUTHORIZED' }
       }
@@ -862,19 +1606,40 @@ export const persistQuiltTilePlacement = async (params: {
       await tx.insert(tileSpatialRefs).values(spatialRefs)
     }
 
-    const eventPayload = { ...params.payload, transform: canonicalTransform }
+    const patchChunkIds = Object.fromEntries((intersectedPatchIds as string[]).map((patchId) => [
+      patchId,
+      [...new Set(spatialRefs
+        .filter((ref) => ref.patchId === patchId)
+        .map((ref) => `${ref.chunkX}:${ref.chunkY}`))],
+    ]))
+    const eventIds: Record<string, string> = {}
     for (const patch of lockedPatches) {
       if (!intersectedPatchIdSet.has(patch.id)) {
         continue
       }
       const nextRevision = patch.revision + 1
-      await tx.insert(patchOperations).values({
+      const eventPayload = { ...params.payload, transform: canonicalTransform, chunkIds: patchChunkIds[patch.id] }
+      const [operation] = await tx.insert(patchOperations).values({
         patchId: patch.id,
         opSeq: nextRevision,
         operationId: params.operationId,
         actorPrincipalId: params.principalId,
         opType: 'tile_placed',
         payload: eventPayload,
+        createdAt,
+      }).returning({ eventId: patchOperations.eventId })
+      eventIds[patch.id] = operation.eventId
+      await tx.insert(authorizationAuditEvents).values({
+        eventType: 'quilt_tile_placed',
+        attemptedAction: 'place_tile',
+        outcome: 'succeeded',
+        actorPrincipalId: params.principalId,
+        quiltId: params.quiltId,
+        patchId: patch.id,
+        operationId: params.operationId,
+        sourceChannel: 'socket',
+        policyVersion: policiesByPatchId.get(patch.id)?.policyVersion,
+        afterState: { tileId: params.payload.tileId, revision: nextRevision },
         createdAt,
       })
       await tx
@@ -887,6 +1652,8 @@ export const persistQuiltTilePlacement = async (params: {
       committed: true,
       idempotent: false,
       operationId: params.operationId,
+      eventIds,
+      patchChunkIds,
       tile: {
         id: params.payload.tileId,
         shape: params.payload.shape,
@@ -910,6 +1677,157 @@ export const persistQuiltTilePlacement = async (params: {
       canary: false,
       measurements: { durationMs: performance.now() - mutationStartedAt },
       dimensions: { mutation: 'place' },
+    })
+  }
+}
+
+export const persistQuiltTileRemoval = async (params: {
+  quiltId: string
+  operationId: string
+  principalId: string
+  expectedPatchRevisions: Record<string, number>
+  tileId: string
+  removedAt?: number
+}): Promise<QuiltRemovalResult> => {
+  const { db } = getDatabaseBundle()
+  const mutationStartedAt = performance.now()
+
+  try {
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${params.operationId}))`)
+      const existingOperations = await tx
+        .select({
+          patchId: patchOperations.patchId,
+          eventId: patchOperations.eventId,
+          opType: patchOperations.opType,
+          payload: patchOperations.payload,
+        })
+        .from(patchOperations)
+        .where(eq(patchOperations.operationId, params.operationId))
+      if (existingOperations.length > 0) {
+        if (existingOperations.some((operation) =>
+          operation.opType !== 'tile_removed'
+          || !isObjectRecord(operation.payload)
+          || operation.payload.tileId !== params.tileId,
+        )) {
+          return { committed: false, reason: 'RESOURCE_UNAVAILABLE' }
+        }
+        const revisionRows = await tx.select({ id: patches.id, revision: patches.revision })
+          .from(patches)
+          .where(inArray(patches.id, existingOperations.map((operation) => operation.patchId)))
+        return {
+          committed: true,
+          idempotent: true,
+          operationId: params.operationId,
+          eventIds: Object.fromEntries(existingOperations.map((operation) => [operation.patchId, operation.eventId])),
+          patchChunkIds: Object.fromEntries(existingOperations.map((operation) => [operation.patchId, []])),
+          tileId: params.tileId,
+          patchRevisions: Object.fromEntries(revisionRows.map((patch) => [patch.id, patch.revision])),
+        }
+      }
+
+      const [tile] = await tx.select().from(tiles)
+        .where(and(eq(tiles.id, params.tileId), eq(tiles.quiltId, params.quiltId)))
+        .limit(1)
+      if (!tile) return { committed: false, reason: 'RESOURCE_UNAVAILABLE' }
+
+      const refs = await tx.select({ patchId: tileSpatialRefs.patchId })
+        .from(tileSpatialRefs)
+        .where(eq(tileSpatialRefs.tileId, params.tileId))
+      const scopedRefs = await tx.select({
+        patchId: tileSpatialRefs.patchId,
+        chunkX: tileSpatialRefs.chunkX,
+        chunkY: tileSpatialRefs.chunkY,
+      })
+        .from(tileSpatialRefs)
+        .where(eq(tileSpatialRefs.tileId, params.tileId))
+      const sortedPatchIds = [...new Set(refs.map((ref) => ref.patchId))].sort((left, right) => left.localeCompare(right))
+      if (sortedPatchIds.length === 0) return { committed: false, reason: 'RESOURCE_UNAVAILABLE' }
+
+      const lockedPatches = await tx.select().from(patches)
+        .where(inArray(patches.id, sortedPatchIds))
+        .orderBy(asc(patches.id))
+        .for('update')
+      const [principal] = await tx.select({ kind: principals.kind, status: principals.status })
+        .from(principals)
+        .where(eq(principals.id, params.principalId))
+        .limit(1)
+      const policyRows = await tx.select().from(patchVisibilityPolicies)
+        .where(inArray(patchVisibilityPolicies.patchId, sortedPatchIds))
+      const policiesByPatchId = new Map(policyRows.map((policy) => [policy.patchId, policy]))
+
+      for (const patch of lockedPatches) {
+        if (
+          principal?.kind !== 'human'
+          || principal.status !== 'active'
+          || patch.state !== 'active'
+          || patch.ownerPrincipalId !== params.principalId
+          || !isPersistedVisibilityPolicy(policiesByPatchId.get(patch.id))
+        ) return { committed: false, reason: 'UNAUTHORIZED' }
+        const expectedRevision = params.expectedPatchRevisions[patch.id]
+        if (expectedRevision === undefined || expectedRevision < patch.revision) {
+          return { committed: false, reason: 'STALE_REVISION' }
+        }
+        if (expectedRevision > patch.revision) return { committed: false, reason: 'OUT_OF_ORDER_REVISION' }
+      }
+
+      const removedAt = new Date(params.removedAt ?? Date.now())
+      await tx.delete(tiles).where(eq(tiles.id, params.tileId))
+      const patchChunkIds = Object.fromEntries(sortedPatchIds.map((patchId) => [
+        patchId,
+        [...new Set(scopedRefs
+          .filter((ref) => ref.patchId === patchId)
+          .map((ref) => `${ref.chunkX}:${ref.chunkY}`))],
+      ]))
+      const eventIds: Record<string, string> = {}
+      const patchRevisions: Record<string, number> = {}
+      for (const patch of lockedPatches) {
+        const nextRevision = patch.revision + 1
+        const [operation] = await tx.insert(patchOperations).values({
+          patchId: patch.id,
+          opSeq: nextRevision,
+          operationId: params.operationId,
+          actorPrincipalId: params.principalId,
+          opType: 'tile_removed',
+          payload: { tileId: params.tileId, chunkIds: patchChunkIds[patch.id] },
+          createdAt: removedAt,
+        }).returning({ eventId: patchOperations.eventId })
+        eventIds[patch.id] = operation.eventId
+        await tx.insert(authorizationAuditEvents).values({
+          eventType: 'quilt_tile_removed',
+          attemptedAction: 'remove_tile',
+          outcome: 'succeeded',
+          actorPrincipalId: params.principalId,
+          quiltId: params.quiltId,
+          patchId: patch.id,
+          operationId: params.operationId,
+          sourceChannel: 'socket',
+          policyVersion: policiesByPatchId.get(patch.id)?.policyVersion,
+          beforeState: { tileId: params.tileId, revision: patch.revision },
+          afterState: { revision: nextRevision },
+          createdAt: removedAt,
+        })
+        await tx.update(patches).set({ revision: nextRevision, updatedAt: removedAt }).where(eq(patches.id, patch.id))
+        patchRevisions[patch.id] = nextRevision
+      }
+      return {
+        committed: true,
+        idempotent: false,
+        operationId: params.operationId,
+        eventIds,
+        patchChunkIds,
+        tileId: params.tileId,
+        patchRevisions,
+      }
+    })
+  } finally {
+    emitQuiltTelemetry({
+      name: 'mutation_latency',
+      quiltId: params.quiltId,
+      principalId: params.principalId,
+      canary: false,
+      measurements: { durationMs: performance.now() - mutationStartedAt },
+      dimensions: { mutation: 'remove' },
     })
   }
 }
@@ -1446,6 +2364,8 @@ export type QuiltDeliveryContext = {
     state: 'unclaimed' | 'active' | 'suspended' | 'deletion_requested' | 'deleted'
     revision: number
     isMember: boolean
+    isOwner: boolean
+    policy: PersistedVisibilityPolicy | null
   }>
 }
 
@@ -1480,8 +2400,17 @@ export const loadQuiltDeliveryContext = async (params: {
       revision: patches.revision,
       memberPrincipalId: patchMemberships.principalId,
       ownerPrincipalId: patches.ownerPrincipalId,
+      existence: patchVisibilityPolicies.existence,
+      fineData: patchVisibilityPolicies.fineData,
+      aggregateData: patchVisibilityPolicies.aggregateData,
+      presence: patchVisibilityPolicies.presence,
+      search: patchVisibilityPolicies.search,
+      durableEvents: patchVisibilityPolicies.durableEvents,
+      claimEnabled: patchVisibilityPolicies.claimEnabled,
+      policyVersion: patchVisibilityPolicies.policyVersion,
     })
     .from(patches)
+    .leftJoin(patchVisibilityPolicies, eq(patchVisibilityPolicies.patchId, patches.id))
     .leftJoin(
       patchMemberships,
       principalId
@@ -1502,24 +2431,89 @@ export const loadQuiltDeliveryContext = async (params: {
       patchHeight: quilt.patchHeight,
     },
     principalId,
-    patches: patchRows.map((patch) => ({
-      id: patch.id,
-      row: patch.row,
-      column: patch.column,
-      state: patch.state as QuiltDeliveryContext['patches'][number]['state'],
-      revision: patch.revision,
-      isMember: principalId !== undefined
-        && (patch.ownerPrincipalId === principalId || patch.memberPrincipalId === principalId),
-    })),
+    patches: patchRows.map((patch) => {
+      const candidatePolicy = {
+        existence: patch.existence,
+        fineData: patch.fineData,
+        aggregateData: patch.aggregateData,
+        presence: patch.presence,
+        search: patch.search,
+        durableEvents: patch.durableEvents,
+        claimEnabled: patch.claimEnabled,
+        policyVersion: patch.policyVersion,
+      }
+      return {
+        id: patch.id,
+        row: patch.row,
+        column: patch.column,
+        state: patch.state as QuiltDeliveryContext['patches'][number]['state'],
+        revision: patch.revision,
+        isMember: principalId !== undefined
+          && (patch.ownerPrincipalId === principalId || patch.memberPrincipalId === principalId),
+        isOwner: principalId !== undefined && patch.ownerPrincipalId === principalId,
+        policy: isPersistedVisibilityPolicy(candidatePolicy) ? candidatePolicy : null,
+      }
+    }),
   }
 }
 
+const authorizePatchDelivery = async (
+  db: DatabaseClient,
+  patchId: string,
+  principalId: string,
+  surface: VisibilitySurface,
+): Promise<boolean> => {
+  const [row] = await db
+    .select({
+      state: patches.state,
+      ownerPrincipalId: patches.ownerPrincipalId,
+      memberPrincipalId: patchMemberships.principalId,
+      existence: patchVisibilityPolicies.existence,
+      fineData: patchVisibilityPolicies.fineData,
+      aggregateData: patchVisibilityPolicies.aggregateData,
+      presence: patchVisibilityPolicies.presence,
+      search: patchVisibilityPolicies.search,
+      durableEvents: patchVisibilityPolicies.durableEvents,
+      claimEnabled: patchVisibilityPolicies.claimEnabled,
+      policyVersion: patchVisibilityPolicies.policyVersion,
+    })
+    .from(patches)
+    .leftJoin(patchVisibilityPolicies, eq(patchVisibilityPolicies.patchId, patches.id))
+    .leftJoin(
+      patchMemberships,
+      and(eq(patchMemberships.patchId, patches.id), eq(patchMemberships.principalId, principalId)),
+    )
+    .where(eq(patches.id, patchId))
+    .limit(1)
+  if (!row) return false
+
+  const policy = {
+    existence: row.existence,
+    fineData: row.fineData,
+    aggregateData: row.aggregateData,
+    presence: row.presence,
+    search: row.search,
+    durableEvents: row.durableEvents,
+    claimEnabled: row.claimEnabled,
+    policyVersion: row.policyVersion,
+  }
+  return canAccessPatchSurface(surface, {
+    state: row.state as QuiltDeliveryContext['patches'][number]['state'],
+    policy: isPersistedVisibilityPolicy(policy) ? policy : null,
+    subject: {
+      authenticated: true,
+      isMember: row.ownerPrincipalId === principalId || row.memberPrincipalId === principalId,
+    },
+  })
+}
+
 export const loadPatchDeliverySnapshot = async (patchId: string, options: {
-  principalId?: string
+  principalId: string
+  surface?: 'fineData' | 'aggregateData'
   dualReadEnabled?: boolean
   canary?: boolean
   chunkIds?: string[]
-} = {}): Promise<{
+}): Promise<{
   opSeq: number
   revision: number
   eventId?: string
@@ -1528,6 +2522,9 @@ export const loadPatchDeliverySnapshot = async (patchId: string, options: {
 }> => {
   const { db } = getDatabaseBundle()
   return db.transaction(async (tx) => {
+    if (!await authorizePatchDelivery(tx, patchId, options.principalId, options.surface ?? 'fineData')) {
+      throw new ResourceNotFoundError()
+    }
     const state = await reconstructPatchStateWithDatabase(tx, patchId)
     const acceptedChunkIds = new Set(options.chunkIds ?? [])
     const scopedRows = acceptedChunkIds.size === 0
@@ -1637,8 +2634,12 @@ export type PatchDeliveryOperation = {
 export const loadPatchDeliveryOperationsAfter = async (
   patchId: string,
   opSeq: number,
+  principalId: string,
 ): Promise<PatchDeliveryOperation[]> => {
   const { db } = getDatabaseBundle()
+  if (!await authorizePatchDelivery(db, patchId, principalId, 'durableEvents')) {
+    throw new ResourceNotFoundError()
+  }
   const rows = await db
     .select({
       eventId: patchOperations.eventId,

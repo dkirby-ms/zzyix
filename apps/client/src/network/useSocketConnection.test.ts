@@ -14,6 +14,7 @@ type MockSocket = {
   id: string
   on: ReturnType<typeof vi.fn>
   off: ReturnType<typeof vi.fn>
+  connect: ReturnType<typeof vi.fn>
   disconnect: ReturnType<typeof vi.fn>
 }
 
@@ -27,12 +28,30 @@ const createMockSocket = (): MockSocket => ({
   id: 'socket-1',
   on: vi.fn(),
   off: vi.fn(),
+  connect: vi.fn(),
   disconnect: vi.fn(),
 })
+
+const accessTokenProvider = vi.fn(async () => 'access-token')
+
+const renderAuthenticatedSocket = (
+  parameters: Parameters<typeof useSocketConnection>,
+  acquireAccessToken = accessTokenProvider,
+  onAuthLoss = vi.fn(),
+) => {
+  const paddedParameters: unknown[] = [...parameters]
+  while (paddedParameters.length < 21) paddedParameters.push(undefined)
+  paddedParameters[21] = acquireAccessToken
+  paddedParameters[22] = onAuthLoss
+  const invokeHook = useSocketConnection as unknown as (...args: unknown[]) => ReturnType<typeof useSocketConnection>
+  return renderHook(() => invokeHook(...paddedParameters))
+}
 
 describe('useSocketConnection collaboration subscriptions', () => {
   beforeEach(() => {
     ioMock.mockReset()
+    accessTokenProvider.mockReset()
+    accessTokenProvider.mockResolvedValue('access-token')
   })
 
   afterEach(() => {
@@ -54,8 +73,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
       onSelectionUpdate: vi.fn(),
     }
 
-    renderHook(() =>
-      useSocketConnection(
+    renderAuthenticatedSocket([
         'http://localhost:3001',
         'session-1',
         'client-1',
@@ -68,8 +86,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
         callbacks.onClientJoined,
         callbacks.onClientLeft,
         callbacks.onSelectionUpdate,
-      ),
-    )
+    ])
 
     expect(ioMock).toHaveBeenCalledTimes(1)
     expect(socket.on).toHaveBeenCalledWith('quilt_protocol', expect.any(Function))
@@ -97,8 +114,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
       onChunkResyncRequired: vi.fn(),
     }
 
-    renderHook(() =>
-      useSocketConnection(
+    renderAuthenticatedSocket([
         'http://localhost:3001',
         'session-1',
         'client-1',
@@ -116,8 +132,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
         callbacks.onChunkTileRemoved,
         callbacks.onChunkResyncRequired,
         true,
-      ),
-    )
+    ])
 
     expect(socket.on).toHaveBeenCalledWith('chunk_snapshot', callbacks.onChunkSnapshot)
     expect(socket.on).toHaveBeenCalledWith('chunk_tile_placed', callbacks.onChunkTilePlaced)
@@ -139,8 +154,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
       onChunkResyncRequired: vi.fn(),
     }
 
-    renderHook(() =>
-      useSocketConnection(
+    renderAuthenticatedSocket([
         'http://localhost:3001',
         'session-1',
         'client-1',
@@ -158,8 +172,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
         callbacks.onChunkTileRemoved,
         callbacks.onChunkResyncRequired,
         false,
-      ),
-    )
+    ])
 
     expect(socket.on).not.toHaveBeenCalledWith('chunk_snapshot', callbacks.onChunkSnapshot)
     expect(socket.on).not.toHaveBeenCalledWith('chunk_tile_placed', callbacks.onChunkTilePlaced)
@@ -182,8 +195,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
       onSelectionUpdate: vi.fn(),
     }
 
-    const { unmount } = renderHook(() =>
-      useSocketConnection(
+    const { unmount } = renderAuthenticatedSocket([
         'http://localhost:3001',
         'session-1',
         'client-1',
@@ -196,8 +208,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
         callbacks.onClientJoined,
         callbacks.onClientLeft,
         callbacks.onSelectionUpdate,
-      ),
-    )
+    ])
 
     unmount()
 
@@ -220,22 +231,19 @@ describe('useSocketConnection collaboration subscriptions', () => {
     const onTilePlaced = vi.fn()
     const onTileRemoved = vi.fn()
 
-    renderHook(() => useSocketConnection(
+    renderAuthenticatedSocket([
       'http://localhost:3001',
       'session-1',
       'client-1',
       onSnapshot,
       onTilePlaced,
       onTileRemoved,
-    ))
+    ])
 
     expect(ioMock).toHaveBeenCalledWith('http://localhost:3001', expect.objectContaining({
-      auth: {
-        sessionId: 'session-1',
-        clientId: 'client-1',
-        protocolVersion: 2,
-        enableProtocolV1Compatibility: false,
-      },
+      auth: expect.any(Function),
+      autoConnect: false,
+      reconnection: false,
     }))
 
     const protocol = registeredHandler<(payload: { selectedProtocolVersion: 1 | 2 }) => void>(socket, 'quilt_protocol')
@@ -258,5 +266,56 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(onSnapshot).toHaveBeenCalledTimes(1)
     expect(onTilePlaced).toHaveBeenCalledTimes(1)
     expect(onTileRemoved).toHaveBeenCalledTimes(1)
+  })
+
+  it('supplies the current token through Socket.IO auth without putting it in the URL', async () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+
+    renderAuthenticatedSocket([
+      'https://api.example.test',
+      'session-1',
+      'client-1',
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    ])
+
+    const options = ioMock.mock.calls[0]?.[1] as { auth: (callback: (auth: Record<string, unknown>) => void) => void }
+    const callback = vi.fn()
+    await options.auth(callback)
+
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+      token: 'access-token',
+      sessionId: 'session-1',
+      clientId: 'client-1',
+    }))
+    expect(ioMock.mock.calls[0]?.[0]).toBe('https://api.example.test')
+    expect(ioMock.mock.calls[0]?.[0]).not.toContain('access-token')
+  })
+
+  it('forces one renewal and reconnects after an authentication failure', async () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+    const acquireAccessToken = vi.fn(async () => 'renewed-token')
+    const onAuthLoss = vi.fn()
+
+    renderAuthenticatedSocket([
+      'https://api.example.test',
+      'session-1',
+      'client-1',
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    ], acquireAccessToken, onAuthLoss)
+
+    const connectError = registeredHandler<(error: Error & { data?: { code?: string } }) => void>(socket, 'connect_error')
+    connectError(Object.assign(new Error('expired'), { data: { code: 'invalid_token' } }))
+    await vi.waitFor(() => expect(socket.connect).toHaveBeenCalledTimes(2))
+
+    connectError(Object.assign(new Error('expired again'), { data: { code: 'invalid_token' } }))
+    expect(acquireAccessToken).toHaveBeenCalledTimes(1)
+    expect(acquireAccessToken).toHaveBeenCalledWith({ forceRefresh: true })
+    expect(onAuthLoss).toHaveBeenCalledWith('authentication_failed', expect.any(Error))
   })
 })

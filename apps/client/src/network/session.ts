@@ -1,7 +1,5 @@
-import { resolveServerUrl } from './serverUrl'
 import type { CanvasSizePreset } from '../../../server/src/contracts'
 
-const SERVER_URL = resolveServerUrl()
 const SESSION_STORAGE_KEY = 'zzyix_session_id'
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
 
@@ -54,8 +52,12 @@ export const clearStoredSessionId = (): void => {
   sessionStorage.removeItem(SESSION_STORAGE_KEY)
 }
 
-export const createSession = async (options?: CreateSessionOptions): Promise<string> => {
-  const response = await fetch(`${SERVER_URL}/sessions`, {
+export const createSession = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+  options?: CreateSessionOptions,
+): Promise<string> => {
+  const response = await authenticatedFetch(`${apiOrigin}/sessions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -68,8 +70,8 @@ export const createSession = async (options?: CreateSessionOptions): Promise<str
   return data.session.id
 }
 
-export const listSessions = async (): Promise<SessionSummary[]> => {
-  const response = await fetch(`${SERVER_URL}/sessions`, { method: 'GET' })
+export const listSessions = async (authenticatedFetch: typeof fetch, apiOrigin: string): Promise<SessionSummary[]> => {
+  const response = await authenticatedFetch(`${apiOrigin}/sessions`, { method: 'GET' })
   if (!response.ok) throw new Error(`Failed to list sessions: ${response.status}`)
 
   const data = (await response.json()) as ListSessionsResponse
@@ -99,11 +101,11 @@ export const listSessions = async (): Promise<SessionSummary[]> => {
     })
 }
 
-export const ensureSession = async (): Promise<string> => {
+export const ensureSession = async (authenticatedFetch: typeof fetch, apiOrigin: string): Promise<string> => {
   const stored = getStoredSessionId()
   if (stored) return stored
 
-  const sessionId = await createSession()
+  const sessionId = await createSession(authenticatedFetch, apiOrigin)
   setStoredSessionId(sessionId)
   return sessionId
 }

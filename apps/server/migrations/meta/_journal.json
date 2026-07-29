@@ -43,6 +43,13 @@
       "when": 1785168000000,
       "tag": "0005_finite_toroidal_quilt",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785282520642,
+      "tag": "0006_authentication_authorization",
+      "breakpoints": true
     }
   ]
 }

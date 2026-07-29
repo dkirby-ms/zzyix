@@ -1,6 +1,10 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import { Toast, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from './Toast'
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('Toast primitives', () => {
   it('renders viewport and open toast with expected class names', () => {

@@ -62,6 +62,19 @@ export type GuidedPlacement = {
   reason: string
 }
 
+export const derivePlacementBounds = (
+  shape: TileShape,
+  transform: Transform2D,
+): MosaicBounds => {
+  const outline = transformTile(shape, transform).outline
+  return {
+    minX: Math.min(...outline.map((point) => point.x)),
+    maxX: Math.max(...outline.map((point) => point.x)),
+    minY: Math.min(...outline.map((point) => point.y)),
+    maxY: Math.max(...outline.map((point) => point.y)),
+  }
+}
+
 export const projectNearestPeriodicTiles = (
   settled: TileInstance[],
   reference: Vec2,

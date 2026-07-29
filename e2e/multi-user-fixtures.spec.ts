@@ -50,7 +50,7 @@ const expectTileObservedByPeer = async (
   })
 }
 
-test('sequential placements from two users converge to one authoritative tile set with exact-once retention', async ({ createMultiUserSession }) => {
+test('owner placements converge for collaborators while non-owner mutation is denied', async ({ createMultiUserSession }) => {
   const session = await createMultiUserSession({ userCount: 2, canvasPreset: 'expanded' })
   const [userA, userB] = session.users
 
@@ -65,7 +65,6 @@ test('sequential placements from two users converge to one authoritative tile se
   expect(initialStateA.clientId).not.toBe(initialStateB.clientId)
 
   const clientA = initialStateA.clientId
-  const clientB = initialStateB.clientId
 
   await userA.setActiveTile({
     shape: 'square',
@@ -94,46 +93,13 @@ test('sequential placements from two users converge to one authoritative tile se
     mirrored: false,
   })
 
-  const placedByB = await userB.placeTile({ x: 1.01, y: 0 })
-  expect(placedByB.placedBy).toBe(clientB)
+  const deniedByB = await userB.placeTileWithAck({ x: 1.01, y: 0 })
+  expect(deniedByB).toMatchObject({ rejected: true, reason: 'PLACEMENT_REJECTED' })
 
-  await expectTileObservedByPeer(userA, placedByB, clientB)
-
-  await userA.setActiveTile({
-    shape: 'square',
-    color: '#4b7fdd',
-    material: 'ceramic',
-    rotation: 0,
-    mirrored: false,
-  })
-
-  const placedByAAgain = await userA.placeTile({ x: 2.02, y: 0 })
-  expect(placedByAAgain.placedBy).toBe(clientA)
-
-  await expectTileObservedByPeer(userB, placedByAAgain, clientA)
-
-  await userB.setActiveTile({
-    shape: 'square',
-    color: '#2f9d7d',
-    material: 'glass',
-    rotation: Math.PI / 2,
-    mirrored: false,
-  })
-
-  const placedByBAgain = await userB.placeTile({ x: 3.03, y: 0 })
-  expect(placedByBAgain.placedBy).toBe(clientB)
-
-  await expectTileObservedByPeer(userA, placedByBAgain, clientB)
-
-  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [
-    placedTile,
-    placedByB,
-    placedByAAgain,
-    placedByBAgain,
-  ])
+  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedTile])
 })
 
-test('near-simultaneous independent placements converge with exact-once authoritative retention', async ({ createMultiUserSession }) => {
+test('near-simultaneous owner and non-owner placements preserve authorization and convergence', async ({ createMultiUserSession }) => {
   const session = await createMultiUserSession({ userCount: 2, canvasPreset: 'expanded' })
   const [userA, userB] = session.users
 
@@ -167,21 +133,17 @@ test('near-simultaneous independent placements converge with exact-once authorit
   ])
 
   expect(ackA.rejected).toBe(false)
-  expect(ackB.rejected).toBe(false)
+  expect(ackB).toMatchObject({ rejected: true, reason: 'PLACEMENT_REJECTED' })
 
-  if (ackA.rejected || ackB.rejected) {
-    throw new Error(`Expected both near-simultaneous placements to be accepted. got A=${ackA.reason} B=${ackB.reason}`)
+  if (ackA.rejected) {
+    throw new Error(`Expected owner placement to be accepted. got ${ackA.reason}`)
   }
 
-  expect(ackA.placed.id).not.toBe(ackB.placed.id)
-
   const placedByA = await userA.waitForTile({ id: ackA.placed.id })
-  const placedByB = await userB.waitForTile({ id: ackB.placed.id })
 
   await expectTileObservedByPeer(userB, placedByA, clientA)
-  await expectTileObservedByPeer(userA, placedByB, clientB)
 
-  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA, placedByB])
+  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA])
 })
 
 test('stale revision rejection triggers resync and successful retry convergence', async ({ createMultiUserSession }) => {
@@ -218,7 +180,7 @@ test('stale revision rejection triggers resync and successful retry convergence'
     throw new Error(`Expected seed placement to be accepted. got ${ackA.reason}`)
   }
 
-  const staleAttempt = await userB.placeTileWithAck(
+  const staleAttempt = await userA.placeTileWithAck(
     { x: 1.01, y: 0 },
     { includeExpectedRevision: true, expectedRevisionOverride: 0 },
   )
@@ -229,23 +191,23 @@ test('stale revision rejection triggers resync and successful retry convergence'
   }
   expect(staleAttempt.reason).toBe('STALE_REVISION')
 
-  await expect.poll(async () => (await userB.getState()).resyncEvents, {
-    message: 'user B should receive a resync signal after stale revision rejection',
+  await expect.poll(async () => (await userA.getState()).resyncEvents, {
+    message: 'the owner should receive a resync signal after stale revision rejection',
   }).toBeGreaterThan(0)
 
-  await expect.poll(async () => (await userB.getState()).revision, {
-    message: 'user B should converge to the updated authoritative revision before retry',
+  await expect.poll(async () => (await userA.getState()).revision, {
+    message: 'the owner should converge to the updated authoritative revision before retry',
   }).toBeGreaterThanOrEqual(1)
 
-  const retryPlacedTile = await userB.placeTile({ x: 1.01, y: 0 })
+  const retryPlacedTile = await userA.placeTile({ x: 1.01, y: 0 })
 
   const placedByA = await userA.waitForTile({ id: ackA.placed.id })
-  const placedByB = await userB.waitForTile({ id: retryPlacedTile.id })
+  const placedByAAgain = await userB.waitForTile({ id: retryPlacedTile.id })
 
   await expectTileObservedByPeer(userB, placedByA, clientA)
-  await expectTileObservedByPeer(userA, placedByB, clientB)
+  expect(placedByAAgain.placedBy).toBe(clientA)
 
-  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA, placedByB])
+  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA, placedByAAgain])
 })
 
 test('out-of-order revision rejection allows clean retry and convergence', async ({ createMultiUserSession }) => {
@@ -288,7 +250,7 @@ test('out-of-order revision rejection allows clean retry and convergence', async
   const outOfOrderRevision = beforeOutOfOrder.revision + 5
   const resyncEventsBefore = beforeOutOfOrder.resyncEvents
 
-  const outOfOrderAttempt = await userB.placeTileWithAck(
+  const outOfOrderAttempt = await userA.placeTileWithAck(
     { x: 1.01, y: 0 },
     {
       includeExpectedRevision: true,
@@ -306,13 +268,13 @@ test('out-of-order revision rejection allows clean retry and convergence', async
     message: 'out-of-order place_tile rejection should not force full-canvas resync',
   }).toBe(resyncEventsBefore)
 
-  const retryPlacedTile = await userB.placeTile({ x: 1.01, y: 0 })
+  const retryPlacedTile = await userA.placeTile({ x: 1.01, y: 0 })
 
   const placedByA = await userA.waitForTile({ id: ackA.placed.id })
-  const placedByB = await userB.waitForTile({ id: retryPlacedTile.id })
+  const placedByAAgain = await userB.waitForTile({ id: retryPlacedTile.id })
 
   await expectTileObservedByPeer(userB, placedByA, clientA)
-  await expectTileObservedByPeer(userA, placedByB, clientB)
+  expect(placedByAAgain.placedBy).toBe(clientA)
 
-  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA, placedByB])
+  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA, placedByAAgain])
 })

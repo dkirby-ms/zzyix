@@ -8,6 +8,7 @@ type CanvasSizePreset = 'classic' | 'expanded' | 'vast'
 export type ResetSharedCanvasOptions = {
   createSession?: boolean
   canvasPreset?: CanvasSizePreset
+  ownerExternalSubject?: string
 }
 
 export type ResetSharedCanvasResult = {
@@ -29,6 +30,7 @@ export const resetSharedCanvasState = async (
     data: {
       createSession: options.createSession ?? false,
       canvasPreset: options.canvasPreset,
+      ownerExternalSubject: options.ownerExternalSubject,
     },
   })
 
@@ -44,6 +46,7 @@ export const createIsolatedSharedCanvas = async (
   const result = await resetSharedCanvasState(request, {
     createSession: true,
     canvasPreset: options.canvasPreset,
+    ownerExternalSubject: options.ownerExternalSubject,
   })
 
   const sessionId = result.session?.id

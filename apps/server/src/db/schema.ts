@@ -17,11 +17,17 @@ import {
 } from 'drizzle-orm/pg-core'
 import type { SessionCanvasConfig } from '../contracts.js'
 import {
+  authorizationAuditChannelValues,
+  authorizationAuditOutcomeValues,
   materialVariantValues,
   operationTypeValues,
+  ownershipTransferStatusValues,
+  patchClaimOutcomeValues,
   patchMembershipRoleValues,
   patchStateValues,
+  patchVisibilityValues,
   principalKindValues,
+  principalStatusValues,
   quiltTopologyValues,
   tileShapeValues,
 } from './types.js'
@@ -63,11 +69,27 @@ export const principals = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     kind: text('kind').notNull(),
+    status: text('status').default('active').notNull(),
     displayName: text('display_name'),
+    email: text('email'),
+    deletionRequestedAt: timestamp('deletion_requested_at', { withTimezone: true }),
+    deletionRecoveryDeadline: timestamp('deletion_recovery_deadline', { withTimezone: true }),
+    deletionCompletedAt: timestamp('deletion_completed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     kindCheck: check('principals_kind_check', sql`${table.kind} in (${asSqlLiteralList(principalKindValues)})`),
+    statusCheck: check(
+      'principals_status_check',
+      sql`${table.status} in (${asSqlLiteralList(principalStatusValues)})`,
+    ),
+    deletionTimelineCheck: check(
+      'principals_deletion_timeline_check',
+      sql`(${table.status} not in ('deletion_pending', 'deleted') or ${table.deletionRequestedAt} is not null)
+        and (${table.status} <> 'deletion_pending' or ${table.deletionRecoveryDeadline} is not null)
+        and (${table.status} <> 'deleted' or ${table.deletionCompletedAt} is not null)`,
+    ),
   }),
 )
 
@@ -86,7 +108,7 @@ export const externalPrincipalMappings = pgTable(
       columns: [table.providerNamespace, table.externalSubject],
       name: 'external_principal_mappings_pk',
     }),
-    principalIndex: index('external_principal_mappings_principal_idx').on(table.principalId),
+    principalUnique: unique('external_principal_mappings_principal_id_unique').on(table.principalId),
   }),
 )
 
@@ -160,6 +182,178 @@ export const patchMemberships = pgTable(
     roleCheck: check(
       'patch_memberships_role_check',
       sql`${table.role} in (${asSqlLiteralList(patchMembershipRoleValues)})`,
+    ),
+  }),
+)
+
+export const patchVisibilityPolicies = pgTable(
+  'patch_visibility_policies',
+  {
+    patchId: uuid('patch_id')
+      .primaryKey()
+      .references(() => patches.id, { onDelete: 'cascade' }),
+    existence: text('existence').default('authenticated').notNull(),
+    fineData: text('fine_data').default('authenticated').notNull(),
+    aggregateData: text('aggregate_data').default('authenticated').notNull(),
+    presence: text('presence').default('authenticated').notNull(),
+    search: text('search').default('authenticated').notNull(),
+    durableEvents: text('durable_events').default('authenticated').notNull(),
+    claimEnabled: boolean('claim_enabled').default(false).notNull(),
+    policyVersion: integer('policy_version').default(1).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    existenceCheck: check(
+      'patch_visibility_policies_existence_check',
+      sql`${table.existence} in (${asSqlLiteralList(patchVisibilityValues)})`,
+    ),
+    fineDataCheck: check(
+      'patch_visibility_policies_fine_data_check',
+      sql`${table.fineData} in (${asSqlLiteralList(patchVisibilityValues)})`,
+    ),
+    aggregateDataCheck: check(
+      'patch_visibility_policies_aggregate_data_check',
+      sql`${table.aggregateData} in (${asSqlLiteralList(patchVisibilityValues)})`,
+    ),
+    presenceCheck: check(
+      'patch_visibility_policies_presence_check',
+      sql`${table.presence} in (${asSqlLiteralList(patchVisibilityValues)}) and ${table.presence} <> 'public'`,
+    ),
+    searchCheck: check(
+      'patch_visibility_policies_search_check',
+      sql`${table.search} in (${asSqlLiteralList(patchVisibilityValues)})`,
+    ),
+    durableEventsCheck: check(
+      'patch_visibility_policies_durable_events_check',
+      sql`${table.durableEvents} in (${asSqlLiteralList(patchVisibilityValues)})`,
+    ),
+    policyVersionCheck: check('patch_visibility_policies_policy_version_check', sql`${table.policyVersion} > 0`),
+  }),
+)
+
+export const patchClaimQuotaRecords = pgTable(
+  'patch_claim_quota_records',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    operationId: uuid('operation_id').notNull(),
+    principalId: uuid('principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'restrict' }),
+    quiltId: uuid('quilt_id')
+      .notNull()
+      .references(() => quilts.id, { onDelete: 'cascade' }),
+    patchId: uuid('patch_id')
+      .notNull()
+      .references(() => patches.id, { onDelete: 'cascade' }),
+    outcome: text('outcome').notNull(),
+    reasonCode: text('reason_code'),
+    attemptedAt: timestamp('attempted_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    operationUnique: unique('patch_claim_quota_records_operation_id_unique').on(table.operationId),
+    principalAttemptIndex: index('patch_claim_quota_records_principal_attempt_idx').on(
+      table.principalId,
+      table.attemptedAt,
+    ),
+    principalOutcomeIndex: index('patch_claim_quota_records_principal_outcome_idx').on(
+      table.principalId,
+      table.outcome,
+      table.attemptedAt,
+    ),
+    outcomeCheck: check(
+      'patch_claim_quota_records_outcome_check',
+      sql`${table.outcome} in (${asSqlLiteralList(patchClaimOutcomeValues)})`,
+    ),
+  }),
+)
+
+export const pendingOwnershipTransfers = pgTable(
+  'pending_ownership_transfers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    operationId: uuid('operation_id').notNull(),
+    patchId: uuid('patch_id')
+      .notNull()
+      .references(() => patches.id, { onDelete: 'cascade' }),
+    senderPrincipalId: uuid('sender_principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'restrict' }),
+    recipientPrincipalId: uuid('recipient_principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'restrict' }),
+    status: text('status').default('pending').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    operationUnique: unique('pending_ownership_transfers_operation_id_unique').on(table.operationId),
+    patchStatusIndex: index('pending_ownership_transfers_patch_status_idx').on(table.patchId, table.status),
+    recipientStatusIndex: index('pending_ownership_transfers_recipient_status_idx').on(
+      table.recipientPrincipalId,
+      table.status,
+    ),
+    statusCheck: check(
+      'pending_ownership_transfers_status_check',
+      sql`${table.status} in (${asSqlLiteralList(ownershipTransferStatusValues)})`,
+    ),
+    distinctPrincipalsCheck: check(
+      'pending_ownership_transfers_distinct_principals_check',
+      sql`${table.senderPrincipalId} <> ${table.recipientPrincipalId}`,
+    ),
+    resolutionCheck: check(
+      'pending_ownership_transfers_resolution_check',
+      sql`(${table.status} = 'pending' and ${table.resolvedAt} is null)
+        or (${table.status} <> 'pending' and ${table.resolvedAt} is not null)`,
+    ),
+  }),
+)
+
+export const authorizationAuditEvents = pgTable(
+  'authorization_audit_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    eventType: text('event_type').notNull(),
+    attemptedAction: text('attempted_action').notNull(),
+    outcome: text('outcome').notNull(),
+    reasonCode: text('reason_code'),
+    actorPrincipalId: uuid('actor_principal_id').references(() => principals.id, { onDelete: 'restrict' }),
+    subjectPrincipalId: uuid('subject_principal_id').references(() => principals.id, { onDelete: 'restrict' }),
+    quiltId: uuid('quilt_id').references(() => quilts.id, { onDelete: 'restrict' }),
+    patchId: uuid('patch_id').references(() => patches.id, { onDelete: 'restrict' }),
+    requestId: text('request_id'),
+    socketId: text('socket_id'),
+    operationId: uuid('operation_id'),
+    sourceChannel: text('source_channel').notNull(),
+    replicaId: text('replica_id'),
+    policyVersion: integer('policy_version'),
+    beforeState: jsonb('before_state'),
+    afterState: jsonb('after_state'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    actorCreatedIndex: index('authorization_audit_events_actor_created_idx').on(
+      table.actorPrincipalId,
+      table.createdAt,
+    ),
+    patchCreatedIndex: index('authorization_audit_events_patch_created_idx').on(table.patchId, table.createdAt),
+    eventTypeCreatedIndex: index('authorization_audit_events_type_created_idx').on(
+      table.eventType,
+      table.createdAt,
+    ),
+    outcomeCheck: check(
+      'authorization_audit_events_outcome_check',
+      sql`${table.outcome} in (${asSqlLiteralList(authorizationAuditOutcomeValues)})`,
+    ),
+    sourceChannelCheck: check(
+      'authorization_audit_events_source_channel_check',
+      sql`${table.sourceChannel} in (${asSqlLiteralList(authorizationAuditChannelValues)})`,
+    ),
+    policyVersionCheck: check(
+      'authorization_audit_events_policy_version_check',
+      sql`${table.policyVersion} is null or ${table.policyVersion} > 0`,
     ),
   }),
 )

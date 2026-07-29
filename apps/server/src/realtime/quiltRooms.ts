@@ -5,10 +5,13 @@ import type {
   QuiltRoomRequest,
   QuiltTopologyHandshake,
 } from '../contracts.js'
+import type { PatchStateValue } from '../db/types.js'
+import type { PersistedVisibilityPolicy } from '../domain/authorizationPolicy.js'
+import { evaluatePatchVisibility } from '../domain/authorizationPolicy.js'
 
 export type PatchRoomAccess = {
   patchId: string
-  state: 'unclaimed' | 'active' | 'suspended' | 'deletion_requested' | 'deleted'
+  state: PatchStateValue
   publishesExistence: boolean
   publicFine: boolean
   publicAggregate: boolean
@@ -16,6 +19,36 @@ export type PatchRoomAccess = {
   principalAggregate: boolean
   principalPresence: boolean
   principalEvents: boolean
+}
+
+export const buildPatchRoomAccess = (patch: {
+  id: string
+  state: PatchStateValue
+  isMember: boolean
+  policy: PersistedVisibilityPolicy | null
+}): PatchRoomAccess => {
+  const publicAccess = evaluatePatchVisibility({
+    state: patch.state,
+    policy: patch.policy,
+    subject: { authenticated: false, isMember: false },
+  })
+  const principalAccess = evaluatePatchVisibility({
+    state: patch.state,
+    policy: patch.policy,
+    subject: { authenticated: true, isMember: patch.isMember },
+  })
+
+  return {
+    patchId: patch.id,
+    state: patch.state,
+    publishesExistence: principalAccess.existence,
+    publicFine: publicAccess.fineData,
+    publicAggregate: publicAccess.aggregateData,
+    principalFine: principalAccess.fineData,
+    principalAggregate: principalAccess.aggregateData,
+    principalPresence: principalAccess.presence,
+    principalEvents: principalAccess.durableEvents,
+  }
 }
 
 export type QuiltRoomResolutionContext = {

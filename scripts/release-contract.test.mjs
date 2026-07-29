@@ -30,6 +30,22 @@ test('CD releases queue without cancelling an in-flight migration owner', async 
   assert.match(workflow, /properties\.status/)
 })
 
+test('production rollout requires operational approvals and keeps mutation disabled', async () => {
+  const workflow = await readWorkflow()
+
+  for (const approval of [
+    'AUTH_TELEMETRY_GATE_APPROVED',
+    'AUTH_ROLLBACK_GATE_APPROVED',
+    'AUTH_RETENTION_POLICY_APPROVED',
+    'AUTH_DELETION_COMPLETION_POLICY_APPROVED',
+  ]) {
+    assert.match(workflow, new RegExp(`${approval}: \\$\\{\\{ vars\\.${approval} \\}\\}`))
+  }
+  assert.match(workflow, /Release approval is not granted: \$\{approval_name\}/)
+  assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false/)
+  assert.doesNotMatch(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true/)
+})
+
 test('migration job create and update reassert single-owner execution settings', async () => {
   const workflow = await readWorkflow()
   const createArguments = [

@@ -220,6 +220,35 @@ FROM schema_objects;
 SQL
 }
 
+verify_authentication_schema() {
+  local database_url="$1"
+  psql "${database_url}" --no-psqlrc --set ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM principals WHERE status <> 'active') THEN
+    RAISE EXCEPTION 'Existing principals did not receive the active lifecycle default';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM patches
+    LEFT JOIN patch_visibility_policies policy ON policy.patch_id = patches.id
+    WHERE policy.patch_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Existing patches are missing persisted visibility policy';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'external_principal_mappings_principal_id_unique'
+      AND contype = 'u'
+  ) THEN
+    RAISE EXCEPTION 'Reverse external principal mapping uniqueness is missing';
+  END IF;
+END
+$$;
+SQL
+}
+
 cleanup_rehearsal_databases() {
   if [[ -z "${REHEARSAL_ADMIN_URL}" ]]; then
     return
@@ -265,6 +294,8 @@ rehearse() {
   upgrade_schema="$(schema_fingerprint "${upgrade_database_url}")"
   [[ "${fresh_schema}" == "${upgrade_schema}" ]] || \
     err 'Fresh and upgraded databases produced different schemas'
+  verify_authentication_schema "${fresh_database_url}"
+  verify_authentication_schema "${upgrade_database_url}"
 
   backfill "${upgrade_database_url}"
   backfill "${upgrade_database_url}"

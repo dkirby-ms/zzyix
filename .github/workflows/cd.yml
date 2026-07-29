@@ -6,16 +6,115 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      recovery_action:
+        description: Restricted operational recovery action
+        required: false
+        type: choice
+        options:
+          - none
+          - recover-principal
+          - cancel-transfer
+        default: none
+      recovery_target_id:
+        description: Internal principal or pending transfer ID
+        required: false
+        type: string
+      support_ticket:
+        description: Approved support ticket ID
+        required: false
+        type: string
+      recovery_reason:
+        description: Approved operational reason
+        required: false
+        type: string
 
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  operational-recovery:
+    name: Restricted Operational Recovery
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_action != 'none' }}
+    runs-on: ubuntu-latest
+    environment: operational-recovery
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Validate Recovery Request
+        env:
+          RECOVERY_ACTION: ${{ inputs.recovery_action }}
+          RECOVERY_TARGET_ID: ${{ inputs.recovery_target_id }}
+          SUPPORT_TICKET: ${{ inputs.support_ticket }}
+          RECOVERY_REASON: ${{ inputs.recovery_reason }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RECOVERY_TARGET_ID}" || -z "${SUPPORT_TICKET}" || -z "${RECOVERY_REASON}" ]]; then
+            echo 'Recovery target, approved support ticket, and reason are required.' >&2
+            exit 1
+          fi
+
+          if [[ "${RECOVERY_ACTION}" != 'recover-principal' && "${RECOVERY_ACTION}" != 'cancel-transfer' ]]; then
+            echo 'Unsupported operational recovery action.' >&2
+            exit 1
+          fi
+
+      - name: Azure Login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Start Restricted Recovery Job
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          RECOVERY_JOB_NAME: ${{ vars.RECOVERY_JOB_NAME }}
+          RECOVERY_ACTION: ${{ inputs.recovery_action }}
+          RECOVERY_TARGET_ID: ${{ inputs.recovery_target_id }}
+          SUPPORT_TICKET: ${{ inputs.support_ticket }}
+          RECOVERY_REASON: ${{ inputs.recovery_reason }}
+          OPERATOR_ID: ${{ github.actor_id }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${RESOURCE_GROUP}" || -z "${RECOVERY_JOB_NAME}" || -z "${OPERATOR_ID}" ]]; then
+              echo 'Restricted recovery infrastructure is not configured.' >&2
+              exit 1
+            fi
+
+            execution_name="$(az containerapp job start \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${RECOVERY_JOB_NAME}" \
+              --command node \
+              --args \
+                dist/operations/principalRecoveryCli.js \
+                --action "${RECOVERY_ACTION}" \
+                --target-id "${RECOVERY_TARGET_ID}" \
+                --operator-id "${OPERATOR_ID}" \
+                --support-ticket "${SUPPORT_TICKET}" \
+                --reason "${RECOVERY_REASON}" \
+              --query name \
+              --output tsv)"
+
+            if [[ -z "${execution_name}" ]]; then
+              echo 'Recovery job did not return an execution name.' >&2
+              exit 1
+            fi
+
+            echo "Restricted recovery execution ${execution_name} started."
+
   build-and-push:
     name: Build And Push (${{ matrix.app }})
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' || (
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.recovery_action == 'none') || (
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
@@ -101,7 +200,7 @@ jobs:
     name: Deploy To Azure Container Apps (staging)
     needs: build-and-push
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' || (
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.recovery_action == 'none') || (
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
@@ -138,6 +237,10 @@ jobs:
       AUTH_REQUIRED_SCOPE: ${{ vars.AUTH_REQUIRED_SCOPE }}
       AUTH_JWKS_URI: ${{ vars.AUTH_JWKS_URI }}
       AUTH_ACCEPTED_ALGORITHM: ${{ vars.AUTH_ACCEPTED_ALGORITHM }}
+      AUTH_TELEMETRY_GATE_APPROVED: ${{ vars.AUTH_TELEMETRY_GATE_APPROVED }}
+      AUTH_ROLLBACK_GATE_APPROVED: ${{ vars.AUTH_ROLLBACK_GATE_APPROVED }}
+      AUTH_RETENTION_POLICY_APPROVED: ${{ vars.AUTH_RETENTION_POLICY_APPROVED }}
+      AUTH_DELETION_COMPLETION_POLICY_APPROVED: ${{ vars.AUTH_DELETION_COMPLETION_POLICY_APPROVED }}
 
     steps:
       - name: Check Out
@@ -180,11 +283,28 @@ jobs:
             AUTH_REQUIRED_SCOPE
             AUTH_JWKS_URI
             AUTH_ACCEPTED_ALGORITHM
+            AUTH_TELEMETRY_GATE_APPROVED
+            AUTH_ROLLBACK_GATE_APPROVED
+            AUTH_RETENTION_POLICY_APPROVED
+            AUTH_DELETION_COMPLETION_POLICY_APPROVED
           )
 
           for variable_name in "${required_variables[@]}"; do
             if [[ -z "${!variable_name:-}" ]]; then
               echo "Missing required GitHub environment variable: ${variable_name}" >&2
+              exit 1
+            fi
+          done
+
+          required_approvals=(
+            AUTH_TELEMETRY_GATE_APPROVED
+            AUTH_ROLLBACK_GATE_APPROVED
+            AUTH_RETENTION_POLICY_APPROVED
+            AUTH_DELETION_COMPLETION_POLICY_APPROVED
+          )
+          for approval_name in "${required_approvals[@]}"; do
+            if [[ "${!approval_name}" != "true" ]]; then
+              echo "Release approval is not granted: ${approval_name}" >&2
               exit 1
             fi
           done
@@ -412,7 +532,7 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
                 --image "${SERVER_IMAGE}" \
-                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}"
+                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -430,7 +550,7 @@ jobs:
                 --image "${SERVER_IMAGE}" \
                 --target-port "${SERVER_TARGET_PORT}" \
                 --ingress internal \
-                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" \
+                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false" \
                 --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
                 --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
@@ -583,4 +703,4 @@ jobs:
             az containerapp update \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${SERVER_CONTAINER_APP_NAME}" \
-              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}"
+              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=false"

@@ -26,6 +26,7 @@ import {
 } from './interaction/controller'
 import type { ActiveTile, PlacementGuide, SequencedTilesState } from './interaction/controller'
 import { ensureClientId } from './network/session'
+import { derivePlacementBounds } from './domain/placementSolver'
 import {
   createSession,
   getStoredSessionId,
@@ -34,7 +35,6 @@ import {
   type CreateSessionOptions,
   type SessionSummary,
 } from './network/session'
-import { resolveServerUrl } from './network/serverUrl'
 import { resolveCanvasDebug } from './config/debugFlags'
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
@@ -63,8 +63,14 @@ import type {
   QuiltPatchEventPayload,
   QuiltPatchResyncRequiredPayload,
   QuiltProtocolHandshake,
+  QuiltPlaceTileAck,
+  QuiltPlaceTileRequest,
+  QuiltRemoveTileAck,
+  QuiltRemoveTileRequest,
   QuiltScopedSnapshotPayload,
+  QuiltTopologyHandshake,
 } from '../../server/src/contracts'
+import { decomposeWrappedViewport } from '../../server/src/domain/quiltTopology'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
 import { GridOverlayControls } from './ui/GridOverlayControls'
@@ -74,6 +80,7 @@ import { palettes } from './ui/palettes'
 import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import { TooltipProvider } from './ui/primitives/Tooltip'
+import { useAuthSession } from './auth/useAuthSession'
 import {
   COLLABORATION_EMIT_INTERVAL_MS,
   COLLABORATOR_CLEANUP_INTERVAL_MS,
@@ -92,6 +99,7 @@ import {
   createQuiltCache,
   evictQuiltCache,
   mergeQuiltPatchSnapshot,
+  reconcileQuiltMutationRevisions,
   selectQuiltCursors,
   selectQuiltTiles,
   setQuiltOptimisticTile,
@@ -333,6 +341,45 @@ const findCachedPatchId = (
   return Object.values(cache.patches).find((patch) => patch.chunkIds.includes(chunkId))?.patchId
 }
 
+const findTilePatchIds = (cache: QuiltCacheState, tileId: string): string[] =>
+  Object.values(cache.patches)
+    .filter((patch) => patch.tileIds.includes(tileId))
+    .map((patch) => patch.patchId)
+
+const findAffectedCachedPatchIds = (
+  cache: QuiltCacheState,
+  tile: Pick<PlaceTilePayload, 'shape' | 'transform'>,
+  topology: QuiltTopologyHandshake,
+): string[] | undefined => {
+  const addressToPatchId = new Map<string, string>()
+  Object.values(cache.patches).forEach((patch) => {
+    const match = patch.roomId.match(/:patch:(\d+):(\d+):/)
+    if (match) addressToPatchId.set(`${match[1]}:${match[2]}`, patch.patchId)
+  })
+  const addresses = new Set<string>()
+  for (const rect of decomposeWrappedViewport(derivePlacementBounds(tile.shape, tile.transform), topology)) {
+    const maxX = rect.maxX === rect.minX ? rect.maxX : Math.max(rect.minX, rect.maxX - Number.EPSILON)
+    const maxY = rect.maxY === rect.minY ? rect.maxY : Math.max(rect.minY, rect.maxY - Number.EPSILON)
+    const minColumn = Math.floor(rect.minX / topology.patchWidth)
+    const maxColumn = Math.floor(maxX / topology.patchWidth)
+    const minRow = Math.floor(rect.minY / topology.patchHeight)
+    const maxRow = Math.floor(maxY / topology.patchHeight)
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let column = minColumn; column <= maxColumn; column += 1) addresses.add(`${row}:${column}`)
+    }
+  }
+  const patchIds = [...addresses].map((address) => addressToPatchId.get(address))
+  return patchIds.every((patchId): patchId is string => patchId !== undefined) ? [...new Set(patchIds)] : undefined
+}
+
+const expectedPatchRevisions = (
+  cache: QuiltCacheState,
+  patchIds: readonly string[],
+): Record<string, number> => Object.fromEntries(patchIds.map((patchId) => [
+  patchId,
+  cache.patches[patchId]?.cursor.revision,
+]).filter((entry): entry is [string, number] => entry[1] !== undefined))
+
 const shouldReplaceChunkTilesForSnapshot = (payloadMode: ChunkPayloadMode): boolean => payloadMode === 'fine'
 
 const DEFAULT_WORLD_BOUNDS = DEFAULT_BOUNDED_WORLD_BOUNDS
@@ -347,7 +394,8 @@ const resolveWorldBounds = (canvasPolicy: BoundsPolicy | undefined, sessionPolic
   return DEFAULT_WORLD_BOUNDS
 }
 
-function App() {
+function ProtectedApp() {
+  const auth = useAuthSession()
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
   )
@@ -420,11 +468,11 @@ function App() {
   })
   const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const clientId = useMemo(() => ensureClientId(), [])
-  const serverUrl = useMemo(() => resolveServerUrl(), [])
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
   const isQuiltV2 = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology !== undefined
+  const mutationControlsEnabled = !isQuiltV2 || quiltProtocol.mutationEnabled
   const visibleTiles = useMemo(
     () => isQuiltV2 ? selectQuiltTiles(quiltCache) : sequencedState.tiles,
     [isQuiltV2, quiltCache, sequencedState.tiles],
@@ -490,7 +538,7 @@ function App() {
     setLobbyError(null)
 
     try {
-      const listedSessions = await listSessions()
+      const listedSessions = await listSessions(auth.authenticatedFetch, auth.apiOrigin)
       setSessions(listedSessions)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load canvases'
@@ -498,7 +546,7 @@ function App() {
     } finally {
       setLobbyLoading(false)
     }
-  }, [])
+  }, [auth.apiOrigin, auth.authenticatedFetch])
 
   useEffect(() => {
     setSessionId(null)
@@ -542,7 +590,7 @@ function App() {
       const createOptions: CreateSessionOptions = {
         canvasPreset: selectedCanvasPreset,
       }
-      const nextSessionId = await createSession(createOptions)
+      const nextSessionId = await createSession(auth.authenticatedFetch, auth.apiOrigin, createOptions)
       enterCanvas(nextSessionId)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to create canvas'
@@ -550,7 +598,7 @@ function App() {
     } finally {
       setCreatingSession(false)
     }
-  }, [enterCanvas, selectedCanvasPreset])
+  }, [auth.apiOrigin, auth.authenticatedFetch, enterCanvas, selectedCanvasPreset])
 
   const triggerInvalidPulse = useCallback((): void => {
     setInvalidPulse(true)
@@ -603,6 +651,8 @@ function App() {
   }, [])
 
   const onQuiltPatchEvent = useCallback((payload: QuiltPatchEventPayload): void => {
+    const currentCursor = quiltCursorsRef.current[payload.canonicalRoomId]
+    if (currentCursor && payload.revision <= currentCursor.revision) return
     quiltCursorsRef.current[payload.canonicalRoomId] = {
       patchId: payload.patchId,
       opSeq: payload.opSeq,
@@ -903,7 +953,7 @@ function App() {
   }, [clientId, sessionId])
 
   const socketRef = useSocketConnection(
-    serverUrl,
+    auth.apiOrigin,
     sessionId,
     clientId,
     onSnapshot,
@@ -924,6 +974,8 @@ function App() {
     onQuiltPatchSnapshot,
     onQuiltPatchEvent,
     onQuiltPatchResyncRequired,
+    auth.acquireAccessToken,
+    auth.handleAuthLoss,
   )
 
   const connectionState = useConnectionStatus(socketRef)
@@ -1155,6 +1207,32 @@ function App() {
     if (isQuiltV2) {
       if (!quiltProtocol?.mutationEnabled || !quiltUndo) return
       setQuiltCache((previous) => setQuiltUndoMetadata(previous, quiltUndo))
+      const patchIds = findTilePatchIds(quiltCache, lastSettled.id)
+      const revisions = expectedPatchRevisions(quiltCache, patchIds)
+      if (!quiltProtocol.topology || patchIds.length === 0 || Object.keys(revisions).length !== patchIds.length) return
+      const payload: QuiltRemoveTileRequest = {
+        quiltId: quiltProtocol.topology.quiltId,
+        operationId: crypto.randomUUID(),
+        expectedPatchRevisions: revisions,
+        tileId: lastSettled.id,
+      }
+      socket.emit('quilt_remove_tile', payload, (ack: QuiltRemoveTileAck) => {
+        if (ack.status === 'rejected') return
+        setQuiltCache((previous) => clearQuiltUndoMetadata(
+          reconcileQuiltMutationRevisions(
+            patchIds.reduce((next, patchId) => applyQuiltPatchRemoval(next, patchId, lastSettled.id, {
+              patchId,
+              opSeq: ack.patchRevisions[patchId],
+              revision: ack.patchRevisions[patchId],
+              eventId: ack.eventIds[patchId],
+            }), previous),
+            ack.patchRevisions,
+            ack.eventIds,
+          ),
+          lastSettled.id,
+        ))
+      })
+      return
     }
 
     socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: sequencedState.revision }, (ack) => {
@@ -1184,7 +1262,7 @@ function App() {
         revision: ack.newRevision,
       }))
     })
-  }, [clientId, isQuiltV2, quiltCache.undo, quiltProtocol?.mutationEnabled, requestSnapshot, sequencedState.revision, socketRef, visibleTiles])
+  }, [clientId, isQuiltV2, quiltCache, quiltProtocol, requestSnapshot, sequencedState.revision, socketRef, visibleTiles])
 
   useEffect(() => {
     if (mode !== 'canvas') {
@@ -1290,11 +1368,56 @@ function App() {
       : undefined
 
     if (isQuiltV2) {
-      if (!quiltProtocol?.mutationEnabled || !quiltPatchId || !isServerTileId(tileId)) {
+      if (!quiltProtocol?.mutationEnabled || !quiltProtocol.topology || !quiltPatchId || !isServerTileId(tileId)) {
         triggerInvalidPulse()
         return
       }
-      setQuiltCache((previous) => setQuiltOptimisticTile(previous, quiltPatchId, tempTile))
+      const patchIds = findAffectedCachedPatchIds(quiltCache, tempTile, quiltProtocol.topology)
+      if (!patchIds) {
+        triggerInvalidPulse()
+        return
+      }
+      const revisions = expectedPatchRevisions(quiltCache, patchIds)
+      if (Object.keys(revisions).length !== patchIds.length) {
+        triggerInvalidPulse()
+        return
+      }
+      const operationId = crypto.randomUUID()
+      setQuiltCache((previous) => setQuiltOptimisticTile(previous, patchIds, tempTile, operationId))
+      const payload: QuiltPlaceTileRequest = {
+        quiltId: quiltProtocol.topology.quiltId,
+        operationId,
+        expectedPatchRevisions: revisions,
+        tile: {
+          tileId,
+          shape: tempTile.shape,
+          color: tempTile.color,
+          material: tempTile.material,
+          transform: tempTile.transform,
+        },
+      }
+      socket.emit('quilt_place_tile', payload, (ack: QuiltPlaceTileAck) => {
+        setQuiltCache((previous) => {
+          const cleared = clearQuiltOptimisticTile(previous, tileId)
+          if (ack.status === 'rejected') return cleared
+          const applied = patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, {
+            ...ack.tile,
+            placedBy: clientId,
+          }, {
+            patchId,
+            opSeq: ack.patchRevisions[patchId],
+            revision: ack.patchRevisions[patchId],
+            eventId: ack.eventIds[patchId],
+          }), cleared)
+          return setQuiltUndoMetadata(
+            reconcileQuiltMutationRevisions(applied, ack.patchRevisions, ack.eventIds),
+            { tileId: ack.tile.id, patchId: patchIds[0], operation: 'place', revision: Math.max(...Object.values(ack.patchRevisions)) },
+          )
+        })
+        if (ack.status === 'rejected') triggerInvalidPulse()
+        else emitSelectionUpdate(ack.tile.id)
+      })
+      return
     } else {
       setSequencedState((prev) => ({
         ...prev,
@@ -1312,24 +1435,6 @@ function App() {
     }
 
     socket.emit('place_tile', payload, (ack: PlaceTileAck) => {
-      if (isQuiltV2) {
-        setQuiltCache((previous) => {
-          const cleared = clearQuiltOptimisticTile(previous, tileId)
-          if (ack.rejected || !quiltPatchId) return cleared
-          return setQuiltUndoMetadata(
-            applyQuiltPatchPlacement(cleared, quiltPatchId, { ...ack.placed, placedBy: clientId }, {
-              patchId: quiltPatchId,
-              opSeq: ack.opSeq,
-              revision: ack.newRevision,
-            }),
-            { tileId: ack.placed.id, patchId: quiltPatchId, operation: 'place', revision: ack.newRevision },
-          )
-        })
-        if (ack.rejected) triggerInvalidPulse()
-        else emitSelectionUpdate(ack.placed.id)
-        return
-      }
-
       if (ack.rejected) {
         setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
         triggerInvalidPulse()
@@ -1339,7 +1444,7 @@ function App() {
       emitSelectionUpdate(ack.placed.id)
       setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
     })
-  }, [clientId, emitSelectionUpdate, isQuiltV2, quiltCache, quiltProtocol?.mutationEnabled, socketRef, triggerInvalidPulse, visibleTiles])
+  }, [clientId, emitSelectionUpdate, isQuiltV2, quiltCache, quiltProtocol, socketRef, triggerInvalidPulse, visibleTiles])
 
   const updatePointer = useCallback((x: number, y: number): void => {
     const pointer = vec2(x, y)
@@ -1559,8 +1664,10 @@ function App() {
         onReturnToLobby={returnToLobby}
         connectionState={connectionState.status}
         collaboratorCount={activeCollaborators.length}
-        canUndo={visibleTiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
+        canUndo={mutationControlsEnabled && visibleTiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
         onUndo={handleUndo}
+        profileName={auth.principal?.profile.displayName ?? auth.principal?.profile.email}
+        onLogout={() => void auth.logout()}
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
@@ -1612,7 +1719,7 @@ function App() {
                 }}
                 onPointerMove={updatePointer}
                 onPointerDown={updatePointer}
-                onPointerUp={attemptPlace}
+                onPointerUp={mutationControlsEnabled ? attemptPlace : () => undefined}
                 onRotateDrag={(deltaX) => dispatchActiveTileUi({ type: 'rotate-fine', delta: deltaX * (Math.PI / 200) })}
                 remoteCursors={remoteCursors}
                 remoteSelections={remoteSelections}
@@ -1679,17 +1786,19 @@ function App() {
             </div>
           )}
         </section>
-        <TilePalette
-          activeTile={activeTile}
-          paletteName={paletteName}
-          onPaletteName={handlePaletteChange}
-          paletteOpen={paletteOpen}
-          onTogglePaletteOpen={() => dispatchActiveTileUi({ type: 'toggle-palette-open' })}
-          onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
-          onMaterial={(material) => dispatchActiveTileUi({ type: 'set-material', material })}
-          onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
-          paletteFallbackAnnouncement={paletteFallbackAnnouncement}
-        />
+        {mutationControlsEnabled && (
+          <TilePalette
+            activeTile={activeTile}
+            paletteName={paletteName}
+            onPaletteName={handlePaletteChange}
+            paletteOpen={paletteOpen}
+            onTogglePaletteOpen={() => dispatchActiveTileUi({ type: 'toggle-palette-open' })}
+            onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
+            onMaterial={(material) => dispatchActiveTileUi({ type: 'set-material', material })}
+            onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
+            paletteFallbackAnnouncement={paletteFallbackAnnouncement}
+          />
+        )}
       </div>
     </main>
   )
@@ -1697,6 +1806,28 @@ function App() {
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={300}>{content}</TooltipProvider>
   )
+}
+
+function App() {
+  const auth = useAuthSession()
+
+  if (auth.status === 'loading') {
+    return <main className="auth-shell">Loading your secure workspace...</main>
+  }
+
+  if (auth.status !== 'authenticated' || !auth.principal) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <h1>Mosaic Atelier</h1>
+          <p>{auth.error ?? 'Sign in to view your canvases.'}</p>
+          <button type="button" className="active" onClick={() => void auth.login()}>Sign in</button>
+        </section>
+      </main>
+    )
+  }
+
+  return <ProtectedApp />
 }
 
 export default App

@@ -13,6 +13,34 @@
   box-sizing: border-box;
 }
 
+.auth-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  color: var(--ink);
+  font-family: var(--font-body, 'Sora', sans-serif);
+  background: var(--color-surface-primary);
+}
+
+.auth-panel {
+  width: min(440px, 100%);
+  padding: 1.25rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 18px 40px rgba(39, 25, 16, 0.12);
+}
+
+.auth-panel h1 {
+  margin: 0;
+  font-family: var(--font-display, 'Fraunces', serif);
+}
+
+.auth-panel p {
+  margin: 0.65rem 0 1rem;
+}
+
 .lobby-shell {
   min-height: 100dvh;
   display: grid;

@@ -197,6 +197,67 @@ export type ListSessionsResponse = {
   sessions: SessionSummary[]
 }
 
+export type SafePrincipalProfile = {
+  displayName?: string
+  email?: string
+}
+
+export type PrincipalCapabilities = {
+  createSession: boolean
+  claimPatch: boolean
+  transferPatch: boolean
+  deleteAccount: boolean
+  mutateProtocolV2: false
+}
+
+export type MeResponse = {
+  profile: SafePrincipalProfile
+  capabilities: PrincipalCapabilities
+}
+
+export type SafeApiError = {
+  code: string
+  message: string
+  requestId: string
+  retryAfterSeconds?: number
+}
+
+export type OwnershipOperationRequest = {
+  operationId: string
+}
+
+export type ClaimPatchRequest = OwnershipOperationRequest & {
+  patchId: string
+}
+
+export type CreateOwnershipTransferRequest = OwnershipOperationRequest & {
+  patchId: string
+  recipientPrincipalId: string
+}
+
+export type ResolveOwnershipTransferRequest = OwnershipOperationRequest & {
+  transferId: string
+}
+
+export type AbandonPatchRequest = OwnershipOperationRequest & {
+  patchId: string
+}
+
+export type OwnershipCommandResponse = {
+  status: 'succeeded' | 'denied'
+  idempotent: boolean
+  transferId?: string
+  revision?: number
+}
+
+export type AccountDeletionRequest = OwnershipOperationRequest
+
+export type AccountDeletionResponse = {
+  status: 'deletion_pending' | 'active'
+  idempotent: boolean
+  recoveryDeadline?: string
+}
+
 // ─── Socket.IO event contracts ────────────────────────────────────────────────
 //
 // Connection: client passes sessionId + clientId in socket.handshake.auth.
@@ -238,6 +299,7 @@ export type ListSessionsResponse = {
 
 /** Passed in socket.handshake.auth when the client connects. */
 export type ConnectionAuth = {
+  token: string
   sessionId: string
   clientId: string
   protocolVersion?: 1 | 2
@@ -250,7 +312,8 @@ export type SocketData = {
   sessionId: string
   protocolVersion: 1 | 2
   enableProtocolV1Compatibility: boolean
-  principalId?: string
+  principalId: string
+  tokenExpiresAt: number
 }
 
 // ── Event payload types ───────────────────────────────────────────────────────
@@ -308,6 +371,55 @@ export type RemoveTilePayload = {
 export type RemoveTileAck =
   | { removed: true; opSeq: number; newRevision: number; idempotent?: boolean }
   | { removed: false; reason?: RemoveTileRejectReason }
+
+export type QuiltPatchRevisionMap = Record<string, number>
+
+export type QuiltMutationRejectCode =
+  | 'AUTHENTICATION_REQUIRED'
+  | 'MUTATION_DISABLED'
+  | 'UNAUTHORIZED'
+  | 'STALE_REVISION'
+  | 'COLLISION'
+  | 'INVALID_FOOTPRINT'
+  | 'THROTTLED'
+  | 'RESOURCE_UNAVAILABLE'
+
+export type QuiltPlaceTileRequest = {
+  quiltId: string
+  operationId: string
+  expectedPatchRevisions: QuiltPatchRevisionMap
+  tile: Omit<PlaceTilePayload, 'expectedRevision'>
+}
+
+export type QuiltRemoveTileRequest = {
+  quiltId: string
+  operationId: string
+  expectedPatchRevisions: QuiltPatchRevisionMap
+  tileId: string
+}
+
+export type QuiltMutationAcceptedAck = {
+  status: 'accepted'
+  operationId: string
+  eventIds: Record<string, string>
+  patchRevisions: QuiltPatchRevisionMap
+  idempotent: boolean
+}
+
+export type QuiltMutationRejectedAck = {
+  status: 'rejected'
+  operationId: string
+  code: QuiltMutationRejectCode
+  message: string
+  requestId: string
+  retryAfterSeconds?: number
+}
+
+export type QuiltPlaceTileAck =
+  | (QuiltMutationAcceptedAck & { tile: TileInstance })
+  | QuiltMutationRejectedAck
+
+export type QuiltRemoveTileAck = QuiltMutationAcceptedAck | QuiltMutationRejectedAck
 
 export type PointerMovePayload = {
   position: Vec2
@@ -561,6 +673,10 @@ export interface ClientToServerEvents {
   place_tile: (payload: PlaceTilePayload, ack: (response: PlaceTileAck) => void) => void
   /** Remove by authoritative tileId; server responds via acknowledgement. */
   remove_tile: (payload: RemoveTilePayload, ack: (response: RemoveTileAck) => void) => void
+  /** Place a canonical quilt tile through the authenticated protocol-v2 transaction. */
+  quilt_place_tile: (payload: QuiltPlaceTileRequest, ack: (response: QuiltPlaceTileAck) => void) => void
+  /** Remove a canonical quilt tile through the authenticated protocol-v2 transaction. */
+  quilt_remove_tile: (payload: QuiltRemoveTileRequest, ack: (response: QuiltRemoveTileAck) => void) => void
   /** Request an authoritative snapshot without reconnecting the socket. */
   request_snapshot: () => void
   /** Fire-and-forget cursor position for collaborative presence. */

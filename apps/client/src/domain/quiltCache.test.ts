@@ -6,6 +6,7 @@ import {
   evictQuiltCache,
   mergeQuiltPatchSnapshot,
   pinQuiltTile,
+  reconcileQuiltMutationRevisions,
   selectQuiltTiles,
   setQuiltOptimisticTile,
   setQuiltUndoMetadata,
@@ -107,5 +108,37 @@ describe('quiltCache', () => {
     const removed = clearQuiltUndoMetadata(acknowledged, 'pending')
     expect(removed.pins.pending).toBeUndefined()
     expect(removed.tiles.pending).toBeUndefined()
+  })
+
+  it('ignores duplicate and out-of-order patch revisions', () => {
+    const initial = mergeQuiltPatchSnapshot(createQuiltCache(), {
+      patchId: 'patch-a', roomId: 'room-a', tiles: [tile('settled')], cursor: cursor('patch-a', 3), accessedAt: 1,
+    })
+    const stale = mergeQuiltPatchSnapshot(initial, {
+      patchId: 'patch-a', roomId: 'room-a', tiles: [], cursor: cursor('patch-a', 2), accessedAt: 2,
+    })
+
+    expect(stale).toBe(initial)
+    expect(selectQuiltTiles(stale).map(({ id }) => id)).toEqual(['settled'])
+  })
+
+  it('reconciles authoritative revisions across every affected patch monotonically', () => {
+    let state = mergeQuiltPatchSnapshot(createQuiltCache(), {
+      patchId: 'patch-a', roomId: 'room-a', tiles: [], cursor: cursor('patch-a', 2), accessedAt: 1,
+    })
+    state = mergeQuiltPatchSnapshot(state, {
+      patchId: 'patch-b', roomId: 'room-b', tiles: [], cursor: cursor('patch-b', 5), accessedAt: 2,
+    })
+
+    const accepted = reconcileQuiltMutationRevisions(state, { 'patch-a': 3, 'patch-b': 6 }, {
+      'patch-a': 'event-a', 'patch-b': 'event-b',
+    })
+    const duplicate = reconcileQuiltMutationRevisions(accepted, { 'patch-a': 3, 'patch-b': 6 }, {
+      'patch-a': 'event-a', 'patch-b': 'event-b',
+    })
+    const stale = reconcileQuiltMutationRevisions(duplicate, { 'patch-a': 1, 'patch-b': 4 }, {})
+
+    expect(stale.patches['patch-a'].cursor).toMatchObject({ revision: 3, eventId: 'event-a' })
+    expect(stale.patches['patch-b'].cursor).toMatchObject({ revision: 6, eventId: 'event-b' })
   })
 })

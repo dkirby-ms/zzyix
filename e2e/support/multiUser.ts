@@ -338,16 +338,29 @@ const createSessionFactory = (
 ): CreateMultiUserSession => async (options = {}) => {
   const userCount = options.userCount ?? 2
   expect(userCount).toBeGreaterThanOrEqual(2)
+  const ownerExternalSubject = `e2e-browser-owner-${crypto.randomUUID()}`
 
   const { sessionId } = await createIsolatedSharedCanvas(request, {
     canvasPreset: options.canvasPreset ?? 'expanded',
+    ownerExternalSubject,
   })
 
   const users: CanvasUser[] = []
 
   try {
     for (let index = 0; index < userCount; index += 1) {
-      const context = await browser.newContext()
+      const context = await browser.newContext({
+        storageState: {
+          cookies: [],
+          origins: [{
+            origin: clientUrl,
+            localStorage: [
+              { name: 'zzyix:e2e-authenticated', value: 'true' },
+              { name: 'zzyix:e2e-subject', value: index === 0 ? ownerExternalSubject : `e2e-browser-user-${index + 1}` },
+            ],
+          }],
+        },
+      })
       openContexts.add(context)
       const page = await context.newPage()
       const user = createCanvasUser(context, page, `user-${index + 1}`, clientUrl)

@@ -1,8 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
-import { canvases, patchMemberships, patches, principals, quilts } from './schema.js'
-import { persistQuiltTilePlacement } from './repository.js'
+import {
+  canvases,
+  patchMemberships,
+  patches,
+  patchVisibilityPolicies,
+  principals,
+  quilts,
+} from './schema.js'
+import { persistQuiltTilePlacement, persistQuiltTileRemoval } from './repository.js'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
 
 const CANVAS_ID = '10000000-0000-4000-8000-000000000001'
@@ -79,12 +86,15 @@ describe('patch-scoped PostgreSQL placement', () => {
       ownerPrincipalId: PRINCIPAL_ID,
       state: 'active',
     })))
+    await database.db.insert(patchVisibilityPolicies).values(PATCH_IDS.map((patchId) => ({ patchId })))
   }, 30_000)
 
   afterAll(async () => database?.dispose(), 30_000)
 
   beforeEach(async () => {
-    await queryWithConnection(database, 'TRUNCATE patch_operations, patch_snapshots, tile_spatial_refs, tiles CASCADE')
+    await queryWithConnection(database,
+      'TRUNCATE authorization_audit_events, patch_operations, patch_snapshots, tile_spatial_refs, tiles CASCADE',
+    )
     await queryWithConnection(database, 'TRUNCATE patch_memberships')
     await queryWithConnection(database, 'UPDATE patches SET revision = 0, owner_principal_id = $1', [PRINCIPAL_ID])
   })
@@ -194,7 +204,7 @@ describe('patch-scoped PostgreSQL placement', () => {
     expect(counts[0]).toEqual({ tiles: 0, refs: 0, operations: 0 })
   })
 
-  it('denies member role mutation and permits the persisted owner capability', async () => {
+  it('denies member roles and requires persisted patch ownership', async () => {
     await database.db.update(patches).set({ ownerPrincipalId: null }).where(eq(patches.id, PATCH_IDS[1]))
     await database.db.insert(patchMemberships).values({
       patchId: PATCH_IDS[1],
@@ -215,14 +225,11 @@ describe('patch-scoped PostgreSQL placement', () => {
         transform: { position: { x: 15, y: 5 }, rotation: 0 },
       },
     })
-    await database.db
-      .update(patchMemberships)
-      .set({ role: 'owner' })
-      .where(and(
-        eq(patchMemberships.patchId, PATCH_IDS[1]),
-        eq(patchMemberships.principalId, MEMBER_PRINCIPAL_ID),
-      ))
-    const ownerResult = await persistQuiltTilePlacement({
+    await database.db.update(patchMemberships).set({ role: 'owner' }).where(and(
+      eq(patchMemberships.patchId, PATCH_IDS[1]),
+      eq(patchMemberships.principalId, MEMBER_PRINCIPAL_ID),
+    ))
+    const delegatedResult = await persistQuiltTilePlacement({
       quiltId: QUILT_ID,
       operationId: randomUUID(),
       principalId: MEMBER_PRINCIPAL_ID,
@@ -235,8 +242,83 @@ describe('patch-scoped PostgreSQL placement', () => {
         transform: { position: { x: 15, y: 5 }, rotation: 0 },
       },
     })
+    await database.db.update(patches).set({ ownerPrincipalId: MEMBER_PRINCIPAL_ID }).where(eq(patches.id, PATCH_IDS[1]))
+    const ownerResult = await persistQuiltTilePlacement({
+      quiltId: QUILT_ID,
+      operationId: randomUUID(),
+      principalId: MEMBER_PRINCIPAL_ID,
+      expectedPatchRevisions: { [PATCH_IDS[1]]: 0 },
+      payload: {
+        tileId: '40000000-0000-4000-8000-000000000011',
+        shape: 'square',
+        color: '#789',
+        material: 'ceramic',
+        transform: { position: { x: 15, y: 5 }, rotation: 0 },
+      },
+    })
 
     expect(memberResult).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
+    expect(delegatedResult).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
     expect(ownerResult).toMatchObject({ committed: true, idempotent: false })
+  })
+
+  it('removes an owned tile durably and replays the committed result idempotently', async () => {
+    const tileId = '40000000-0000-4000-8000-000000000012'
+    const placed = await placement(tileId, randomUUID(), 15, { [PATCH_IDS[1]]: 0 })
+    expect(placed).toMatchObject({ committed: true, patchRevisions: { [PATCH_IDS[1]]: 1 } })
+    const operationId = randomUUID()
+    const removal = {
+      quiltId: QUILT_ID,
+      operationId,
+      principalId: PRINCIPAL_ID,
+      expectedPatchRevisions: { [PATCH_IDS[1]]: 1 },
+      tileId,
+    }
+
+    const first = await persistQuiltTileRemoval(removal)
+    const retry = await persistQuiltTileRemoval(removal)
+    const mismatchedRetry = await persistQuiltTileRemoval({
+      ...removal,
+      tileId: '40000000-0000-4000-8000-000000000099',
+    })
+    const counts = await queryWithConnection<{ tiles: number; refs: number; removals: number; audits: number }>(database,
+      'SELECT (SELECT count(*)::int FROM tiles WHERE id = $1) AS tiles, ' +
+      '(SELECT count(*)::int FROM tile_spatial_refs WHERE tile_id = $1) AS refs, ' +
+      "(SELECT count(*)::int FROM patch_operations WHERE operation_id = $2 AND op_type = 'tile_removed') AS removals, " +
+      "(SELECT count(*)::int FROM authorization_audit_events WHERE operation_id = $2 AND event_type = 'quilt_tile_removed') AS audits",
+      [tileId, operationId],
+    )
+
+    expect(first).toMatchObject({ committed: true, idempotent: false, patchRevisions: { [PATCH_IDS[1]]: 2 } })
+    expect(retry).toMatchObject({ committed: true, idempotent: true, patchRevisions: { [PATCH_IDS[1]]: 2 } })
+    expect(mismatchedRetry).toEqual({ committed: false, reason: 'RESOURCE_UNAVAILABLE' })
+    expect(counts[0]).toEqual({ tiles: 0, refs: 0, removals: 1, audits: 1 })
+  })
+
+  it('rolls back removal for non-owners and stale revisions', async () => {
+    const tileId = '40000000-0000-4000-8000-000000000013'
+    await placement(tileId, randomUUID(), 15, { [PATCH_IDS[1]]: 0 })
+    const denied = await persistQuiltTileRemoval({
+      quiltId: QUILT_ID,
+      operationId: randomUUID(),
+      principalId: MEMBER_PRINCIPAL_ID,
+      expectedPatchRevisions: { [PATCH_IDS[1]]: 1 },
+      tileId,
+    })
+    const stale = await persistQuiltTileRemoval({
+      quiltId: QUILT_ID,
+      operationId: randomUUID(),
+      principalId: PRINCIPAL_ID,
+      expectedPatchRevisions: { [PATCH_IDS[1]]: 0 },
+      tileId,
+    })
+    const [tileCount] = await queryWithConnection<{ count: number }>(database,
+      'SELECT count(*)::int AS count FROM tiles WHERE id = $1',
+      [tileId],
+    )
+
+    expect(denied).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
+    expect(stale).toEqual({ committed: false, reason: 'STALE_REVISION' })
+    expect(tileCount.count).toBe(1)
   })
 })

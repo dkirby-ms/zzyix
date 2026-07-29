@@ -21,6 +21,7 @@ import type {
   QuiltProtocolHandshake,
   QuiltScopedSnapshotPayload,
 } from '../../../server/src/contracts'
+import { isInteractionRequiredError, type AccessTokenProvider, type AuthLossReason } from './authenticatedFetch'
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
@@ -46,32 +47,74 @@ export const useSocketConnection = (
   onQuiltPatchSnapshot?: (payload: QuiltScopedSnapshotPayload) => void,
   onQuiltPatchEvent?: (payload: QuiltPatchEventPayload) => void,
   onQuiltPatchResyncRequired?: (payload: QuiltPatchResyncRequiredPayload) => void,
+  acquireAccessToken?: AccessTokenProvider,
+  onAuthLoss?: (reason: AuthLossReason, error?: unknown) => void,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
   const selectedProtocolRef = useRef<1 | 2>(2)
 
   useEffect(() => {
-    if (!sessionId) return
+    if (!sessionId || !acquireAccessToken) return
+
+    let cancelled = false
+    let renewalAttempted = false
+    let renewal: Promise<void> | null = null
 
     const socket: AppSocket = io(serverUrl, {
-      auth: { sessionId, clientId, protocolVersion: 2, enableProtocolV1Compatibility: false },
+      autoConnect: false,
+      auth: async (callback) => {
+        try {
+          const token = await acquireAccessToken()
+          callback({ token, sessionId, clientId, protocolVersion: 2, enableProtocolV1Compatibility: false })
+        } catch (error) {
+          onAuthLoss?.(isInteractionRequiredError(error) ? 'interaction_required' : 'authentication_failed', error)
+        }
+      },
       transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      reconnectionAttempts: 5,
+      reconnection: false,
     })
 
+    const renewAndReconnect = (error?: unknown): void => {
+      if (renewal) return
+      if (renewalAttempted) {
+        onAuthLoss?.('authentication_failed', error)
+        return
+      }
+
+      renewalAttempted = true
+      renewal = acquireAccessToken({ forceRefresh: true })
+        .then(() => {
+          if (!cancelled) socket.connect()
+        })
+        .catch((renewalError) => {
+          if (!cancelled) {
+            onAuthLoss?.(
+              isInteractionRequiredError(renewalError) ? 'interaction_required' : 'authentication_failed',
+              renewalError,
+            )
+          }
+        })
+        .finally(() => { renewal = null })
+    }
+
     socket.on('connect', () => {
+      renewalAttempted = false
       console.log('✅ Socket.IO connected:', { sessionId: socket.id })
     })
 
-    socket.on('connect_error', (error: Error) => {
+    socket.on('connect_error', (error: Error & { data?: { code?: string } }) => {
       console.error('❌ Socket.IO connection error:', error.message)
+      const code = error.data?.code
+      if (code === 'authentication_required' || code === 'invalid_token') {
+        renewAndReconnect(error)
+      } else if (code === 'principal_inactive' || code === 'insufficient_scope') {
+        onAuthLoss?.('authentication_failed', error)
+      }
     })
 
     socket.on('disconnect', (reason: string) => {
       console.log('🔌 Socket.IO disconnected:', reason)
+      if (reason === 'io server disconnect') renewAndReconnect(new Error('Socket authentication expired'))
     })
 
     const handleProtocol = (payload: QuiltProtocolHandshake): void => {
@@ -127,8 +170,10 @@ export const useSocketConnection = (
     if (socketActionRef) {
       socketActionRef.current = socket
     }
+    socket.connect()
 
     return () => {
+      cancelled = true
       socket.off('quilt_protocol', handleProtocol)
       socket.off('session_snapshot', handleSnapshot)
       socket.off('tile_placed', handleTilePlaced)
@@ -191,6 +236,8 @@ export const useSocketConnection = (
     onQuiltPatchSnapshot,
     onQuiltPatchEvent,
     onQuiltPatchResyncRequired,
+    acquireAccessToken,
+    onAuthLoss,
   ])
 
   return socketRef
