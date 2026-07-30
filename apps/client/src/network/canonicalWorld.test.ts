@@ -15,6 +15,7 @@ const descriptor = {
   generation: 1,
   entryAttemptId: '40000000-0000-4000-8000-000000000001',
   initialPatch: { id: '30000000-0000-4000-8000-000000000001', row: 0, column: 0 },
+  assignedPatch: { id: '30000000-0000-4000-8000-000000000002', row: 1, column: 2 },
 }
 
 describe('canonical world discovery', () => {
@@ -44,6 +45,12 @@ describe('canonical world discovery', () => {
       new Response(JSON.stringify({ ...descriptor, entryAttemptId: undefined }), { status: 200 }),
     )
     await expect(discoverCanonicalWorld(missingAttemptFetch, 'https://app.example.test'))
+      .rejects.toThrow('Canonical world descriptor is invalid')
+
+    const missingAssignmentFetch = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ ...descriptor, assignedPatch: undefined }), { status: 200 }),
+    )
+    await expect(discoverCanonicalWorld(missingAssignmentFetch, 'https://app.example.test'))
       .rejects.toThrow('Canonical world descriptor is invalid')
   })
 })
