@@ -94,7 +94,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.app }}
-          cache-to: type=gha,mode=min,scope=${{ matrix.app }}
+            cache-to: type=gha,mode=min,scope=${{ matrix.app }},ignore-error=true
 
   deploy-staging:
     name: Deploy To Azure Container Apps (staging)
