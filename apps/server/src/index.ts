@@ -51,6 +51,7 @@ import {
   persistQuiltTilePlacement,
   persistQuiltTileRemoval,
   discoverCanonicalWorld,
+  ensureCanonicalPatchAssignment,
   provisionCanonicalWorld,
   activateCanonicalWorld,
   listEligibleCanonicalPatches,
@@ -974,7 +975,21 @@ app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
   try {
     const principal = getPrincipalContext(req)
     const attemptId = await issueCanonicalAttempt(principal.principalId, 'entry')
-    await sendCanonicalWorldDiscovery(res, discoverCanonicalWorld, true, attemptId ?? undefined)
+    await sendCanonicalWorldDiscovery(res, async () => {
+      const [descriptor, assignment] = await Promise.all([
+        discoverCanonicalWorld(),
+        ensureCanonicalPatchAssignment(principal.principalId),
+      ])
+      if (!descriptor || !assignment) return null
+      return {
+        ...descriptor,
+        initialPatch: {
+          id: assignment.patchId,
+          row: assignment.row,
+          column: assignment.column,
+        },
+      }
+    }, true, attemptId ?? undefined)
   } catch (error) {
     writeLog('error', 'canonical_attempt_issue_failed', { error })
     if (!res.headersSent) {

@@ -7,9 +7,7 @@ import type { MeResponse } from '../../server/src/contracts'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
 const {
-  claimPatchMock,
   discoverCanonicalWorldMock,
-  discoverEligibleCanonicalPatchesMock,
   getStoredSessionIdMock,
   getCanonicalPatchLinkMock,
   listSessionsMock,
@@ -20,9 +18,7 @@ const {
   resolveCanvasDebugMock,
   authSessionState,
 } = vi.hoisted(() => ({
-  claimPatchMock: vi.fn<() => Promise<void>>(),
   discoverCanonicalWorldMock: vi.fn(),
-  discoverEligibleCanonicalPatchesMock: vi.fn(),
   getStoredSessionIdMock: vi.fn(),
   getCanonicalPatchLinkMock: vi.fn(),
   listSessionsMock: vi.fn<() => Promise<SessionSummary[]>>(),
@@ -115,10 +111,8 @@ const enterCanonicalCanvas = async (): Promise<void> => {
 
 vi.mock('./network/session', () => ({
   ensureClientId: vi.fn(() => 'client-1'),
-  claimPatch: claimPatchMock,
   listSessions: listSessionsMock,
   discoverCanonicalWorld: discoverCanonicalWorldMock,
-  discoverEligibleCanonicalPatches: discoverEligibleCanonicalPatchesMock,
   getCanonicalPatchLink: getCanonicalPatchLinkMock,
   getStoredSessionId: getStoredSessionIdMock,
   setStoredSessionId: setStoredSessionIdMock,
@@ -255,19 +249,11 @@ describe('App canonical canvas behavior', () => {
     setStoredSessionIdMock.mockReset()
     discoverCanonicalWorldMock.mockReset()
     discoverCanonicalWorldMock.mockResolvedValue(canonicalDescriptor)
-    discoverEligibleCanonicalPatchesMock.mockReset()
-    discoverEligibleCanonicalPatchesMock.mockResolvedValue({
-      quiltId: 'quilt-1',
-      generation: 1,
-      claimAllowed: true,
-      patches: [],
-    })
     getCanonicalPatchLinkMock.mockReset()
     getCanonicalPatchLinkMock.mockReturnValue(null)
     resolveCanonicalPatchNavigationMock.mockReset()
     setCanonicalPatchLinkMock.mockReset()
     listSessionsMock.mockReset()
-    claimPatchMock.mockReset()
     useSocketConnectionMock.mockClear()
     resolveCanvasDebugMock.mockReset()
     resolveCanvasDebugMock.mockReturnValue(false)
@@ -328,7 +314,7 @@ describe('App canonical canvas behavior', () => {
     expect(screen.queryByRole('button', { name: '← Back' })).not.toBeInTheDocument()
   })
 
-  it('resolves a durable patch link and claims an eligible patch before focusing it', async () => {
+  it('resolves a durable patch link without rendering manual claim controls', async () => {
     discoverCanonicalWorldMock.mockResolvedValue({
       quiltId: 'quilt-1', legacyCanvasId: 'canonical-canvas', topology: 'toroidal', protocolVersion: 2,
       patchRows: 2, patchColumns: 2, patchWidth: 10, patchHeight: 10, originX: 0, originY: 0,
@@ -338,14 +324,6 @@ describe('App canonical canvas behavior', () => {
     resolveCanonicalPatchNavigationMock.mockResolvedValue({
       quiltId: 'quilt-1', patchId: 'patch-deep', row: 1, column: 1, centerX: 15, centerY: 15,
     })
-    discoverEligibleCanonicalPatchesMock
-      .mockResolvedValueOnce({
-        quiltId: 'quilt-1', generation: 1, claimAllowed: true,
-        patches: [{ quiltId: 'quilt-1', patchId: 'patch-claim', row: 0, column: 1, centerX: 15, centerY: 5 }],
-      })
-      .mockResolvedValueOnce({ quiltId: 'quilt-1', generation: 1, claimAllowed: false, patches: [] })
-    claimPatchMock.mockResolvedValue(undefined)
-
     render(<App />)
     await waitFor(() => expect(resolveCanonicalPatchNavigationMock).toHaveBeenCalledWith(
       authSessionState.authenticatedFetch,
@@ -366,16 +344,7 @@ describe('App canonical canvas behavior', () => {
     }))
     expect(screen.getByText('Patch 1, 1')).toBeInTheDocument()
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '15,15')
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Claim 0, 1' }))
-    await waitFor(() => expect(claimPatchMock).toHaveBeenCalledWith(
-      authSessionState.authenticatedFetch,
-      authSessionState.apiOrigin,
-      'patch-claim',
-    ))
-    expect(screen.getByText('Patch 0, 1')).toBeInTheDocument()
-    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '15,5')
-    expect(setCanonicalPatchLinkMock).toHaveBeenLastCalledWith(expect.objectContaining({ patchId: 'patch-claim' }))
+    expect(screen.queryByRole('button', { name: /^Claim / })).not.toBeInTheDocument()
   })
 
   it('rediscovers canonical entry on reload without consulting selected-session storage', async () => {

@@ -24,9 +24,7 @@ import type { ActiveTile, PlacementGuide, SequencedTilesState } from './interact
 import { ensureClientId } from './network/session'
 import { derivePlacementBounds } from './domain/placementSolver'
 import {
-  claimPatch,
   discoverCanonicalWorld,
-  discoverEligibleCanonicalPatches,
   getCanonicalPatchLink,
   resolveCanonicalPatchNavigation,
   setCanonicalPatchLink,
@@ -390,10 +388,6 @@ function ProtectedApp() {
   const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
   const [canonicalError, setCanonicalError] = useState<string | null>(null)
   const [canonicalDescriptor, setCanonicalDescriptor] = useState<CanonicalWorldEntryDescriptor | null>(null)
-  const [canonicalPatches, setCanonicalPatches] = useState<CanonicalPatchNavigation[]>([])
-  const [canonicalNavigationError, setCanonicalNavigationError] = useState<string | null>(null)
-  const [canonicalNavigationLoading, setCanonicalNavigationLoading] = useState(false)
-  const [canonicalClaimingPatchId, setCanonicalClaimingPatchId] = useState<string | null>(null)
   const [focusedCanonicalPatch, setFocusedCanonicalPatch] = useState<CanonicalPatchNavigation | null>(null)
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
@@ -504,10 +498,6 @@ function ProtectedApp() {
   const clearProtectedWorldState = useCallback((): void => {
     setSessionId(null)
     setCanonicalDescriptor(null)
-    setCanonicalPatches([])
-    setCanonicalNavigationError(null)
-    setCanonicalNavigationLoading(false)
-    setCanonicalClaimingPatchId(null)
     setFocusedCanonicalPatch(null)
     setQuiltProtocol(null)
     setQuiltCache(createQuiltCache())
@@ -552,20 +542,6 @@ function ProtectedApp() {
     setCanonicalPatchLink(navigation)
   }, [])
 
-  const loadCanonicalPatches = useCallback(async (): Promise<void> => {
-    setCanonicalNavigationLoading(true)
-    setCanonicalNavigationError(null)
-    try {
-      const result = await discoverEligibleCanonicalPatches(auth.authenticatedFetch, auth.apiOrigin)
-      setCanonicalPatches(result.patches)
-    } catch (error) {
-      setCanonicalPatches([])
-      setCanonicalNavigationError(error instanceof Error ? error.message : 'Eligible patches are unavailable')
-    } finally {
-      setCanonicalNavigationLoading(false)
-    }
-  }, [auth.apiOrigin, auth.authenticatedFetch])
-
   useEffect(() => {
     if (!canonicalDescriptor?.quiltId) return
 
@@ -595,14 +571,12 @@ function ProtectedApp() {
       })
     }
 
-    void loadCanonicalPatches()
     return () => { cancelled = true }
   }, [
     auth.apiOrigin,
     auth.authenticatedFetch,
     canonicalDescriptor,
     focusCanonicalPatch,
-    loadCanonicalPatches,
   ])
 
   useEffect(() => {
@@ -632,20 +606,6 @@ function ProtectedApp() {
     clearProtectedWorldState,
     connectionEpoch,
   ])
-
-  const handleCanonicalClaim = useCallback(async (navigation: CanonicalPatchNavigation): Promise<void> => {
-    setCanonicalClaimingPatchId(navigation.patchId)
-    setCanonicalNavigationError(null)
-    try {
-      await claimPatch(auth.authenticatedFetch, auth.apiOrigin, navigation.patchId)
-      focusCanonicalPatch(navigation)
-      await loadCanonicalPatches()
-    } catch (error) {
-      setCanonicalNavigationError(error instanceof Error ? error.message : 'Failed to claim patch')
-    } finally {
-      setCanonicalClaimingPatchId(null)
-    }
-  }, [auth.apiOrigin, auth.authenticatedFetch, focusCanonicalPatch, loadCanonicalPatches])
 
   const triggerInvalidPulse = useCallback((): void => {
     setInvalidPulse(true)
@@ -1421,27 +1381,6 @@ function ProtectedApp() {
                   Root
                 </button>
               </div>
-              {canonicalNavigationError && <p className="canonical-navigation-error">{canonicalNavigationError}</p>}
-              {canonicalNavigationLoading ? (
-                <p className="canonical-navigation-empty">Finding eligible patches...</p>
-              ) : canonicalPatches.length > 0 ? (
-                <div className="canonical-patch-list">
-                  {canonicalPatches.slice(0, 8).map((patch) => (
-                    <button
-                      key={patch.patchId}
-                      type="button"
-                      onClick={() => void handleCanonicalClaim(patch)}
-                      disabled={canonicalClaimingPatchId !== null}
-                    >
-                      {canonicalClaimingPatchId === patch.patchId
-                        ? 'Claiming...'
-                        : `Claim ${patch.row}, ${patch.column}`}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="canonical-navigation-empty">No patches are currently eligible.</p>
-              )}
             </section>
           )}
           <GridOverlayControls

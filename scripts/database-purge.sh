@@ -15,6 +15,7 @@ Purge canvas, quilt, and tile data from the Postgres database.
 
 By default, this script purges all rows from:
 	- quilt-scoped authorization audit events
+	- canonical world metadata
 	- tiles
 	- quilts
 	- canvases
@@ -104,6 +105,8 @@ purge_all() {
 	sql+="  DELETE FROM authorization_audit_events"
 	sql+="  WHERE quilt_id IS NOT NULL OR patch_id IS NOT NULL RETURNING 1"
 	sql+=") SELECT count(*) AS deleted_audit_events FROM deleted;"
+	sql+=" WITH deleted AS (DELETE FROM canonical_world RETURNING 1)"
+	sql+=" SELECT count(*) AS deleted_canonical_worlds FROM deleted;"
 	sql+=" WITH deleted AS (DELETE FROM tiles RETURNING 1)"
 	sql+=" SELECT count(*) AS deleted_tiles FROM deleted;"
 	sql+=" WITH deleted AS (DELETE FROM quilts RETURNING 1)"
@@ -132,6 +135,13 @@ purge_canvas() {
 	sql+="     )"
 	sql+="  RETURNING 1"
 	sql+=") SELECT count(*) AS deleted_audit_events FROM deleted;"
+	sql+=" WITH deleted AS ("
+	sql+="  DELETE FROM canonical_world"
+	sql+="  WHERE quilt_id IN ("
+	sql+="   SELECT id FROM quilts WHERE legacy_canvas_id = :'canvas_id'"
+	sql+="  )"
+	sql+="  RETURNING 1"
+	sql+=") SELECT count(*) AS deleted_canonical_worlds FROM deleted;"
 	sql+=" WITH deleted AS ("
 	sql+="  DELETE FROM tiles"
 	sql+="  WHERE canvas_id = :'canvas_id'"

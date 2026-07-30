@@ -1,7 +1,6 @@
 import type {
   CanonicalPatchNavigation,
   CanonicalWorldEntryDescriptor,
-  EligibleCanonicalPatchesResponse,
   OwnershipCommandResponse,
 } from '../../../server/src/contracts'
 
@@ -49,15 +48,6 @@ export const discoverCanonicalWorld = async (
   }
 
   return descriptor as CanonicalWorldEntryDescriptor
-}
-
-export const discoverEligibleCanonicalPatches = async (
-  authenticatedFetch: typeof fetch,
-  apiOrigin: string,
-): Promise<EligibleCanonicalPatchesResponse> => {
-  const response = await authenticatedFetch(`${apiOrigin}/quilts/canonical/patches/eligible`, { method: 'GET' })
-  if (!response.ok) throw new Error(`Eligible patches are unavailable (${response.status})`)
-  return response.json() as Promise<EligibleCanonicalPatchesResponse>
 }
 
 export const resolveCanonicalPatchNavigation = async (

@@ -308,22 +308,6 @@
   opacity: 0.78;
 }
 
-.canonical-patch-list {
-  display: flex;
-  gap: 0.4rem;
-  overflow-x: auto;
-  padding-bottom: 0.15rem;
-}
-
-.canonical-patch-list button {
-  flex: 0 0 auto;
-}
-
-.canonical-navigation .canonical-navigation-error {
-  color: var(--color-feedback-danger);
-  opacity: 1;
-}
-
 .canvas-action-bar {
   display: flex;
   flex-wrap: wrap;

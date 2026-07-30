@@ -6,6 +6,7 @@ import {
   CanonicalWorldTargetInvalidError,
   deactivateCanonicalWorld,
   discoverCanonicalWorld,
+  ensureCanonicalPatchAssignment,
   getCanonicalWorldStatus,
   listEligibleCanonicalPatches,
   provisionCanonicalWorld,
@@ -233,6 +234,45 @@ describe('canonical world control plane', () => {
       update patches set owner_principal_id = ${principalId}, state = 'active' where id = ${target.patchId}
     `)
     await expect(listEligibleCanonicalPatches(principalId)).resolves.toMatchObject({ claimAllowed: false, patches: [] })
+  })
+
+  it('assigns one stable random patch per principal without collisions', async () => {
+    const principalIds = [
+      'ca000000-0000-4000-8000-000000000011',
+      'ca000000-0000-4000-8000-000000000012',
+    ]
+    const provisioned = await provisionCanonicalWorld(provisionInput)
+    await activateCanonicalWorld({
+      action: 'activate', quiltId: provisioned.quilt!.id, expectedGeneration: 1,
+      operatorId: 'integration-test', reason: 'assign patches',
+    })
+    await getDatabaseBundle().db.execute(sql`
+      insert into principals (id, kind) values
+        (${principalIds[0]}, 'human'),
+        (${principalIds[1]}, 'human')
+    `)
+
+    const assignments = await Promise.all(principalIds.map(ensureCanonicalPatchAssignment))
+
+    expect(assignments[0]).not.toBeNull()
+    expect(assignments[1]).not.toBeNull()
+    expect(assignments[0]?.patchId).not.toBe(assignments[1]?.patchId)
+    await expect(ensureCanonicalPatchAssignment(principalIds[0])).resolves.toEqual(assignments[0])
+
+    const ownership = await getDatabaseBundle().db.execute(sql`
+      select owner_principal_id, count(*)::integer as count
+      from patches
+      where owner_principal_id in (${principalIds[0]}, ${principalIds[1]}) and state = 'active'
+      group by owner_principal_id
+    `)
+    expect(ownership.rows).toHaveLength(2)
+    expect(ownership.rows.every((row) => row.count === 1)).toBe(true)
+    const auditEvents = await getDatabaseBundle().db.execute(sql`
+      select count(*)::integer as count
+      from authorization_audit_events
+      where attempted_action = 'automatic_patch_assignment'
+    `)
+    expect(auditEvents.rows[0]?.count).toBe(2)
   })
 
   it('fails closed for invalid policy, lifecycle, topology, protocol, alias, and incomplete grids', async () => {

@@ -3046,6 +3046,76 @@ export const listEligibleCanonicalPatches = async (
   }
 }
 
+export const ensureCanonicalPatchAssignment = async (
+  principalId: string,
+): Promise<CanonicalPatchNavigation | null> => {
+  const descriptor = await discoverCanonicalWorld()
+  if (!descriptor) return null
+  const { db } = getDatabaseBundle()
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${principalId}))`)
+
+    const [existing] = await tx
+      .select({ id: patches.id, row: patches.row, column: patches.column })
+      .from(patches)
+      .where(and(
+        eq(patches.quiltId, descriptor.quiltId),
+        eq(patches.ownerPrincipalId, principalId),
+        eq(patches.state, 'active'),
+      ))
+      .limit(1)
+    if (existing) return toCanonicalPatchNavigation(descriptor, existing)
+
+    const [assigned] = await tx
+      .select({ id: patches.id, row: patches.row, column: patches.column, revision: patches.revision })
+      .from(patches)
+      .innerJoin(patchVisibilityPolicies, eq(patchVisibilityPolicies.patchId, patches.id))
+      .where(and(
+        eq(patches.quiltId, descriptor.quiltId),
+        eq(patches.state, 'unclaimed'),
+        isNull(patches.ownerPrincipalId),
+        eq(patchVisibilityPolicies.claimEnabled, true),
+      ))
+      .orderBy(sql`random()`)
+      .for('update', { skipLocked: true })
+      .limit(1)
+    if (!assigned) return null
+
+    const assignedAt = new Date()
+    await tx
+      .update(patches)
+      .set({
+        ownerPrincipalId: principalId,
+        state: 'active',
+        revision: assigned.revision + 1,
+        updatedAt: assignedAt,
+      })
+      .where(eq(patches.id, assigned.id))
+    await tx.insert(patchMemberships).values({
+      patchId: assigned.id,
+      principalId,
+      role: 'owner',
+      createdAt: assignedAt,
+    })
+    await tx.insert(authorizationAuditEvents).values({
+      eventType: 'patch_claim',
+      attemptedAction: 'automatic_patch_assignment',
+      outcome: 'succeeded',
+      actorPrincipalId: principalId,
+      subjectPrincipalId: principalId,
+      quiltId: descriptor.quiltId,
+      patchId: assigned.id,
+      sourceChannel: 'http',
+      beforeState: { state: 'unclaimed', revision: assigned.revision },
+      afterState: { state: 'active', revision: assigned.revision + 1 },
+      createdAt: assignedAt,
+    })
+
+    return toCanonicalPatchNavigation(descriptor, assigned)
+  })
+}
+
 export const resolveCanonicalPatchNavigation = async (
   quiltId: string,
   patchId: string,
