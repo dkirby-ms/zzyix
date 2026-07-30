@@ -40,7 +40,7 @@ export const resetSharedCanvasState = async (
 export const createIsolatedCanonicalQuilt = async (
   request: APIRequestContext,
   options: ResetSharedCanvasOptions = {},
-): Promise<{ quiltId: string }> => {
+): Promise<{ quiltId: string; patchId: string }> => {
   const result = await resetSharedCanvasState(request, {
     createCanonicalWorld: true,
     ownerExternalSubject: options.ownerExternalSubject,
@@ -48,5 +48,8 @@ export const createIsolatedCanonicalQuilt = async (
 
   expect(result.canonical, 'test reset should seed a canonical quilt').toBeTruthy()
 
-  return { quiltId: result.canonical!.quiltId }
+  return {
+    quiltId: result.canonical!.quiltId,
+    patchId: result.canonical!.patchId,
+  }
 }

@@ -96,6 +96,7 @@ export type MultiUserSession = {
 
 export type CreateMultiUserSessionOptions = {
   userCount?: number
+  automaticAssignments?: boolean
 }
 
 type CreateMultiUserSession = (options?: CreateMultiUserSessionOptions) => Promise<MultiUserSession>
@@ -348,11 +349,16 @@ const createQuiltFactory = (
 ): CreateMultiUserSession => async (options = {}) => {
   const userCount = options.userCount ?? 2
   expect(userCount).toBeGreaterThanOrEqual(2)
-  const ownerExternalSubject = `e2e-browser-owner-${crypto.randomUUID()}`
+  const ownerExternalSubject = options.automaticAssignments
+    ? undefined
+    : `e2e-browser-owner-${crypto.randomUUID()}`
 
-  const { quiltId } = await createIsolatedCanonicalQuilt(request, {
+  const { quiltId, patchId } = await createIsolatedCanonicalQuilt(request, {
     ownerExternalSubject,
   })
+  const entryUrl = options.automaticAssignments
+    ? clientUrl
+    : `${clientUrl}?quilt=${encodeURIComponent(quiltId)}&patch=${encodeURIComponent(patchId)}`
 
   const users: CanvasUser[] = []
 
@@ -365,16 +371,25 @@ const createQuiltFactory = (
             origin: clientUrl,
             localStorage: [
               { name: 'zzyix:e2e-authenticated', value: 'true' },
-              { name: 'zzyix:e2e-subject', value: index === 0 ? ownerExternalSubject : `e2e-browser-user-${index + 1}` },
+              {
+                name: 'zzyix:e2e-subject',
+                value: index === 0 && ownerExternalSubject
+                  ? ownerExternalSubject
+                  : `e2e-browser-user-${index + 1}-${crypto.randomUUID()}`,
+              },
             ],
           }],
         },
       })
       openContexts.add(context)
       const page = await context.newPage()
-      const user = createCanvasUser(context, page, `user-${index + 1}`, clientUrl)
-      await user.open()
+      const user = createCanvasUser(context, page, `user-${index + 1}`, entryUrl)
       users.push(user)
+    }
+    if (options.automaticAssignments) {
+      await Promise.all(users.map(async (user) => user.open()))
+    } else {
+      for (const user of users) await user.open()
     }
   } catch (error) {
     await Promise.all(Array.from(openContexts).map(async (context) => closeContext(openContexts, context)))

@@ -56,6 +56,24 @@ const expectTileObservedByPeer = async (
   })
 }
 
+test('simultaneous first logins receive distinct stable patch assignments', async ({ createMultiUserSession }) => {
+  const session = await createMultiUserSession({ userCount: 3, automaticAssignments: true })
+
+  const assignmentLabels = await Promise.all(session.users.map(async (user) => {
+    const assignment = user.page.getByText(/^Patch \d+, \d+$/)
+    await expect(assignment).toBeVisible()
+    await expect(user.page.getByRole('button', { name: /^Claim / })).toHaveCount(0)
+    return assignment.textContent()
+  }))
+
+  expect(new Set(assignmentLabels).size).toBe(session.users.length)
+
+  await Promise.all(session.users.map(async (user, index) => {
+    await user.open()
+    await expect(user.page.getByText(assignmentLabels[index]!)).toBeVisible()
+  }))
+})
+
 test('owner placements converge for collaborators while non-owner mutation is denied', async ({ createMultiUserSession }) => {
   const session = await createMultiUserSession({ userCount: 2 })
   const [userA, userB] = session.users
