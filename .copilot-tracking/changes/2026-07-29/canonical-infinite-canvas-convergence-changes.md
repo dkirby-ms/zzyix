@@ -7,10 +7,9 @@
 
 ## Summary
 
-Implementation review found the canonical product path present but release-blocked by
-retirement-evidence, telemetry-integrity, final-state compatibility, activation-provenance,
-presence-lifecycle, and integration-coverage defects. Phase 7 remediation is in progress
-after resumed review found three critical, four major, and one minor release blocker.
+Implementation review found the canonical product path present but release-blocked. Phase 8
+closes the final child-attempt integrity, long-lived reconnect, compiled-contract,
+live-boundary, Playwright-isolation, release-reporting, and ADR findings.
 
 ## Changes
 
@@ -74,6 +73,25 @@ after resumed review found three critical, four major, and one minor release blo
 * `apps/server/src/db/migrate.test.ts` - Updated migration-count compatibility for migration 0009
 * `apps/server/migrations/meta/_journal.json` - Registered migration 0009
 * `scripts/verify-quilt-migration.sh` - Extended migration rehearsal through canonical attempt persistence
+* `apps/server/src/migration/canonicalAttempts.ts` - Added rotating durable lineage and atomic server-observed cycle consumption
+* `apps/server/src/migration/canonicalAttempts.postgres.integration.test.ts` - Covered expiry, rotation, replay, ownership, and cross-replica cycle consumption
+* `apps/server/src/contracts.ts` - Removed compiled session-era public contracts and defined secure lineage messages
+* `apps/server/src/auth/httpAuth.ts` - Removed the retired `/me` session command field
+* `apps/server/src/auth/httpAuth.test.ts` - Covered the reduced authenticated command contract
+* `apps/server/src/index.ts` - Bound reconnect and resubscribe attempts to live observed socket cycles
+* `apps/server/src/index.test.ts` - Covered retired contract and attempt behavior
+* `apps/server/src/index.integration.test.ts` - Exercised navigation, claim, and presence through live authenticated boundaries
+* `apps/client/src/network/useSocketConnection.ts` - Rotated reconnect lineage and consumed server-observed child cycles
+* `apps/client/src/network/useSocketConnection.test.ts` - Covered lineage rotation, expiry, and observed-cycle handling
+* `apps/client/src/App.tsx` - Removed remaining retired session assumptions from canonical runtime state
+* `apps/client/src/App.test.tsx` - Updated canonical application assertions for the retired contract
+* `apps/client/src/auth/useAuthSession.test.tsx` - Updated authentication expectations after command retirement
+* `e2e/multi-user-fixtures.spec.ts` - Asserted authoritative exact convergence without order-dependent optimistic state
+* `e2e/quilt-reconnect.spec.ts` - Used rotating server-observed reconnect lineage
+* `e2e/quilt-seams.spec.ts` - Used the final canonical socket contract
+* `e2e/support/multiUser.ts` - Isolated multi-user canonical fixture state
+* `e2e/support/testState.ts` - Reset authoritative fixture state between standard Playwright cases
+* `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md` - Corrected and YAML-validated keyword indentation
 
 * `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md` - Established one newly provisioned 32-by-32 canonical quilt, durable navigation and claim behavior, ownership limits, and database-backed presence leases
 * `.copilot-tracking/plans/2026-07-29/canonical-infinite-canvas-convergence-plan.instructions.md` - Marked Phase 0 complete
@@ -195,10 +213,11 @@ after resumed review found three critical, four major, and one minor release blo
 
 ## Release Summary
 
-All seven implementation phases are complete. Phase 7 closes resumed findings IV-003,
-IV-004, IV-007, IV-010, IV-011, IV-012, IV-013, and IV-014 with shared attempt persistence,
-complete deployment evidence wiring, retired public contracts, composed live boundaries,
-and repaired placement acceptance. Final validation passed 367 workspace tests with 17
-skipped, 14 standard Playwright tests, one multi-replica Playwright test, 10 migration and
-recovery rehearsal tests, nine release-contract checks, lint, production builds, and
-`git diff --check`. Ports 3001 and 5173 are clear; PostgreSQL remains healthy and running.
+All eight implementation phases are complete. Phase 8 closes IV-004, IV-007, IV-010,
+IV-011, IV-012, IV-015, and IV-016 with observed single-use socket cycles, rotating durable
+lineage, retired public session contracts, live authenticated boundary coverage, isolated
+acceptance fixtures, and corrected release artifacts. Validation passed 146 client tests
+with 16 skipped, 221 server tests with one skipped, two consecutive 14-of-14 standard
+Playwright runs, one multi-replica Playwright test, 10 recovery rehearsal tests, nine
+release-contract checks, ADR YAML parsing, lint, production builds, and `git diff --check`.
+Ports 3001 and 5173 are clear.

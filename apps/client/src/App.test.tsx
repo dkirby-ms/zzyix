@@ -8,7 +8,6 @@ import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
 const {
   claimPatchMock,
-  createSessionMock,
   discoverCanonicalWorldMock,
   discoverEligibleCanonicalPatchesMock,
   getStoredSessionIdMock,
@@ -22,7 +21,6 @@ const {
   authSessionState,
 } = vi.hoisted(() => ({
   claimPatchMock: vi.fn<() => Promise<void>>(),
-  createSessionMock: vi.fn(),
   discoverCanonicalWorldMock: vi.fn(),
   discoverEligibleCanonicalPatchesMock: vi.fn(),
   getStoredSessionIdMock: vi.fn(),
@@ -38,7 +36,6 @@ const {
     principal: {
       profile: { displayName: 'Ada' },
       commands: {
-        createSession: true,
         claimPatch: true,
         createTransfer: true,
         acceptTransfer: true,
@@ -118,7 +115,6 @@ const enterCanonicalCanvas = async (): Promise<void> => {
 
 vi.mock('./network/session', () => ({
   ensureClientId: vi.fn(() => 'client-1'),
-  createSession: createSessionMock,
   claimPatch: claimPatchMock,
   listSessions: listSessionsMock,
   discoverCanonicalWorld: discoverCanonicalWorldMock,
@@ -240,7 +236,6 @@ describe('App canonical canvas behavior', () => {
     authSessionState.principal = {
       profile: { displayName: 'Ada' },
       commands: {
-        createSession: true,
         claimPatch: true,
         createTransfer: true,
         acceptTransfer: true,
@@ -272,7 +267,6 @@ describe('App canonical canvas behavior', () => {
     resolveCanonicalPatchNavigationMock.mockReset()
     setCanonicalPatchLinkMock.mockReset()
     listSessionsMock.mockReset()
-    createSessionMock.mockReset()
     claimPatchMock.mockReset()
     useSocketConnectionMock.mockClear()
     resolveCanvasDebugMock.mockReset()
@@ -468,7 +462,6 @@ describe('App canonical canvas behavior', () => {
     authSessionState.principal = {
       profile: { displayName: 'Ada' },
       commands: {
-        createSession: true,
         claimPatch: true,
         createTransfer: true,
         acceptTransfer: true,

@@ -29,9 +29,9 @@ research items.
 
 ### Final Validation Status
 
-Status: Passed. Phase 7 corrected the three critical, four major, and one minor resumed
-review findings. Shared attempt persistence, deployment evidence, live boundaries, standard
-and multi-replica Playwright, migration rehearsal, lint, builds, and workspace tests pass.
+Status: Passed. Phase 8 closed IV-004, IV-007, IV-010, IV-011, IV-012, IV-015, and IV-016.
+Observed single-use socket cycles, durable lineage rotation, retired public contracts, live
+boundary coverage, and repeated full Playwright validation restore release readiness.
 
 ### Implementation Review Deviations
 
@@ -51,9 +51,12 @@ and multi-replica Playwright, migration rehearsal, lint, builds, and workspace t
 ### Implementation Review Remediation
 
 * Phase 6 closed IV-001, IV-002, IV-005, IV-006, IV-008, and IV-009
-* Phase 7 closed IV-003, IV-004, IV-007, IV-010, IV-011, IV-012, IV-013, and IV-014
+* Phase 7 closed IV-003, IV-013, and IV-014
 * Canonical attempts use shared PostgreSQL persistence so non-sticky replicas can issue and atomically consume lineage
-* Release readiness is restored after complete Phase 7 validation
+* Phase 8 closed IV-004, IV-007, IV-010, IV-011, IV-012, IV-015, and IV-016
+* Child issuance now consumes principal-bound server observations, and reconnect lineage rotates independently of short-lived entry authorization
+* Public session contracts are retired, required product boundaries are live-tested, and standard Playwright state is isolated
+* Release readiness is restored after complete repeated validation
 
 ## Implementation Paths Considered
 
@@ -153,3 +156,12 @@ Items identified during planning that fall outside current scope.
 * Phase 7 standard Playwright acceptance passed 14 tests and multi-replica acceptance passed one test
 * Phase 7 migration and recovery rehearsal passed 10 tests
 * Phase 7 lint, production builds, `git diff --check`, diagnostics, and port checks passed
+* Phase 8 release-contract validation passed nine tests
+* Phase 8 ADR frontmatter parsed successfully as YAML
+* Phase 8 client validation passed 146 tests with 16 skipped
+* Phase 8 server validation passed 221 tests with one skipped
+* Phase 8 lint and production builds passed with existing non-blocking Vite chunk-size and Three.js deprecation advisories
+* Phase 8 standard Playwright acceptance passed 14 tests on two consecutive full runs
+* Phase 8 multi-replica Playwright acceptance passed one test
+* Phase 8 migration and recovery rehearsal passed 10 recovery tests
+* Phase 8 `git diff --check` passed, and ports 3001 and 5173 were clear

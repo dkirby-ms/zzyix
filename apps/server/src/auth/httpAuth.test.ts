@@ -76,7 +76,6 @@ describe('HTTP authentication boundary', () => {
     expect(response).toEqual({
       profile: { displayName: 'Ada', email: 'ada@example.test' },
       commands: {
-        createSession: false,
         claimPatch: true,
         createTransfer: true,
         acceptTransfer: true,

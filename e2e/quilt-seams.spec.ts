@@ -3,7 +3,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   ClientToServerEvents,
   QuiltProtocolHandshake,
-  QuiltScopedSnapshotPayload,
+  QuiltScopedStatePayload,
   ServerToClientEvents,
   SubscribeQuiltAreaAck,
 } from '../apps/server/src/contracts'
@@ -97,7 +97,7 @@ test('canonical room aliases stay deduplicated across one-axis seams, corners, r
   expect(protocol.topology?.topology).toBe('toroidal')
   expect(protocol.mutationEnabled).toBe(true)
 
-  const snapshotPromise = once<QuiltScopedSnapshotPayload>(socket, 'quilt_patch_snapshot')
+  const statePromise = once<QuiltScopedStatePayload>(socket, 'quilt_patch_state')
   const aliases = await subscribe(socket, quiltId, [
     { requestId: 'origin', row: 0, column: 0 },
     { requestId: 'x-seam', row: 0, column: 2 },
@@ -108,7 +108,7 @@ test('canonical room aliases stay deduplicated across one-axis seams, corners, r
   const acceptedRoomIds = aliases.outcomes.flatMap((outcome) => outcome.status === 'accepted' ? [outcome.canonicalRoomId] : [])
   expect(new Set(acceptedRoomIds).size).toBe(1)
   expect(Object.keys(aliases.acceptedCursors)).toHaveLength(1)
-  const snapshot = await snapshotPromise
+  const snapshot = await statePromise
 
   const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot))
   await testInfo.attach('quilt-seam-measurements.json', {

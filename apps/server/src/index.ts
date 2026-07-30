@@ -30,10 +30,7 @@ import type {
   QuiltRemoveTileAck,
   QuiltRemoveTileRequest,
   CanonicalWorldDescriptor,
-  CanonicalAttemptIssueRequest,
-  CanonicalAttemptIssueResponse,
   CanonicalWorldUnavailableError,
-  ClientUpgradeRequiredError,
   SafeApiError,
 } from './contracts.js'
 import type { LegacySession as Session } from './domain/legacySession.js'
@@ -88,8 +85,10 @@ import { createSocketAuth } from './auth/socketAuth.js'
 import { configureQuiltTelemetry, emitQuiltTelemetry } from './migration/quiltTelemetry.js'
 import {
   consumeCanonicalAttempt,
+  consumeObservedCanonicalCycle,
   issueCanonicalAttempt,
-  ownsCanonicalAttempt,
+  observeCanonicalCycle,
+  rotateCanonicalLineage,
 } from './migration/canonicalAttempts.js'
 import { parseCanonicalTelemetryEvent } from './operations/canonicalRetirementReportCli.js'
 
@@ -782,21 +781,18 @@ const HOST = process.env.HOST ?? '0.0.0.0'
 
 // ─── Initialize Express ──────────────────────────────────────────────────────
 
-const app = express()
-const httpServer = createServer(app)
+export const app = express()
+export const httpServer = createServer(app)
 const isTestControlEnabled = process.env.NODE_ENV === 'test' && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
 const testControlToken = (process.env.E2E_RESET_TOKEN ?? TEST_CONTROL_DEFAULT_TOKEN).trim()
 
-const jsonBodyParser = express.json()
-app.use((req, res, next) => {
-  if (req.path === '/sessions') {
-    next()
-    return
-  }
-  jsonBodyParser(req, res, next)
-})
+app.use(express.json())
 
 let configuredTokenVerifier: TokenVerifier | undefined
+export const configureTokenVerifierForTests = (verifier: TokenVerifier): void => {
+  if (process.env.NODE_ENV !== 'test') throw new Error('Test token verification can only be configured in test mode')
+  configuredTokenVerifier = verifier
+}
 const configureAuthentication = (): void => {
   configuredTokenVerifier ??= createTokenVerifier(loadAuthenticationConfig())
 }
@@ -991,36 +987,6 @@ app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
   }
 })
 
-app.post('/quilts/canonical/attempts', requireHttpPrincipal, async (req, res) => {
-  const principal = getPrincipalContext(req)
-  const payload = req.body as Partial<CanonicalAttemptIssueRequest> | undefined
-  let attemptId: string | null = null
-  try {
-    attemptId = payload
-      && (payload.kind === 'reconnect' || payload.kind === 'resubscribe')
-      && typeof payload.parentAttemptId === 'string'
-      ? await issueCanonicalAttempt(principal.principalId, payload.kind, payload.parentAttemptId)
-      : null
-  } catch (error) {
-    writeLog('error', 'canonical_child_attempt_issue_failed', { error })
-    res.status(500).json({
-      code: 'internal_error',
-      message: 'An internal error occurred.',
-      requestId: res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID(),
-    } satisfies SafeApiError)
-    return
-  }
-  if (!attemptId) {
-    res.status(400).json({
-      code: 'invalid_request',
-      message: 'The request payload is invalid.',
-      requestId: res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID(),
-    } satisfies SafeApiError)
-    return
-  }
-  res.status(201).json({ attemptId } satisfies CanonicalAttemptIssueResponse)
-})
-
 app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, async (req, res) => {
   const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
   const result = await listEligibleCanonicalPatches(getPrincipalContext(req).principalId)
@@ -1039,6 +1005,7 @@ app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, async (req, 
 app.post('/quilts/canonical/telemetry', requireHttpPrincipal, async (req, res) => {
   const principal = getPrincipalContext(req)
   const attemptId = req.header('x-canonical-attempt-id')
+  const lineageAttemptId = req.header('x-canonical-lineage-id')
   const payload = req.body as Partial<CanonicalClientTelemetry> | undefined
   const kind = payload?.name === 'canonical_entry'
     ? 'entry'
@@ -1048,9 +1015,39 @@ app.post('/quilts/canonical/telemetry', requireHttpPrincipal, async (req, res) =
         ? 'resubscribe'
         : null
   const descriptor = await discoverCanonicalWorld()
-  const context = descriptor && attemptId && kind ? {
-      attemptId,
-      ...(kind === 'entry' ? {} : { parentAttemptId: payload && 'parentAttemptId' in payload ? String(payload.parentAttemptId) : undefined }),
+  const provisionalEvent = descriptor && kind ? buildCanonicalClientTelemetryEvent(payload, {
+    attemptId: attemptId && UUID_PATTERN.test(attemptId) ? attemptId : crypto.randomUUID(),
+    ...(kind === 'entry' ? {} : { parentAttemptId: lineageAttemptId }),
+    quiltId: descriptor.quiltId,
+    canonicalGeneration: descriptor.generation,
+    cohort: 'global',
+  }) : null
+  if (!provisionalEvent) {
+    res.status(400).json({
+      code: 'invalid_request',
+      message: 'The request payload is invalid.',
+      requestId: res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID(),
+    } satisfies SafeApiError)
+    return
+  }
+  let observedAttemptId: string | null = null
+  try {
+    observedAttemptId = kind && kind !== 'entry' && lineageAttemptId && UUID_PATTERN.test(lineageAttemptId)
+      ? await consumeObservedCanonicalCycle(principal.principalId, lineageAttemptId, kind)
+      : null
+  } catch (error) {
+    writeLog('error', 'canonical_observed_attempt_consume_failed', { error })
+    res.status(500).json({
+      code: 'internal_error',
+      message: 'An internal error occurred.',
+      requestId: res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID(),
+    } satisfies SafeApiError)
+    return
+  }
+  const effectiveAttemptId = kind === 'entry' ? attemptId : observedAttemptId
+  const context = descriptor && effectiveAttemptId && kind ? {
+      attemptId: effectiveAttemptId,
+      ...(kind === 'entry' && attemptId ? {} : { parentAttemptId: lineageAttemptId }),
       quiltId: descriptor.quiltId,
       canonicalGeneration: descriptor.generation,
       cohort: 'global',
@@ -1059,11 +1056,14 @@ app.post('/quilts/canonical/telemetry', requireHttpPrincipal, async (req, res) =
   let consumed = false
   try {
     consumed = descriptor !== null
-      && attemptId !== undefined
-      && UUID_PATTERN.test(attemptId)
+      && effectiveAttemptId !== undefined
+      && effectiveAttemptId !== null
+      && UUID_PATTERN.test(effectiveAttemptId)
       && kind !== null
       && event !== null
-      && await consumeCanonicalAttempt(attemptId, principal.principalId, kind)
+      && (kind === 'entry'
+        ? await consumeCanonicalAttempt(effectiveAttemptId, principal.principalId, kind)
+        : observedAttemptId === effectiveAttemptId)
   } catch (error) {
     writeLog('error', 'canonical_attempt_consume_failed', { error })
     res.status(500).json({
@@ -1164,42 +1164,6 @@ app.post('/account/deletion/recover', requireDeletionPendingPrincipal, async (re
   if (!result.succeeded) return sendOwnershipResult(res, result)
   res.status(200).json({ status: 'active', idempotent: result.idempotent } satisfies AccountDeletionResponse)
 })
-
-export const sendClientUpgradeRequired = (response: express.Response, requestId: string): void => {
-  emitQuiltTelemetry({
-    schemaVersion: 1,
-    eventId: crypto.randomUUID(),
-    attemptId: crypto.randomUUID(),
-    occurredAt: new Date().toISOString(),
-    quiltId: null,
-    canonicalGeneration: null,
-    cohort: 'global',
-    name: 'canonical_old_client_rejected',
-    outcome: 'rejected',
-    transport: 'http',
-  })
-  response.setHeader('Cache-Control', 'no-store')
-  response.setHeader('Upgrade', 'zzyix/2.0')
-  response.status(426).json({
-    code: 'client_upgrade_required',
-    message: 'This client version is no longer supported.',
-    requestId,
-    minimumSchemaVersion: SCHEMA_VERSION,
-    minimumProtocolVersion: QUILT_PROTOCOL_VERSION,
-  } satisfies ClientUpgradeRequiredError)
-}
-
-export const createRetiredSessionsRouter = (authenticate: express.RequestHandler): express.Router => {
-  const router = express.Router()
-  const reject = (_req: express.Request, res: express.Response): void => {
-    sendClientUpgradeRequired(res, res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID())
-  }
-  router.get('/', authenticate, reject)
-  router.post('/', authenticate, reject)
-  return router
-}
-
-app.use('/sessions', createRetiredSessionsRouter(requireHttpPrincipal))
 
 type TestResetRequest = {
   createCanonicalWorld?: boolean
@@ -1314,7 +1278,6 @@ if (isTestControlEnabled) {
 
         res.status(200).json({
           reset: true,
-          session: { id: provisioned.quilt.legacyCanvasId },
           canonical: {
             quiltId: provisioned.quilt.id,
             patchId: provisioned.initialPatch.id,
@@ -1525,7 +1488,7 @@ app.use((error: unknown, req: express.Request, res: express.Response, _next: exp
 
 // ─── Initialize Socket.IO ────────────────────────────────────────────────────
 
-const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
+export const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
   httpServer,
   {
     allowRequest: (request, callback) => {
@@ -1615,15 +1578,21 @@ export const enforceCanonicalSocketCompatibility = async (
     next(buildClientUpgradeRequiredSocketError())
     return
   }
-  let ownsAttempt = false
+  let lineageAttemptId: string | null = null
   try {
-    ownsAttempt = await ownsCanonicalAttempt(auth.entryAttemptId, socket.data.principalId, 'entry')
+    lineageAttemptId = await rotateCanonicalLineage(
+      socket.data.principalId,
+      auth.entryAttemptId,
+      typeof auth.lineageAttemptId === 'string' && UUID_PATTERN.test(auth.lineageAttemptId)
+        ? auth.lineageAttemptId
+        : undefined,
+    )
   } catch (error) {
     writeLog('error', 'canonical_socket_attempt_lookup_failed', { error })
     next(new Error('Canonical authorization is temporarily unavailable.'))
     return
   }
-  if (!ownsAttempt) {
+  if (!lineageAttemptId) {
     emitQuiltTelemetry({
       schemaVersion: 1,
       eventId: crypto.randomUUID(),
@@ -1647,6 +1616,8 @@ export const enforceCanonicalSocketCompatibility = async (
   socket.data.protocolVersion = QUILT_PROTOCOL_VERSION
   socket.data.canonicalGeneration = auth.canonicalGeneration
   socket.data.entryAttemptId = auth.entryAttemptId
+  socket.data.lineageAttemptId = lineageAttemptId
+  socket.data.reconnectCycleLineageId = auth.lineageAttemptId
 
   next()
 }
@@ -1684,20 +1655,24 @@ export const registerCanonicalTelemetryHandler = (socket: CanonicalSocket): void
     try {
       const attemptId = payload?.name === 'canonical_entry'
         ? socket.data.entryAttemptId
-        : await issueCanonicalAttempt(socket.data.principalId, 'reconnect', socket.data.entryAttemptId)
+        : socket.data.reconnectCycleLineageId
+          ? await consumeObservedCanonicalCycle(
+              socket.data.principalId,
+              socket.data.reconnectCycleLineageId,
+              'reconnect',
+            )
+          : null
       const context = attemptId ? {
         attemptId,
-        ...(payload.name === 'canonical_entry' ? {} : { parentAttemptId: socket.data.entryAttemptId }),
+        ...(payload.name === 'canonical_entry' ? {} : { parentAttemptId: socket.data.reconnectCycleLineageId }),
         quiltId: socket.data.quiltId,
         canonicalGeneration: socket.data.canonicalGeneration,
         cohort: 'global' as const,
       } : null
       const event = context ? buildCanonicalClientTelemetryEvent(payload, context) : null
-      if (!attemptId || !event || !await consumeCanonicalAttempt(
-        attemptId,
-        socket.data.principalId,
-        payload?.name === 'canonical_entry' ? 'entry' : 'reconnect',
-      )) return
+      if (!attemptId || !event) return
+      if (payload?.name === 'canonical_entry'
+        && !await consumeCanonicalAttempt(attemptId, socket.data.principalId, 'entry')) return
       emitQuiltTelemetry(event)
       terminalNames.add(payload.name)
     } catch (error) {
@@ -1710,7 +1685,6 @@ export const registerCanonicalTelemetryHandler = (socket: CanonicalSocket): void
 
 io.on('connection', (socket) => {
   const { quiltId, clientId } = socket.data
-  const sessionId = quiltId
   let selectedProtocolVersion: 1 | 2 = 2
   let canaryTelemetryEnabled = true
   let dualReadEnabled = false
@@ -1726,10 +1700,11 @@ io.on('connection', (socket) => {
   let roomChurnInWindow = 0
 
   registerCanonicalTelemetryHandler(socket)
+  socket.emit('canonical_lineage', { lineageAttemptId: socket.data.lineageAttemptId })
 
   socket.onAny((eventName, ...args) => {
     writeLog('debug', 'socket_event_received', {
-      sessionId,
+      quiltId,
       clientId,
       eventName,
       argCount: args.length,
@@ -1806,7 +1781,7 @@ io.on('connection', (socket) => {
       cohort: 'global',
     })
     writeLog('error', 'socket_initialize_failed', {
-      sessionId,
+      quiltId,
       clientId,
       error,
     })
@@ -1899,7 +1874,7 @@ io.on('connection', (socket) => {
         }
       }
     } catch (error) {
-      writeLog('error', 'quilt_place_tile_failed', { sessionId, operationId, error })
+      writeLog('error', 'quilt_place_tile_failed', { quiltId, operationId, error })
       rejectQuiltMutation<QuiltPlaceTileAck>(ack, operationId, 'RESOURCE_UNAVAILABLE')
     }
   })
@@ -1964,7 +1939,7 @@ io.on('connection', (socket) => {
         }
       }
     } catch (error) {
-      writeLog('error', 'quilt_remove_tile_failed', { sessionId, operationId, error })
+      writeLog('error', 'quilt_remove_tile_failed', { quiltId, operationId, error })
       rejectQuiltMutation<QuiltRemoveTileAck>(ack, operationId, 'RESOURCE_UNAVAILABLE')
     }
   })
@@ -1983,10 +1958,10 @@ io.on('connection', (socket) => {
     const resubscribeStartedAt = performance.now()
     const recordResubscribe = async (outcomes: SubscribeQuiltAreaAck['outcomes']): Promise<void> => {
       try {
-        const attemptId = await issueCanonicalAttempt(
+        const attemptId = await observeCanonicalCycle(
           socket.data.principalId,
+          socket.data.lineageAttemptId,
           'resubscribe',
-          socket.data.entryAttemptId,
         )
         if (!attemptId || !await consumeCanonicalAttempt(
           attemptId,
@@ -2004,7 +1979,7 @@ io.on('connection', (socket) => {
           resyncRequired: outcomes.filter((outcome) => outcome.status === 'accepted' && outcome.cursor === undefined).length,
         }, {
           attemptId,
-          parentAttemptId: socket.data.entryAttemptId,
+          parentAttemptId: socket.data.lineageAttemptId,
           quiltId: socket.data.quiltId,
           canonicalGeneration: socket.data.canonicalGeneration,
           cohort: 'global',
@@ -2064,7 +2039,7 @@ io.on('connection', (socket) => {
         limits: QUILT_PROTOCOL_LIMITS,
       })
       const acceptedCursors: SubscribeQuiltAreaAck['acceptedCursors'] = {}
-      const snapshots: Array<Parameters<ServerToClientEvents['quilt_patch_snapshot']>[0]> = []
+      const states: Array<Parameters<ServerToClientEvents['quilt_patch_state']>[0]> = []
       const replayEvents: Array<Parameters<ServerToClientEvents['quilt_patch_event']>[0]> = []
       const budgetFailures = new Map<string, string>()
       for (const room of resolution.accepted) {
@@ -2196,7 +2171,7 @@ io.on('connection', (socket) => {
           delete acceptedCursors[room.canonicalRoomId]
           continue
         }
-        snapshots.push(scopedSnapshot)
+        states.push(scopedSnapshot)
       }
 
       const outcomes = resolution.outcomes.map((outcome) => {
@@ -2232,10 +2207,10 @@ io.on('connection', (socket) => {
       })
       invokeAckSafely<SubscribeQuiltAreaAck>(ack, { outcomes, acceptedCursors })
       await recordResubscribe(outcomes)
-      for (const snapshot of snapshots) socket.emit('quilt_patch_snapshot', snapshot)
+      for (const state of states) socket.emit('quilt_patch_state', state)
       for (const event of replayEvents) socket.emit('quilt_patch_event', event)
     } catch (error) {
-      writeLog('error', 'subscribe_quilt_area_failed', { sessionId, clientId, error })
+      writeLog('error', 'subscribe_quilt_area_failed', { quiltId, clientId, error })
       const outcomes: SubscribeQuiltAreaAck['outcomes'] = payload.rooms.map((room) => ({
         requestId: room.requestId,
         status: 'invalid',
@@ -2263,8 +2238,18 @@ io.on('connection', (socket) => {
 
     writeLog('info', 'socket_disconnected', {
       clientId,
-      sessionId,
+      quiltId,
     })
+
+    try {
+      await observeCanonicalCycle(
+        socket.data.principalId,
+        socket.data.lineageAttemptId,
+        'reconnect',
+      )
+    } catch (error) {
+      writeLog('error', 'canonical_reconnect_cycle_observation_failed', { socketId: socket.id, error })
+    }
 
     if (selectedProtocolVersion === 2 && selectedQuiltId && selectedPrincipalId && presenceLeaseActive) {
       try {

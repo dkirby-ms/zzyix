@@ -64,20 +64,69 @@ describe('canonical attempt shared persistence', () => {
     await expect(secondStore.consume(attemptId!, PRINCIPAL_A, 'entry', issuedAt + 10 * 60 * 1_000)).resolves.toBe(false)
   })
 
-  it('issues children only from a nonexpired entry owned by the same principal', async () => {
+  it('rotates durable lineage and consumes only server-observed child cycles', async () => {
     const issuedAt = Date.parse('2026-07-30T00:00:00Z')
-    const parentAttemptId = await firstStore.issue(PRINCIPAL_A, 'entry', undefined, issuedAt)
-    const childAttemptId = await secondStore.issue(PRINCIPAL_A, 'reconnect', parentAttemptId!, issuedAt + 1)
-
-    expect(childAttemptId).toEqual(expect.any(String))
-    await expect(firstStore.owns(childAttemptId!, PRINCIPAL_A, 'reconnect', issuedAt + 1)).resolves.toBe(true)
-    await expect(secondStore.issue(PRINCIPAL_B, 'reconnect', parentAttemptId!, issuedAt + 1)).resolves.toBeNull()
-    await expect(secondStore.issue(PRINCIPAL_A, 'resubscribe', undefined, issuedAt + 1)).resolves.toBeNull()
-    await expect(secondStore.issue(
+    const entryAttemptId = await firstStore.issue(PRINCIPAL_A, 'entry', undefined, issuedAt)
+    const firstLineageId = await secondStore.rotateLineage(PRINCIPAL_A, entryAttemptId!, undefined, issuedAt + 1)
+    const reconnectAttemptId = await firstStore.observeCycle(
       PRINCIPAL_A,
-      'resubscribe',
-      parentAttemptId!,
-      issuedAt + 10 * 60 * 1_000,
+      firstLineageId!,
+      'reconnect',
+      issuedAt + 2,
+    )
+
+    expect(reconnectAttemptId).toEqual(expect.any(String))
+    await expect(secondStore.consumeObservedCycle(
+      PRINCIPAL_A,
+      firstLineageId!,
+      'reconnect',
+      issuedAt + 3,
+    )).resolves.toBe(reconnectAttemptId)
+    await expect(firstStore.consumeObservedCycle(
+      PRINCIPAL_A,
+      firstLineageId!,
+      'reconnect',
+      issuedAt + 3,
     )).resolves.toBeNull()
+    await expect(firstStore.consumeObservedCycle(
+      PRINCIPAL_B,
+      firstLineageId!,
+      'reconnect',
+      issuedAt + 3,
+    )).resolves.toBeNull()
+    await expect(firstStore.consumeObservedCycle(
+      PRINCIPAL_A,
+      '41000000-0000-4000-8000-000000000099',
+      'reconnect',
+      issuedAt + 3,
+    )).resolves.toBeNull()
+
+    const afterEntryExpiry = issuedAt + 10 * 60 * 1_000 + 1
+    const secondLineageId = await firstStore.rotateLineage(
+      PRINCIPAL_A,
+      entryAttemptId!,
+      firstLineageId!,
+      afterEntryExpiry,
+    )
+    expect(secondLineageId).toEqual(expect.any(String))
+    await expect(secondStore.rotateLineage(
+      PRINCIPAL_A,
+      entryAttemptId!,
+      firstLineageId!,
+      afterEntryExpiry,
+    )).resolves.toBeNull()
+
+    const resubscribeAttemptId = await secondStore.observeCycle(
+      PRINCIPAL_A,
+      secondLineageId!,
+      'resubscribe',
+      afterEntryExpiry + 1,
+    )
+    await expect(firstStore.consumeObservedCycle(
+      PRINCIPAL_A,
+      secondLineageId!,
+      'resubscribe',
+      afterEntryExpiry + 2,
+    )).resolves.toBe(resubscribeAttemptId)
   })
 })

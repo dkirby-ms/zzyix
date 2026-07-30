@@ -1,6 +1,5 @@
 import { sql } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import express from 'express'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { Server as SocketServer } from 'socket.io'
@@ -21,8 +20,10 @@ import {
   selectScopedReplayOperations,
   sendOwnershipResult,
   sendCanonicalWorldDiscovery,
-  createRetiredSessionsRouter,
+  configureTokenVerifierForTests,
   enforceCanonicalSocketCompatibility,
+  httpServer,
+  io,
   registerCanonicalTelemetryHandler,
 } from './index.js'
 import { buildPatchRoomAccess } from './realtime/quiltRooms.js'
@@ -40,21 +41,97 @@ import {
 import { createPostgresTestDatabase, type PostgresTestDatabase } from './test/postgresTestDatabase.js'
 
 let attemptDatabase: PostgresTestDatabase
+let liveBaseUrl: string
+
+const PRINCIPAL_A = '11111111-1111-4111-8111-111111111111'
+const PRINCIPAL_B = '22222222-2222-4222-8222-222222222222'
+const CANVAS_ID = '30000000-0000-4000-8000-000000000001'
+const QUILT_ID = '40000000-0000-4000-8000-000000000001'
+const PATCH_A = '50000000-0000-4000-8000-000000000001'
+const PATCH_B = '50000000-0000-4000-8000-000000000002'
+const TEST_ISSUER = 'https://issuer.example/'
 
 beforeAll(async () => {
   attemptDatabase = await createPostgresTestDatabase('zzyix_index_attempts')
+  configureTokenVerifierForTests(async (token) => {
+    if (token === 'denied') throw new AuthenticationError('insufficient_scope')
+    return {
+      issuer: TEST_ISSUER,
+      subject: token === 'second' ? 'subject-b' : 'subject-a',
+      expiresAt: new Date(Date.now() + 60_000),
+      scope: ['access'],
+    }
+  })
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
+  liveBaseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
 }, 30_000)
 
 beforeEach(async () => {
-  await attemptDatabase.db.execute(sql`truncate table canonical_attempts, principals cascade`)
+  for (const socket of await io.fetchSockets()) socket.disconnect(true)
+  await attemptDatabase.db.execute(sql`truncate table canvases, principals cascade`)
   await attemptDatabase.db.execute(sql`
     insert into principals (id, kind) values
-      ('11111111-1111-4111-8111-111111111111', 'human'),
-      ('22222222-2222-4222-8222-222222222222', 'human')
+      (${PRINCIPAL_A}, 'human'),
+      (${PRINCIPAL_B}, 'human')
   `)
 })
 
-afterAll(async () => attemptDatabase?.dispose(), 30_000)
+afterAll(async () => {
+  await new Promise<void>((resolve) => io.close(() => resolve()))
+  await attemptDatabase?.dispose()
+}, 30_000)
+
+const seedCanonicalBoundary = async (): Promise<void> => {
+  await attemptDatabase.db.execute(sql`
+    insert into external_principal_mappings (provider_namespace, external_subject, principal_id)
+    values
+      (${TEST_ISSUER}, 'subject-a', ${PRINCIPAL_A}),
+      (${TEST_ISSUER}, 'subject-b', ${PRINCIPAL_B})
+  `)
+  await attemptDatabase.db.execute(sql`insert into canvases (id, version) values (${CANVAS_ID}, 0)`)
+  await attemptDatabase.db.execute(sql`
+    insert into quilts (
+      id, legacy_canvas_id, patch_rows, patch_columns, patch_width, patch_height,
+      origin_x, origin_y, topology, protocol_version
+    ) values (${QUILT_ID}, ${CANVAS_ID}, 1, 2, 10, 10, 0, 0, 'toroidal', 2)
+  `)
+  await attemptDatabase.db.execute(sql`
+    insert into patches (id, quilt_id, row, "column", state, revision)
+    values
+      (${PATCH_A}, ${QUILT_ID}, 0, 0, 'unclaimed', 0),
+      (${PATCH_B}, ${QUILT_ID}, 0, 1, 'unclaimed', 0)
+  `)
+  await attemptDatabase.db.execute(sql`
+    insert into patch_visibility_policies (
+      patch_id, existence, fine_data, aggregate_data, presence, search,
+      durable_events, claim_enabled, policy_version
+    ) values
+      (${PATCH_A}, 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', true, 1),
+      (${PATCH_B}, 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', true, 1)
+  `)
+  await attemptDatabase.db.execute(sql`
+    insert into canonical_world (product_key, quilt_id, status, generation)
+    values ('canonical', ${QUILT_ID}, 'active', 2)
+  `)
+}
+
+const authenticatedRequest = (
+  path: string,
+  token = 'allowed',
+  init: RequestInit = {},
+): Promise<Response> => fetch(`${liveBaseUrl}${path}`, {
+  ...init,
+  headers: {
+    authorization: `Bearer ${token}`,
+    ...init.headers,
+  },
+})
+
+const discoverEntryAttempt = async (token: string): Promise<string> => {
+  const response = await authenticatedRequest('/quilts/canonical', token)
+  expect(response.status).toBe(200)
+  return ((await response.json()) as { entryAttemptId: string }).entryAttemptId
+}
 
 describe('Socket.IO handshake origin boundary', () => {
   const allowedOrigin = 'https://app.example.com'
@@ -173,43 +250,137 @@ describe('canonical discovery HTTP contract', () => {
   })
 })
 
-describe('live retired session HTTP boundary', () => {
-  it.each([
-    ['missing bearer', undefined, 401, 'authentication_required'],
-    ['disallowed principal', 'Bearer denied', 403, 'insufficient_scope'],
-    ['authenticated principal', 'Bearer allowed', 426, 'client_upgrade_required'],
-  ])('orders %s before retirement rejection without parsing POST bodies', async (_label, authorization, expectedStatus, expectedCode) => {
-    const verifier = vi.fn(async (token: string) => {
-      if (token === 'denied') throw new AuthenticationError('insufficient_scope')
-      return { subject: 'subject-1' }
-    })
-    const resolver = vi.fn(async () => ({ principalId: 'principal-1', status: 'active' as const }))
-    const boundary = express()
-    boundary.use((_req, res, next) => {
-      res.setHeader('x-request-id', 'request-live')
-      next()
-    })
-    boundary.use('/sessions', createRetiredSessionsRouter(createHttpAuth(verifier as never, resolver as never)))
-    const server = createServer(boundary)
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
-    try {
-      const address = server.address() as AddressInfo
-      const response = await fetch(`http://127.0.0.1:${address.port}/sessions`, {
-        method: 'POST',
-        headers: {
-          ...(authorization ? { authorization } : {}),
-          'content-type': 'application/json',
-        },
-        body: '{not valid json',
-      })
-      const payload = await response.json() as { code: string }
+describe('live canonical product boundaries', () => {
+  it('does not register session routes or advertise createSession from /me', async () => {
+    await seedCanonicalBoundary()
 
-      expect(response.status).toBe(expectedStatus)
-      expect(payload.code).toBe(expectedCode)
-      expect(resolver).toHaveBeenCalledTimes(expectedStatus === 426 ? 1 : 0)
+    const retired = await authenticatedRequest('/sessions')
+    const me = await authenticatedRequest('/me')
+    const meBody = await me.json() as { commands: Record<string, boolean> }
+
+    expect(retired.status).toBe(404)
+    expect(me.status).toBe(200)
+    expect(meBody.commands).not.toHaveProperty('createSession')
+  })
+
+  it('authenticates navigation and persists a claim through live HTTP routes', async () => {
+    await seedCanonicalBoundary()
+
+    const unauthenticated = await fetch(`${liveBaseUrl}/quilts/${QUILT_ID}/patches/${PATCH_A}/navigation`)
+    const denied = await authenticatedRequest(`/quilts/${QUILT_ID}/patches/${PATCH_A}/navigation`, 'denied')
+    const navigation = await authenticatedRequest(`/quilts/${QUILT_ID}/patches/${PATCH_A}/navigation`)
+    const claim = await authenticatedRequest('/ownership/claims', 'allowed', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        operationId: '60000000-0000-4000-8000-000000000001',
+        patchId: PATCH_B,
+      }),
+    })
+    const [persisted] = await attemptDatabase.db.execute(sql`
+      select owner_principal_id, state from patches where id = ${PATCH_B}
+    `).then((result) => result.rows)
+
+    expect(unauthenticated.status).toBe(401)
+    expect(denied.status).toBe(403)
+    expect(navigation.status).toBe(200)
+    await expect(navigation.json()).resolves.toMatchObject({ quiltId: QUILT_ID, patchId: PATCH_A, row: 0, column: 0 })
+    expect(claim.status).toBe(200)
+    expect(persisted).toMatchObject({ owner_principal_id: PRINCIPAL_A, state: 'active' })
+  })
+
+  it('publishes presence and removes the durable lease through live socket disconnect cleanup', async () => {
+    await seedCanonicalBoundary()
+    const firstEntryAttemptId = await discoverEntryAttempt('allowed')
+    const secondEntryAttemptId = await discoverEntryAttempt('second')
+    const connect = (token: string, clientId: string, entryAttemptId: string) => createSocketClient(liveBaseUrl, {
+      transports: ['websocket'],
+      reconnection: false,
+      auth: {
+        token,
+        quiltId: QUILT_ID,
+        clientId,
+        schemaVersion: '2.0.0',
+        protocolVersion: 2,
+        canonicalGeneration: 2,
+        entryAttemptId,
+      },
+    })
+    const first = connect('allowed', 'client-a', firstEntryAttemptId)
+    let second: SocketClient | undefined
+    try {
+      await new Promise<void>((resolve) => first.once('quilt_protocol', () => resolve()))
+      const joined = new Promise<{ client: { clientId: string; joinedAt: number } }>((resolve) => {
+        first.once('client_joined', resolve)
+      })
+      second = connect('second', 'client-b', secondEntryAttemptId)
+      await new Promise<void>((resolve) => second!.once('quilt_protocol', () => resolve()))
+      await expect(joined).resolves.toEqual({
+        client: { clientId: PRINCIPAL_B, joinedAt: expect.any(Number) },
+      })
+      const left = new Promise<{ clientId: string }>((resolve) => first.once('client_left', resolve))
+      second.disconnect()
+
+      await expect(left).resolves.toEqual({ clientId: PRINCIPAL_B })
+      await vi.waitFor(async () => {
+        const leases = await attemptDatabase.db.execute(sql`
+          select count(*)::integer as count from quilt_presence_leases where principal_id = ${PRINCIPAL_B}
+        `)
+        expect(leases.rows[0]?.count).toBe(0)
+      })
     } finally {
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+      first.disconnect()
+      second?.disconnect()
     }
+  })
+
+  it('accepts one terminal for one observed disconnect and rejects duplicate fallback delivery', async () => {
+    await seedCanonicalBoundary()
+    const entryAttemptId = await discoverEntryAttempt('allowed')
+    const client = createSocketClient(liveBaseUrl, {
+      transports: ['websocket'],
+      reconnection: false,
+      auth: {
+        token: 'allowed',
+        quiltId: QUILT_ID,
+        clientId: 'client-cycle',
+        schemaVersion: '2.0.0',
+        protocolVersion: 2,
+        canonicalGeneration: 2,
+        entryAttemptId,
+      },
+    })
+    const lineage = await new Promise<string>((resolve) => {
+      client.once('canonical_lineage', (payload) => resolve(payload.lineageAttemptId))
+    })
+    await new Promise<void>((resolve) => client.once('quilt_protocol', () => resolve()))
+    client.disconnect()
+    await vi.waitFor(async () => {
+      const observations = await attemptDatabase.db.execute(sql`
+        select count(*)::integer as count
+        from canonical_attempts
+        where parent_attempt_id = ${lineage} and kind = 'reconnect' and consumed = false
+      `)
+      expect(observations.rows[0]?.count).toBe(1)
+    })
+
+    const deliver = () => authenticatedRequest('/quilts/canonical/telemetry', 'allowed', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-canonical-attempt-id': entryAttemptId,
+        'x-canonical-lineage-id': lineage,
+      },
+      body: JSON.stringify({
+        name: 'canonical_reconnect',
+        outcome: 'exhausted',
+        durationMs: 10,
+        attempts: 1,
+      }),
+    })
+
+    expect((await deliver()).status).toBe(202)
+    expect((await deliver()).status).toBe(400)
   })
 })
 

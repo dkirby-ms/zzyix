@@ -4,7 +4,6 @@ import {
   isOriginAllowed,
   isSupportedCanonicalConnectionAuth,
   resolveCorsOrigin,
-  sendClientUpgradeRequired,
 } from './index.js'
 
 describe('authoritative handler semantics', () => {
@@ -24,38 +23,6 @@ describe('authoritative handler semantics', () => {
     expect(buildClientUpgradeRequiredSocketError().data).toEqual({
       code: 'client_upgrade_required',
       message: 'This client version is no longer supported.',
-      minimumSchemaVersion: '2.0.0',
-      minimumProtocolVersion: 2,
-    })
-  })
-
-  it('returns the exact deterministic client upgrade response', () => {
-    const headers = new Map<string, string>()
-    let status = 0
-    let body: unknown
-    const response = {
-      setHeader: (name: string, value: string) => headers.set(name, value),
-      status: (value: number) => {
-        status = value
-        return response
-      },
-      json: (value: unknown) => {
-        body = value
-        return response
-      },
-    }
-
-    sendClientUpgradeRequired(response as never, 'request-123')
-
-    expect(status).toBe(426)
-    expect(headers).toEqual(new Map([
-      ['Cache-Control', 'no-store'],
-      ['Upgrade', 'zzyix/2.0'],
-    ]))
-    expect(body).toEqual({
-      code: 'client_upgrade_required',
-      message: 'This client version is no longer supported.',
-      requestId: 'request-123',
       minimumSchemaVersion: '2.0.0',
       minimumProtocolVersion: 2,
     })

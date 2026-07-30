@@ -4,12 +4,12 @@
 
 ## Review Metadata
 
-* Date: 2026-07-29
+* Date: 2026-07-30
 * Plan: `.copilot-tracking/plans/2026-07-29/canonical-infinite-canvas-convergence-plan.instructions.md`
 * Changes log: `.copilot-tracking/changes/2026-07-29/canonical-infinite-canvas-convergence-changes.md`
 * Research: `.copilot-tracking/research/2026-07-29/canonical-infinite-canvas-convergence-research.md`
 * Reviewer: Task Reviewer
-* Scope: Full implementation review across Phases 0 through 6, resumed after remediation
+* Scope: Full implementation review across Phases 0 through 7, resumed after Phase 7 remediation
 
 ## Prior Review Context
 
@@ -19,16 +19,16 @@ replaces that planning-only status with implementation validation.
 
 ## Findings Summary
 
-* Critical: 3
-* Major: 4
+* Critical: 1
+* Major: 5
 * Minor: 1
 
-Phase 6 closes six of the twelve prior findings, but release readiness remains blocked by
-an incomplete existing-app evidence deployment path, forgeable entry-attempt telemetry,
-invalid reconnect terminal lineage, residual session contracts, incomplete live boundary
-coverage, a reproducible standard-E2E placement failure, and overstated release artifacts.
-Current evidence is recorded in
-`.copilot-tracking/reviews/2026-07-29/canonical-infinite-canvas-convergence-plan-quality-phase6.md`.
+Phase 7 closes IV-003, IV-013, and IV-014. Release readiness remains blocked because child
+attempts are not bound to server-observed reconnect or resubscribe cycles, entry lineage
+expires during long-lived sessions, session-era public contracts remain compiled, required
+live product boundaries remain helper-tested, standard Playwright is order-dependent, and
+release artifacts overstate closure. Current evidence is recorded in
+`.copilot-tracking/reviews/2026-07-29/canonical-infinite-canvas-convergence-plan-quality-phase7.md`.
 
 ## RPI Validation
 
@@ -53,7 +53,7 @@ Current evidence is recorded in
 
 Phase artifacts are stored under
 `.copilot-tracking/reviews/rpi/2026-07-29/canonical-infinite-canvas-convergence-plan-000-validation.md`
-through `canonical-infinite-canvas-convergence-plan-006-validation.md`.
+through `canonical-infinite-canvas-convergence-plan-007-validation.md`.
 
 ## Phase 6 RPI Validation
 
@@ -69,23 +69,36 @@ through `canonical-infinite-canvas-convergence-plan-006-validation.md`.
 
 Closed prior findings: IV-001, IV-002, IV-005, IV-006, IV-008, and IV-009.
 
+## Phase 7 RPI Validation
+
+* Step 7.1: Partial. Both deployment branches install immutable evidence and branch-specific
+	release contracts pass, but the ADR keyword indentation remains malformed.
+* Step 7.2: RPI Passed, quality review Failed. Entry attempts and child lineage are shared,
+	principal-bound, and single-use, but the public child-attempt endpoint can issue unlimited
+	children without a server-observed reconnect or resubscribe cycle. The original entry
+	lineage also expires after ten minutes and rejects later reconnects.
+* Step 7.3: Failed. Snapshot handlers are removed and socket authentication is composed, but
+	session-era public contracts remain compiled and navigation, claim, and presence coverage
+	still calls helpers instead of live product boundaries.
+* Step 7.4: Failed. The original authenticated placement defect is corrected, but the full
+	standard Playwright suite failed twice at 13 of 14 because the multi-user case is
+	order-dependent. Release artifacts still claim complete closure.
+
+Closed resumed findings: IV-003, IV-013, and IV-014. IV-004 is reopened by the independent
+quality review. IV-007, IV-010, IV-011, and IV-012 remain open. IV-015 and IV-016 are new.
+
 ## Implementation Quality
 
-The independent full-quality review found 12 unique issues after duplicate phase findings
-were merged:
+The Phase 7 full-quality review found seven open issues:
 
-* Retirement behavior is not coupled to mandatory immutable promotion evidence.
-* Report parsing trusts caller-supplied decisions instead of deriving them from evidence.
-* Socket telemetry does not bind entry attempts to authenticated handshake identity.
-* Failure terminals are omitted or emitted over a disconnected socket.
-* Phase 2 discovery and entry controls remain in the final deployment and UI path.
-* Activation can adopt or repoint to a target outside the fixed provisioning contract.
-* Legacy handlers, state, and public contracts remain compiled.
-* Failure telemetry uses a fabricated quilt identity and generation.
-* Presence heartbeat renewal failures and missing leases are ignored.
-* Live HTTP and Socket.IO compatibility boundaries lack composed integration coverage.
-* Planning and release artifacts overstate readiness.
-* ADR keyword frontmatter indentation is malformed.
+* Critical IV-004: child attempts can be issued without a server-observed cycle and can pad
+	promotion evidence.
+* Major IV-016: ten-minute entry-attempt expiry rejects reconnects for long-lived sessions.
+* Major IV-007: session-era public contracts remain compiled.
+* Major IV-010: navigation, claim, and presence boundaries remain helper-tested.
+* Major IV-015: standard Playwright acceptance is order-dependent.
+* Major IV-011: planning and release artifacts overstate readiness.
+* Minor IV-012: ADR keyword frontmatter indentation remains malformed.
 
 ## Validation Commands
 
@@ -119,15 +132,30 @@ rehearsal were not rerun because loopback PostgreSQL and Docker integration are 
 * VS Code diagnostics: Passed on reviewed source, workflow, and ADR files.
 * Ports 3001 and 5173: Clear. PostgreSQL was preserved.
 
+## Fresh Phase 7 Validation
+
+* `npm run test:release-contract`: Passed, 9 of 9.
+* Focused Phase 7 server tests: Passed, 64 tests.
+* Focused Phase 7 client tests: Passed, 25 tests with 16 skipped.
+* `npm run lint`: Passed.
+* `npm run build`: Passed with the existing Vite chunk-size warning.
+* `npm test`: Passed, 367 tests with 17 skipped across 147 files.
+* Focused authentication Playwright: Passed, 7 of 7, including `1 placed`.
+* Focused multi-user Playwright: Passed, 1 of 1.
+* Full standard Playwright: Failed twice, 13 passed and 1 failed at the same multi-user test.
+* Multi-replica Playwright: Passed, 1 of 1.
+* Migration and recovery rehearsal: Passed, 10 of 10.
+* `git diff --check`: Passed.
+* VS Code diagnostics: Passed on review artifacts and reviewed source surfaces.
+* Ports 3001 and 5173: Clear after validation. PostgreSQL was preserved.
+
 ## Missing Work and Deviations
 
-* Enforce and deploy immutable retirement evidence before compatibility can be retired.
-* Recompute report decisions and reject empty or inconsistent promotion reports.
-* Bind telemetry to server-authenticated attempt identity and capture every terminal failure.
-* Remove final-state canary controls and compiled legacy runtime surfaces.
-* Restrict activation to the provisioned pointer and fixed topology contract.
-* Handle presence renewal failure and lease loss.
-* Add composed HTTP, Socket.IO, navigation, claim, and presence integration coverage.
+* Bind child attempts to server-observed, single-use reconnect and resubscribe cycles.
+* Preserve or rotate reconnect lineage beyond the ten-minute attempt lifetime.
+* Remove compiled session-era public contracts and `/me` command fields.
+* Add live authenticated navigation, claim, and presence lifecycle coverage.
+* Eliminate standard Playwright cross-test state leakage and rerun the full suite repeatedly.
 * Correct release claims and ADR frontmatter.
 
 ## Follow-Up Work
@@ -141,15 +169,15 @@ rehearsal were not rerun because loopback PostgreSQL and Docker integration are 
 
 * Preserve machine-readable PostgreSQL, Playwright, and migration-rehearsal results for
 	independent release verification.
-* Define server-owned identity semantics for pre-discovery and old-client telemetry.
-* Define reconnect and resubscribe attempt lineage for promotion metrics.
-* Add a lease-loss policy for connected sockets whose heartbeat no longer renews a row.
+* Add retention or cleanup policy for consumed and expired canonical-attempt rows.
+* Distinguish expired attempt lineage from unsupported-client compatibility failures.
 
 ## Overall Status
 
-Needs Rework. Three critical findings leave retirement evidence undeployable on the normal
-update path or permit misleading promotion metrics. Four major findings leave runtime
-retirement, composed integration coverage, release reporting, and the primary product
-placement acceptance incomplete. Correct all Critical and Major findings, then rerun the
-focused suites, release contracts, full workspace tests, both Playwright suites, and migration
-rehearsal before treating the implementation as release-ready.
+Needs Rework. One Critical finding permits authenticated callers to manufacture child
+terminal volume without an observed reconnect or resubscribe cycle. Five Major findings
+leave long-lived reconnects, runtime retirement, composed integration coverage, full-suite
+isolation, and release reporting incomplete. Correct all Critical and Major findings, then
+rerun focused suites, release contracts, full workspace tests, repeated standard Playwright,
+multi-replica Playwright, and migration rehearsal before treating the implementation as
+release-ready.

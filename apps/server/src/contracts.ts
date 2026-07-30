@@ -86,23 +86,6 @@ export type ClientPresence = {
   pointer?: Vec2
 }
 
-// ─── REST API ─────────────────────────────────────────────────────────────────
-//
-// POST   /sessions                          → CreateSessionResponse
-// GET    /sessions                          → ListSessionsResponse
-//
-// All error responses use ApiError.
-
-export type ApiError = {
-  error: string
-  code:
-    | 'SESSION_NOT_FOUND'
-    | 'TILE_NOT_FOUND'
-    | 'PLACEMENT_REJECTED'
-    | 'INVALID_REQUEST'
-    | 'INTERNAL_ERROR'
-}
-
 // ─── Validation Rules ─────────────────────────────────────────────────────────
 // These rules are enforced by the server's domain engine (placementSolver).
 // Clients MUST NOT assume a placement is valid without server authorization.
@@ -127,33 +110,23 @@ export type ApiError = {
 //    Reason: Tile collides with another settled tile or boundary.
 //    Client action: Remove optimistic tile; show "placement invalid" feedback.
 //
-// 2. SESSION_NOT_FOUND (404 on REST, not sent over Socket.IO)
-//    Reason: Session ID does not exist.
-//    Client action: Prompt user to create a new session or check session ID.
-//
-// 3. TILE_NOT_FOUND (404 on REST, not sent over Socket.IO)
+// 2. TILE_NOT_FOUND
 //    Reason: Attempted to remove a tile that doesn't exist.
 //    Client action: Likely a race condition; reconcile against latest broadcast.
 //
-// 4. Socket disconnect / reconnection
+// 3. Socket disconnect / reconnection
 //    Reason: Network failure or ACA idle timeout (240s).
 //    Socket.IO behavior: Automatic reconnection with exponential backoff.
-//    Client action: Queue mutations; replay on reconnect. Server sends session_snapshot
-//                   on reconnect to sync any missed broadcasts.
+//    Client action: Resubscribe with patch cursors to recover missed operations.
 //
-// 5. INVALID_REQUEST
+// 4. INVALID_REQUEST
 //    Reason: Malformed payload (e.g., invalid shape enum, missing required field).
 //    Client action: Log and alert user; check client version matches SCHEMA_VERSION.
 //
-// 6. INTERNAL_ERROR
+// 5. INTERNAL_ERROR
 //    Reason: Unexpected server error during validation or state mutation.
 //    Client action: Retry after a brief delay; if persistent, alert user and suggest
 //                   refreshing the page.
-
-export type CanvasSize = {
-  width: number
-  height: number
-}
 
 export type SafePrincipalProfile = {
   displayName?: string
@@ -161,7 +134,6 @@ export type SafePrincipalProfile = {
 }
 
 export type PrincipalCommandAvailability = {
-  createSession: boolean
   claimPatch: boolean
   createTransfer: boolean
   acceptTransfer: boolean
@@ -210,15 +182,6 @@ export type CanonicalWorldDescriptor = {
 
 export type CanonicalWorldEntryDescriptor = CanonicalWorldDescriptor & {
   entryAttemptId: string
-}
-
-export type CanonicalAttemptIssueRequest = {
-  kind: 'reconnect' | 'resubscribe'
-  parentAttemptId: string
-}
-
-export type CanonicalAttemptIssueResponse = {
-  attemptId: string
 }
 
 export type CanonicalWorldUnavailableError = SafeApiError & {
@@ -280,18 +243,8 @@ export type AccountDeletionResponse = {
 
 // ─── Socket.IO event contracts ────────────────────────────────────────────────
 //
-// Connection: client passes sessionId + clientId in socket.handshake.auth.
-// On connect the server calls socket.join(sessionId) and emits session_snapshot
-// to the connecting socket.
-//
-// Broadcast patterns:
-//   tile_placed, tile_removed, client_joined, client_left
-//     → io.to(sessionId).emit(...)          (all sockets in session room)
-//   pointer_update
-//     → socket.to(sessionId).emit(...)      (all sockets except sender)
-//
-// Request/response: place_tile and remove_tile use Socket.IO acknowledgements
-// so the calling client gets an inline result without a separate rejection event.
+// Clients identify the canonical quilt during the authenticated handshake. Room
+// membership is derived from authorized patch subscriptions.
 //
 // CONCURRENT EDITS — How simultaneous placements are handled:
 //
@@ -326,6 +279,7 @@ export type ConnectionAuth = {
   protocolVersion: typeof QUILT_PROTOCOL_VERSION
   canonicalGeneration: number
   entryAttemptId: string
+  lineageAttemptId?: string
 }
 
 /** Per-socket metadata stored by Socket.IO (accessible as socket.data). */
@@ -336,6 +290,8 @@ export type SocketData = {
   protocolVersion: typeof QUILT_PROTOCOL_VERSION
   canonicalGeneration: number
   entryAttemptId: string
+  lineageAttemptId: string
+  reconnectCycleLineageId?: string
   principalId: string
   tokenExpiresAt: number
 }
@@ -566,7 +522,7 @@ export type SubscribeQuiltAreaAck = {
   acceptedCursors: Record<string, QuiltPatchCursor>
 }
 
-export type QuiltScopedSnapshotPayload = {
+export type QuiltScopedStatePayload = {
   quiltId: string
   canonicalRoomId: string
   patchId: string
@@ -615,14 +571,16 @@ export interface ClientToServerEvents {
 
 /** Events emitted by the server, received by clients. */
 export interface ServerToClientEvents {
+  /** Rotates the principal-bound lineage used to authorize later reconnect cycles. */
+  canonical_lineage: (payload: { lineageAttemptId: string }) => void
   /** Announces the selected transport protocol and immutable quilt topology. */
   quilt_protocol: (payload: QuiltProtocolHandshake) => void
-  /** Broadcast to all sockets in the session room when a peer connects. */
+  /** Announces a principal's first active presence lease in the canonical quilt. */
   client_joined: (payload: ClientJoinedPayload) => void
-  /** Broadcast to all sockets in the session room when a peer disconnects. */
+  /** Announces release of a principal's final active presence lease. */
   client_left: (payload: ClientLeftPayload) => void
   /** Reconstructable protocol-v2 snapshot scoped to one accepted room. */
-  quilt_patch_snapshot: (payload: QuiltScopedSnapshotPayload) => void
+  quilt_patch_state: (payload: QuiltScopedStatePayload) => void
   /** Durable protocol-v2 event scoped to one accepted room. */
   quilt_patch_event: (payload: QuiltPatchEventPayload) => void
   /** Requests cursor-based recovery for one accepted room. */
@@ -631,41 +589,3 @@ export interface ServerToClientEvents {
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */
 export interface InterServerEvents {}
-
-// ─── FORMAL AGREEMENT ────────────────────────────────────────────────────────
-//
-// This section documents what BOTH client and server teams commit to.
-// Any future changes to this contract MUST be reviewed and approved by both teams.
-//
-// CLIENT TEAM COMMITS TO:
-//   ✓ Using SCHEMA_VERSION to detect compatibility issues.
-//   ✓ Implementing optimistic placement (show tiles before server ack).
-//   ✓ Handling place_tile ack responses correctly (accept/reject, use server ID).
-//   ✓ Reconciling state when tile_placed / tile_removed broadcasts arrive.
-//   ✓ Merging session_snapshot after reconnection (ground truth sync).
-//   ✓ Handling all error codes in ApiError and all rejection reasons in PlaceTileAck.
-//
-// SERVER TEAM COMMITS TO:
-//   ✓ Assigning tile IDs server-side; never trusting client-provided IDs.
-//   ✓ Validating every placement against the current authoritative state using the
-//     domain engine (placementSolver with SAT collision detection).
-//   ✓ Responding to place_tile with either accepted (placed: TileInstance) or
-//     rejected (reason: string) within the ack callback.
-//   ✓ Broadcasting tile_placed / tile_removed / pointer_update to all affected clients.
-//   ✓ Sending session_snapshot on connection and after reconnection.
-//   ✓ Using consistent error codes and messages as defined in ApiError.
-//   ✓ Maintaining a single authoritative Session.tiles array; clients are never the source of truth.
-//
-// CONCURRENT EDIT HANDLING (BOTH TEAMS):
-//   ✓ Server validates each placement against the CURRENT state at that moment.
-//   ✓ If two placements conflict, the server responds with accepted/rejected based on
-//     the order received and current state.
-//   ✓ Clients receive authoritative broadcasts and reconcile locally stored state.
-//   ✓ Conflict resolution is deterministic (first-write-wins on the server).
-//
-// VERSIONING:
-//   ✓ If the contract changes, SCHEMA_VERSION MUST increment.
-//   ✓ Breaking changes: new required fields, removed events, renamed event names, changed error codes.
-//   ✓ Non-breaking changes: new optional fields, new events, new error codes (old clients still work).
-//   ✓ Client SHOULD warn if server schema version does not match; server SHOULD enforce minimum version.
-

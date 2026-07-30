@@ -144,6 +144,19 @@ Steps 3.1 and 3.2 execute sequentially because both integrate through `App.tsx` 
 * [x] Step 7.4: Repair placement acceptance and rerun release validation
   * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 7, Step 7.4)
 
+### [x] Implementation Phase 8: Close Final Quality Review Findings
+
+<!-- parallelizable: false -->
+
+* [x] Step 8.1: Bind child attempts to observed cycles and preserve long-lived lineage
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 8, Step 8.1)
+* [x] Step 8.2: Remove compiled session contracts and test live product boundaries
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 8, Step 8.2)
+* [x] Step 8.3: Isolate standard Playwright state and correct release artifacts
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 8, Step 8.3)
+* [x] Step 8.4: Rerun complete release validation
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 8, Step 8.4)
+
 ## Planning Log
 
 See `.copilot-tracking/plans/logs/2026-07-29/canonical-infinite-canvas-convergence-log.md`
@@ -158,6 +171,7 @@ for discrepancy tracking, implementation paths considered, and suggested follow-
 * Runtime client configuration and Azure Container Apps deployment propagation
 * Phase 6 implementation review findings IV-001 through IV-012
 * Phase 7 resumed review findings IV-003, IV-004, IV-007, and IV-010 through IV-014
+* Phase 8 quality review findings IV-004, IV-007, and IV-010 through IV-016
 
 ## Success Criteria
 

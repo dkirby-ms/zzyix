@@ -117,7 +117,6 @@ describe('useSocketConnection collaboration subscriptions', () => {
 
     expect(ioMock).toHaveBeenCalledTimes(1)
     expect(socket.on).toHaveBeenCalledWith('quilt_protocol', expect.any(Function))
-    expect(socket.on).not.toHaveBeenCalledWith('session_snapshot', expect.any(Function))
     expect(socket.on).not.toHaveBeenCalledWith('tile_placed', expect.any(Function))
     expect(socket.on).not.toHaveBeenCalledWith('tile_removed', expect.any(Function))
     expect(socket.on).not.toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
@@ -128,12 +127,9 @@ describe('useSocketConnection collaboration subscriptions', () => {
   })
 
   it('delivers bounded reconnect recovery and exhaustion terminals', async () => {
-    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
-      const url = input.toString()
-      return url.endsWith('/attempts')
-        ? new Response(JSON.stringify({ attemptId: '30000000-0000-4000-8000-000000000001' }), { status: 201 })
-        : new Response(null, { status: 202 })
-    })
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => (
+      new Response(null, { status: 202 })
+    ))
     vi.stubGlobal('fetch', fetchMock)
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)
@@ -141,8 +137,10 @@ describe('useSocketConnection collaboration subscriptions', () => {
 
     const disconnect = registeredHandler<(reason: string) => void>(socket, 'disconnect')
     const connect = registeredHandler<() => void>(socket, 'connect')
+    const lineage = registeredHandler<(payload: { lineageAttemptId: string }) => void>(socket, 'canonical_lineage')
     const reconnectAttempt = registeredManagerHandler<() => void>(socket, 'reconnect_attempt')
     const reconnectFailed = registeredManagerHandler<() => void>(socket, 'reconnect_failed')
+    lineage({ lineageAttemptId: '30000000-0000-4000-8000-000000000001' })
 
     disconnect('transport close')
     reconnectAttempt()
@@ -156,23 +154,17 @@ describe('useSocketConnection collaboration subscriptions', () => {
     reconnectAttempt()
     reconnectFailed()
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      new URL('http://localhost:3001/quilts/canonical/attempts'),
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining('"kind":"reconnect"'),
-      }),
-    ))
-    expect(fetchMock).toHaveBeenCalledWith(
       new URL('http://localhost:3001/quilts/canonical/telemetry'),
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
           authorization: 'Bearer access-token',
-          'x-canonical-attempt-id': '30000000-0000-4000-8000-000000000001',
+          'x-canonical-lineage-id': '30000000-0000-4000-8000-000000000001',
         }),
         body: expect.stringContaining('"outcome":"exhausted"'),
       }),
-    )
+    ))
+    expect(fetchMock.mock.calls.some(([input]) => input.toString().endsWith('/attempts'))).toBe(false)
   })
 
   it('does not restore retired chunk events when the legacy option is enabled', () => {
@@ -288,7 +280,6 @@ describe('useSocketConnection collaboration subscriptions', () => {
     unmount()
 
     expect(socket.off).toHaveBeenCalledWith('quilt_protocol', expect.any(Function))
-    expect(socket.off).not.toHaveBeenCalledWith('session_snapshot', expect.any(Function))
     expect(socket.off).not.toHaveBeenCalledWith('tile_placed', expect.any(Function))
     expect(socket.off).not.toHaveBeenCalledWith('tile_removed', expect.any(Function))
     expect(socket.off).not.toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
@@ -354,6 +345,14 @@ describe('useSocketConnection collaboration subscriptions', () => {
     }))
     expect(ioMock.mock.calls[0]?.[0]).toBe('https://api.example.test')
     expect(ioMock.mock.calls[0]?.[0]).not.toContain('access-token')
+
+    const lineage = registeredHandler<(payload: { lineageAttemptId: string }) => void>(socket, 'canonical_lineage')
+    lineage({ lineageAttemptId: '30000000-0000-4000-8000-000000000001' })
+    callback.mockClear()
+    await options.auth(callback)
+    expect(callback).toHaveBeenCalledWith(expect.objectContaining({
+      lineageAttemptId: '30000000-0000-4000-8000-000000000001',
+    }))
   })
 
   it('forces one renewal and reconnects after an authentication failure', async () => {

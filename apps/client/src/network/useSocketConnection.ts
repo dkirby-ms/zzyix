@@ -9,7 +9,7 @@ import type {
   QuiltPatchEventPayload,
   QuiltPatchResyncRequiredPayload,
   QuiltProtocolHandshake,
-  QuiltScopedSnapshotPayload,
+  QuiltScopedStatePayload,
   CanonicalWorldEntryDescriptor,
   CanonicalClientTelemetry,
 } from '../../../server/src/contracts'
@@ -26,7 +26,7 @@ export const useSocketConnection = (
   onClientJoined?: (payload: ClientJoinedPayload) => void,
   onClientLeft?: (payload: ClientLeftPayload) => void,
   onQuiltProtocol?: (payload: QuiltProtocolHandshake) => void,
-  onQuiltPatchSnapshot?: (payload: QuiltScopedSnapshotPayload) => void,
+  onQuiltPatchState?: (payload: QuiltScopedStatePayload) => void,
   onQuiltPatchEvent?: (payload: QuiltPatchEventPayload) => void,
   onQuiltPatchResyncRequired?: (payload: QuiltPatchResyncRequiredPayload) => void,
   acquireAccessToken?: AccessTokenProvider,
@@ -53,6 +53,7 @@ export const useSocketConnection = (
     let entryReported = false
     let disconnectedAt: number | null = null
     let reconnectAttempts = 0
+    let lineageAttemptId: string | undefined
 
     const socket: AppSocket = io(serverUrl, {
       autoConnect: false,
@@ -67,6 +68,7 @@ export const useSocketConnection = (
             protocolVersion: 2,
             canonicalGeneration,
             entryAttemptId,
+            ...(lineageAttemptId ? { lineageAttemptId } : {}),
           })
         } catch (error) {
           onAuthLoss?.(isInteractionRequiredError(error) ? 'interaction_required' : 'authentication_failed', error)
@@ -87,30 +89,16 @@ export const useSocketConnection = (
       }
       try {
         const token = await acquireAccessToken()
-        let attemptId = entryAttemptId
-        let body: CanonicalClientTelemetry & { parentAttemptId?: string } = payload
-        if (payload.name !== 'canonical_entry') {
-          const attemptResponse = await fetch(new URL('/quilts/canonical/attempts', serverUrl || location.origin), {
-            method: 'POST',
-            headers: {
-              authorization: `Bearer ${token}`,
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({ kind: payload.name === 'canonical_reconnect' ? 'reconnect' : 'resubscribe', parentAttemptId: entryAttemptId }),
-            keepalive: true,
-          })
-          if (!attemptResponse.ok) return
-          attemptId = (await attemptResponse.json() as { attemptId: string }).attemptId
-          body = { ...payload, parentAttemptId: entryAttemptId }
-        }
+        if (payload.name !== 'canonical_entry' && !lineageAttemptId) return
         await fetch(new URL('/quilts/canonical/telemetry', serverUrl || location.origin), {
           method: 'POST',
           headers: {
             authorization: `Bearer ${token}`,
             'content-type': 'application/json',
-            'x-canonical-attempt-id': attemptId,
+            'x-canonical-attempt-id': entryAttemptId,
+            ...(lineageAttemptId ? { 'x-canonical-lineage-id': lineageAttemptId } : {}),
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify(payload),
           keepalive: true,
         })
       } catch {
@@ -157,6 +145,11 @@ export const useSocketConnection = (
       onConnectionEpoch?.(connectionEpoch)
       console.log('✅ Socket.IO connected:', { quiltId, socketId: socket.id })
     })
+
+    const handleCanonicalLineage = (payload: { lineageAttemptId: string }): void => {
+      lineageAttemptId = payload.lineageAttemptId
+    }
+    socket.on('canonical_lineage', handleCanonicalLineage)
 
     socket.on('connect_error', (error: Error & { data?: { code?: string } }) => {
       console.error('❌ Socket.IO connection error:', error.message)
@@ -226,7 +219,7 @@ export const useSocketConnection = (
       onQuiltProtocol?.(payload)
     }
     socket.on('quilt_protocol', handleProtocol)
-    if (onQuiltPatchSnapshot) socket.on('quilt_patch_snapshot', onQuiltPatchSnapshot)
+    if (onQuiltPatchState) socket.on('quilt_patch_state', onQuiltPatchState)
     if (onQuiltPatchEvent) socket.on('quilt_patch_event', onQuiltPatchEvent)
     if (onQuiltPatchResyncRequired) socket.on('quilt_patch_resync_required', onQuiltPatchResyncRequired)
     if (onClientJoined) {
@@ -245,7 +238,8 @@ export const useSocketConnection = (
     return () => {
       cancelled = true
       socket.off('quilt_protocol', handleProtocol)
-      if (onQuiltPatchSnapshot) socket.off('quilt_patch_snapshot', onQuiltPatchSnapshot)
+      socket.off('canonical_lineage', handleCanonicalLineage)
+      if (onQuiltPatchState) socket.off('quilt_patch_state', onQuiltPatchState)
       if (onQuiltPatchEvent) socket.off('quilt_patch_event', onQuiltPatchEvent)
       if (onQuiltPatchResyncRequired) socket.off('quilt_patch_resync_required', onQuiltPatchResyncRequired)
       if (onClientJoined) {
@@ -270,7 +264,7 @@ export const useSocketConnection = (
     onClientJoined,
     onClientLeft,
     onQuiltProtocol,
-    onQuiltPatchSnapshot,
+    onQuiltPatchState,
     onQuiltPatchEvent,
     onQuiltPatchResyncRequired,
     acquireAccessToken,

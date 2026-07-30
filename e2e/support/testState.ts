@@ -3,20 +3,13 @@ import { expect, type APIRequestContext } from '@playwright/test'
 const SERVER_URL = process.env.E2E_SERVER_URL ?? 'http://127.0.0.1:3101'
 const TEST_RESET_TOKEN = process.env.E2E_RESET_TOKEN ?? 'zzyix-e2e-token'
 
-type CanvasSizePreset = 'classic' | 'expanded' | 'vast'
-
 export type ResetSharedCanvasOptions = {
-  createSession?: boolean
   createCanonicalWorld?: boolean
-  canvasPreset?: CanvasSizePreset
   ownerExternalSubject?: string
 }
 
 export type ResetSharedCanvasResult = {
   reset: true
-  session?: {
-    id: string
-  }
   canonical?: {
     quiltId: string
     patchId: string
@@ -34,9 +27,7 @@ export const resetSharedCanvasState = async (
       'content-type': 'application/json',
     },
     data: {
-      createSession: options.createSession ?? false,
       createCanonicalWorld: options.createCanonicalWorld ?? false,
-      canvasPreset: options.canvasPreset,
       ownerExternalSubject: options.ownerExternalSubject,
     },
   })
@@ -46,17 +37,16 @@ export const resetSharedCanvasState = async (
   return (await response.json()) as ResetSharedCanvasResult
 }
 
-export const createIsolatedSharedCanvas = async (
+export const createIsolatedCanonicalQuilt = async (
   request: APIRequestContext,
-  options: Omit<ResetSharedCanvasOptions, 'createSession'> = {},
-): Promise<{ sessionId: string }> => {
+  options: ResetSharedCanvasOptions = {},
+): Promise<{ quiltId: string }> => {
   const result = await resetSharedCanvasState(request, {
     createCanonicalWorld: true,
-    canvasPreset: options.canvasPreset,
     ownerExternalSubject: options.ownerExternalSubject,
   })
 
   expect(result.canonical, 'test reset should seed a canonical quilt').toBeTruthy()
 
-  return { sessionId: result.canonical!.quiltId }
+  return { quiltId: result.canonical!.quiltId }
 }

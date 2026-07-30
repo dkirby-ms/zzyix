@@ -1,5 +1,5 @@
 import { expect, test as base, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
-import { createIsolatedSharedCanvas, resetSharedCanvasState, type ResetSharedCanvasOptions } from './testState'
+import { createIsolatedCanonicalQuilt, resetSharedCanvasState } from './testState'
 import type { PlaceTileAck } from '../../apps/server/src/contracts'
 
 const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
@@ -8,8 +8,6 @@ const SERVER_TILE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab]
 
 type CanvasConnectionStatus = 'connecting' | 'connected' | 'disconnecting' | 'disconnected' | 'error'
 type CanvasMode = 'lobby' | 'canvas'
-type CanvasSizePreset = NonNullable<ResetSharedCanvasOptions['canvasPreset']>
-
 export type CanvasTileSnapshot = {
   id: string
   shape: 'square' | 'triangle' | 'rectangle' | 'l-shape'
@@ -40,6 +38,9 @@ export type CanvasStateSnapshot = {
     mirrored: boolean
   }
   tiles: CanvasTileSnapshot[]
+  metrics: {
+    optimisticCount: number
+  }
 }
 
 type CanvasTestApi = {
@@ -95,7 +96,6 @@ export type MultiUserSession = {
 
 export type CreateMultiUserSessionOptions = {
   userCount?: number
-  canvasPreset?: CanvasSizePreset
 }
 
 type CreateMultiUserSession = (options?: CreateMultiUserSessionOptions) => Promise<MultiUserSession>
@@ -340,7 +340,7 @@ const closeContext = async (openContexts: Set<BrowserContext>, context: BrowserC
   await context.close()
 }
 
-const createSessionFactory = (
+const createQuiltFactory = (
   browser: Browser,
   request: APIRequestContext,
   clientUrl: string,
@@ -350,8 +350,7 @@ const createSessionFactory = (
   expect(userCount).toBeGreaterThanOrEqual(2)
   const ownerExternalSubject = `e2e-browser-owner-${crypto.randomUUID()}`
 
-  const { sessionId } = await createIsolatedSharedCanvas(request, {
-    canvasPreset: options.canvasPreset ?? 'expanded',
+  const { quiltId } = await createIsolatedCanonicalQuilt(request, {
     ownerExternalSubject,
   })
 
@@ -383,7 +382,7 @@ const createSessionFactory = (
   }
 
   return {
-    sessionId,
+    sessionId: quiltId,
     users,
     close: async () => {
       await Promise.all(users.map(async (user) => closeContext(openContexts, user.context)))
@@ -396,7 +395,7 @@ export const test = base.extend<{ createMultiUserSession: CreateMultiUserSession
   createMultiUserSession: async ({ browser, request, baseURL }, use) => {
     const openContexts = new Set<BrowserContext>()
     const clientUrl = baseURL ?? DEFAULT_CLIENT_URL
-    const createMultiUserSession = createSessionFactory(browser, request, clientUrl, openContexts)
+    const createMultiUserSession = createQuiltFactory(browser, request, clientUrl, openContexts)
 
     await use(createMultiUserSession)
 

@@ -3,11 +3,7 @@ title: Canonical Finite Toroidal Quilt Architecture Decision
 description: Product, topology, identity, authorization, and operating budget contract for the canonical quilt
 ms.date: 2026-07-29
 ms.topic: concept
-keywords:
-  - quilt topology
-  - patch authorization
-   - canonical quilt
-  - realtime collaboration
+keywords: [quilt topology, patch authorization, canonical quilt, realtime collaboration]
 ---
 
 ## Status

@@ -50,7 +50,7 @@ import type {
   QuiltPlaceTileRequest,
   QuiltRemoveTileAck,
   QuiltRemoveTileRequest,
-  QuiltScopedSnapshotPayload,
+  QuiltScopedStatePayload,
   QuiltTopologyHandshake,
   CanonicalWorldEntryDescriptor,
 } from '../../server/src/contracts'
@@ -676,7 +676,7 @@ function ProtectedApp() {
     auth.handleAuthLoss(reason, error)
   }, [auth, clearProtectedWorldState])
 
-  const onQuiltPatchSnapshot = useCallback((payload: QuiltScopedSnapshotPayload): void => {
+  const onQuiltPatchState = useCallback((payload: QuiltScopedStatePayload): void => {
     quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
     setQuiltCache((previous) => mergeQuiltPatchSnapshot(previous, {
       patchId: payload.patchId,
@@ -786,7 +786,7 @@ function ProtectedApp() {
     onClientJoined,
     onClientLeft,
     onQuiltProtocol,
-    onQuiltPatchSnapshot,
+    onQuiltPatchState,
     onQuiltPatchEvent,
     onQuiltPatchResyncRequired,
     auth.acquireAccessToken,

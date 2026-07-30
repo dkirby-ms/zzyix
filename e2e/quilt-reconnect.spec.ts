@@ -8,7 +8,7 @@ import type {
   QuiltPlaceTileAck,
   QuiltProtocolHandshake,
   QuiltRemoveTileAck,
-  QuiltScopedSnapshotPayload,
+  QuiltScopedStatePayload,
   ServerToClientEvents,
   SubscribeQuiltAreaAck,
 } from '../apps/server/src/contracts'
@@ -155,9 +155,9 @@ test('reconnects through another replica with cursor convergence and an attachme
   const { socket: second, protocol: secondProtocol } = await connect(REPLICA_B, quiltId, ownerToken)
   expect(secondProtocol.topology?.topology).toBe('toroidal')
   expect(secondProtocol.mutationEnabled).toBe(true)
-  const aggregateSnapshotPromise = onceMatching<QuiltScopedSnapshotPayload>(
+  const aggregateSnapshotPromise = onceMatching<QuiltScopedStatePayload>(
     second,
-    'quilt_patch_snapshot',
+    'quilt_patch_state',
     (payload) => payload.payloadMode === 'aggregate',
   )
   const subscription = await new Promise<SubscribeQuiltAreaAck>((resolve) => second.emit('subscribe_quilt_area', {

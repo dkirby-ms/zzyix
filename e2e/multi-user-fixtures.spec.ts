@@ -23,13 +23,19 @@ const collectIdentityCounts = (tiles: CanvasTileSnapshot[]): Map<string, number>
 }
 
 const expectAcceptedTilesExactlyOnceAcrossUsers = async (users: CanvasUser[], expectedTiles: CanvasTileSnapshot[]): Promise<void> => {
-  const expectedIdentityCounts = collectIdentityCounts(expectedTiles)
+  const expectedIdentityCounts = Array.from(collectIdentityCounts(expectedTiles)).sort(([left], [right]) => left.localeCompare(right))
 
   for (const user of users) {
-    const state = await user.getState()
-    const actualIdentityCounts = collectIdentityCounts(state.tiles)
-
-    expect(actualIdentityCounts).toEqual(expectedIdentityCounts)
+    await expect.poll(async () => {
+      const state = await user.getState()
+      return {
+        identities: Array.from(collectIdentityCounts(state.tiles)).sort(([left], [right]) => left.localeCompare(right)),
+        optimisticCount: state.metrics.optimisticCount,
+      }
+    }, { message: `${user.name} should converge to exact authoritative tile state` }).toEqual({
+      identities: expectedIdentityCounts,
+      optimisticCount: 0,
+    })
   }
 }
 
@@ -51,7 +57,7 @@ const expectTileObservedByPeer = async (
 }
 
 test('owner placements converge for collaborators while non-owner mutation is denied', async ({ createMultiUserSession }) => {
-  const session = await createMultiUserSession({ userCount: 2, canvasPreset: 'expanded' })
+  const session = await createMultiUserSession({ userCount: 2 })
   const [userA, userB] = session.users
 
   await userA.waitForConnection('connected')
@@ -100,7 +106,7 @@ test('owner placements converge for collaborators while non-owner mutation is de
 })
 
 test('near-simultaneous owner and non-owner placements preserve authorization and convergence', async ({ createMultiUserSession }) => {
-  const session = await createMultiUserSession({ userCount: 2, canvasPreset: 'expanded' })
+  const session = await createMultiUserSession({ userCount: 2 })
   const [userA, userB] = session.users
 
   await userA.waitForConnection('connected')
@@ -147,7 +153,7 @@ test('near-simultaneous owner and non-owner placements preserve authorization an
 })
 
 test('stale revision rejection triggers resync and successful retry convergence', async ({ createMultiUserSession }) => {
-  const session = await createMultiUserSession({ userCount: 2, canvasPreset: 'expanded' })
+  const session = await createMultiUserSession({ userCount: 2 })
   const [userA, userB] = session.users
 
   await userA.waitForConnection('connected')
@@ -211,7 +217,7 @@ test('stale revision rejection triggers resync and successful retry convergence'
 })
 
 test('out-of-order revision rejection allows clean retry and convergence', async ({ createMultiUserSession }) => {
-  const session = await createMultiUserSession({ userCount: 2, canvasPreset: 'expanded' })
+  const session = await createMultiUserSession({ userCount: 2 })
   const [userA, userB] = session.users
 
   await userA.waitForConnection('connected')

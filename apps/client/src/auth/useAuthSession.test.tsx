@@ -106,7 +106,6 @@ describe('AuthSessionProvider', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       profile: { displayName: 'Ada' },
       commands: {
-        createSession: true,
         claimPatch: true,
         createTransfer: true,
         acceptTransfer: true,
@@ -139,7 +138,6 @@ describe('AuthSessionProvider', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       profile: { displayName: 'Ada' },
       commands: {
-        createSession: true,
         claimPatch: true,
         createTransfer: true,
         acceptTransfer: true,
@@ -170,7 +168,6 @@ describe('AuthSessionProvider', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       profile: { displayName: 'Ada' },
       commands: {
-        createSession: true,
         claimPatch: true,
         createTransfer: true,
         acceptTransfer: true,

@@ -641,6 +641,106 @@ Success criteria:
 * PostgreSQL, standard Playwright, multi-replica Playwright, and migration evidence is retained
 * Release artifacts report readiness only after every critical and major finding is closed
 
+## Implementation Phase 8: Close Final Quality Review Findings
+
+<!-- parallelizable: false -->
+
+Source:
+
+* `.copilot-tracking/reviews/2026-07-29/canonical-infinite-canvas-convergence-plan-quality-phase7.md`
+
+### Step 8.1: Bind child attempts to observed cycles and preserve long-lived lineage
+
+Issue reconnect and resubscribe child attempts only from server-observed socket cycles. Bind
+each cycle to its authenticated principal, socket lineage, cycle kind, and single-use nonce,
+then atomically consume the observation when issuing or recording its terminal. Separate or
+rotate durable reconnect lineage before the short-lived entry authorization expires so a
+long-lived authenticated session can reconnect without accepting fabricated lineage.
+
+Files:
+
+* `apps/server/src/migration/canonicalAttempts.ts`
+* `apps/server/src/migration/canonicalAttempts.postgres.integration.test.ts`
+* `apps/server/src/contracts.ts`
+* `apps/server/src/index.ts`
+* `apps/server/src/index.integration.test.ts`
+* `apps/client/src/network/useSocketConnection.ts`
+* `apps/client/src/network/useSocketConnection.test.ts`
+
+Success criteria:
+
+* A child attempt can be issued only for one server-observed reconnect or resubscribe cycle
+* Replayed, foreign, fabricated, or duplicate cycle observations cannot add terminal volume
+* Clock-controlled tests prove reconnect remains supported after the original entry attempt expires
+* Cross-replica issuance and consumption remain atomic through PostgreSQL
+
+### Step 8.2: Remove compiled session contracts and test live product boundaries
+
+Remove session-era routes, errors, snapshot events, room aliases, and `/me` command fields
+from public compiled contracts. Keep retention-only database shapes internal. Replace helper
+assertions for navigation, claim, and presence with live authenticated HTTP and Socket.IO
+integration coverage backed by isolated PostgreSQL.
+
+Files:
+
+* `apps/server/src/contracts.ts`
+* `apps/server/src/auth/httpAuth.ts`
+* `apps/server/src/index.ts`
+* `apps/server/src/index.integration.test.ts`
+* Related tests and consumers identified by symbol references
+
+Success criteria:
+
+* Public compiled contracts contain no retired session or snapshot semantics
+* `/me` does not advertise retired session commands
+* Navigation and claim tests traverse authenticated HTTP routes
+* Presence lifecycle tests traverse authenticated sockets through disconnect cleanup
+
+### Step 8.3: Isolate standard Playwright state and correct release artifacts
+
+Find and remove cross-test fixture or optimistic-state leakage in the standard Playwright
+suite. Make the multi-user placed-count oracle independent of execution order while retaining
+its product assertion. Correct ADR YAML indentation and keep plan, changes, and planning logs
+blocked until the complete validation in Step 8.4 passes.
+
+Files:
+
+* `e2e/multi-user-fixtures.spec.ts`
+* `e2e/support/testState.ts`
+* Related client optimistic-state code and Playwright fixtures identified by the failing order
+* `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md`
+* Phase tracking artifacts
+
+Success criteria:
+
+* The full standard Playwright suite passes repeatedly without retries or order dependence
+* The multi-user case still proves authoritative convergence and exact durable placement
+* ADR frontmatter parses as YAML with aligned keyword indentation
+* Release artifacts match observed evidence and remain blocked on any failed required check
+
+### Step 8.4: Rerun complete release validation
+
+Validation commands:
+
+* `npm run test:release-contract`
+* Focused server canonical-attempt, live-boundary, authentication, and retirement-report tests
+* Focused client socket and application tests
+* `npm run lint`
+* `npm run build`
+* `npm test`
+* Two consecutive `npm run test:e2e` runs
+* `TEST_DATABASE_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run test:e2e:multi-replica`
+* `./scripts/verify-quilt-migration.sh rehearse`
+* `git diff --check`
+* Verify ports 3001 and 5173 are clear after validation
+
+Success criteria:
+
+* Every Critical and Major quality finding has a passing regression at its live boundary
+* Both consecutive standard Playwright runs pass in full
+* Multi-replica Playwright, PostgreSQL suites, and migration rehearsal pass
+* Release logs report exact observed counts, skips, warnings, and remaining blockers
+
 ## Implementation Phase 7: Close Resumed Review Findings
 
 <!-- parallelizable: false -->
@@ -750,6 +850,7 @@ Success criteria:
 * Existing quilt protocol-V2, authorization, recovery, and telemetry mechanisms
 * Implementation review findings IV-001 through IV-012
 * Resumed implementation review findings IV-003, IV-004, IV-007, and IV-010 through IV-014
+* Final quality review findings IV-004, IV-007, and IV-010 through IV-016
 
 ## Success Criteria
 
