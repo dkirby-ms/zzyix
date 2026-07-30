@@ -118,7 +118,7 @@ Steps 3.1 and 3.2 execute sequentially because both integrate through `App.tsx` 
 * [x] Step 5.3: Report issues requiring new product or architecture planning
   * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Lines 533-538)
 
-### [ ] Implementation Phase 6: Remediate Implementation Review Findings
+### [x] Implementation Phase 6: Remediate Implementation Review Findings
 
 <!-- parallelizable: false -->
 
@@ -128,8 +128,21 @@ Steps 3.1 and 3.2 execute sequentially because both integrate through `App.tsx` 
   * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 6, Step 6.2)
 * [x] Step 6.3: Enforce canonical provenance, presence lease loss, and runtime retirement
   * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 6, Step 6.3)
-* [ ] Step 6.4: Add composed boundary coverage and rerun release validation
+* [x] Step 6.4: Add composed boundary coverage and rerun release validation
   * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 6, Step 6.4)
+
+### [x] Implementation Phase 7: Close Resumed Review Findings
+
+<!-- parallelizable: false -->
+
+* [x] Step 7.1: Install retirement evidence on every deployment path
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 7, Step 7.1)
+* [x] Step 7.2: Issue server-owned entry and reconnect attempt lineage
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 7, Step 7.2)
+* [x] Step 7.3: Remove residual contracts and compose live product boundaries
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 7, Step 7.3)
+* [x] Step 7.4: Repair placement acceptance and rerun release validation
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 7, Step 7.4)
 
 ## Planning Log
 
@@ -144,6 +157,7 @@ for discrepancy tracking, implementation paths considered, and suggested follow-
 * Existing protocol-V2, patch authorization, recovery, and telemetry mechanisms
 * Runtime client configuration and Azure Container Apps deployment propagation
 * Phase 6 implementation review findings IV-001 through IV-012
+* Phase 7 resumed review findings IV-003, IV-004, IV-007, and IV-010 through IV-014
 
 ## Success Criteria
 

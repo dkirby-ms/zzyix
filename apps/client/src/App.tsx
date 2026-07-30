@@ -12,13 +12,10 @@ import type { TileShape } from './domain/tileGeometry'
 import { GRID_PATTERNS, getConstructibleGridPatterns } from './domain/gridPatterns'
 import type { GridPatternId } from './domain/gridPatterns'
 import {
-  applySequencedSnapshot,
   createInitialGhost,
   createInitialSequencedTilesState,
   createServerTileId,
   isServerTileId,
-  reconcileSequencedTilePlaced,
-  reconcileSequencedTileRemoved,
   stepGhost,
   tryPlaceTile,
   updateGhostTarget,
@@ -41,23 +38,10 @@ import type { AuthLossReason } from './network/authenticatedFetch'
 import { StatusIndicator } from './ui/StatusIndicator'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
-  BoundsPolicy,
   CanonicalPatchNavigation,
   ClientJoinedPayload,
   ClientLeftPayload,
   PlaceTilePayload,
-  PointerUpdatePayload,
-  SelectionUpdatePayload,
-  ResyncRequiredPayload,
-  SessionSnapshotPayload,
-  TilePlacedPayload,
-  TileRemovedPayload,
-  ChunkResyncRequiredPayload,
-  ChunkSnapshotPayload,
-  ChunkTilePlacedPayload,
-  ChunkTileRemovedPayload,
-  ChunkPayloadMode,
-  RealtimeCapabilities,
   QuiltPatchCursor,
   QuiltPatchEventPayload,
   QuiltPatchResyncRequiredPayload,
@@ -68,7 +52,7 @@ import type {
   QuiltRemoveTileRequest,
   QuiltScopedSnapshotPayload,
   QuiltTopologyHandshake,
-  CanonicalWorldDescriptor,
+  CanonicalWorldEntryDescriptor,
 } from '../../server/src/contracts'
 import { decomposeWrappedViewport } from '../../server/src/domain/quiltTopology'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
@@ -84,7 +68,6 @@ import {
   COLLABORATOR_CLEANUP_INTERVAL_MS,
   evictStaleCollaboratorSignals,
   formatCollaboratorLabel,
-  mergeCollaboratorsFromSnapshot,
   updateCollaborator,
   type RemoteCollaboratorMap,
 } from './domain/collaboratorUtils'
@@ -101,7 +84,6 @@ import {
   selectQuiltCursors,
   selectQuiltTiles,
   setQuiltOptimisticTile,
-  setQuiltSelection,
   setQuiltUndoMetadata,
   type QuiltCacheState,
 } from './domain/quiltCache'
@@ -378,19 +360,7 @@ const expectedPatchRevisions = (
   cache.patches[patchId]?.cursor.revision,
 ]).filter((entry): entry is [string, number] => entry[1] !== undefined))
 
-const shouldReplaceChunkTilesForSnapshot = (payloadMode: ChunkPayloadMode): boolean => payloadMode === 'fine'
-
 const DEFAULT_WORLD_BOUNDS = DEFAULT_BOUNDED_WORLD_BOUNDS
-
-const resolveWorldBounds = (canvasPolicy: BoundsPolicy | undefined, sessionPolicy: BoundsPolicy | undefined) => {
-  const policy = canvasPolicy ?? sessionPolicy
-
-  if (policy?.mode === 'bounded') {
-    return policy.bounds
-  }
-
-  return DEFAULT_WORLD_BOUNDS
-}
 
 function ProtectedApp() {
   const auth = useAuthSession()
@@ -419,7 +389,7 @@ function ProtectedApp() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
   const [canonicalError, setCanonicalError] = useState<string | null>(null)
-  const [canonicalDescriptor, setCanonicalDescriptor] = useState<CanonicalWorldDescriptor | null>(null)
+  const [canonicalDescriptor, setCanonicalDescriptor] = useState<CanonicalWorldEntryDescriptor | null>(null)
   const [canonicalPatches, setCanonicalPatches] = useState<CanonicalPatchNavigation[]>([])
   const [canonicalNavigationError, setCanonicalNavigationError] = useState<string | null>(null)
   const [canonicalNavigationLoading, setCanonicalNavigationLoading] = useState(false)
@@ -428,7 +398,6 @@ function ProtectedApp() {
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
-  const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
   const [quiltProtocol, setQuiltProtocol] = useState<QuiltProtocolHandshake | null>(null)
   const [quiltCache, setQuiltCache] = useState<QuiltCacheState>(createQuiltCache)
   const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
@@ -467,7 +436,6 @@ function ProtectedApp() {
   })
   const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const clientId = useMemo(() => ensureClientId(), [])
-  const entryAttemptId = useMemo(() => crypto.randomUUID(), [])
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
@@ -541,7 +509,6 @@ function ProtectedApp() {
     setCanonicalNavigationLoading(false)
     setCanonicalClaimingPatchId(null)
     setFocusedCanonicalPatch(null)
-    setRealtimeCapabilities(null)
     setQuiltProtocol(null)
     setQuiltCache(createQuiltCache())
     setSequencedState(createInitialSequencedTilesState())
@@ -685,28 +652,10 @@ function ProtectedApp() {
     window.setTimeout(() => setInvalidPulse(false), 180)
   }, [])
 
-  const requestSnapshot = useCallback((): void => {
-    setQuiltSubscriptionEpoch((previous) => previous + 1)
-  }, [])
-
-  const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
-    setRealtimeCapabilities(payload.realtimeCapabilities ?? null)
-    setWorldBounds(resolveWorldBounds(payload.canvasConfig?.boundsPolicy, payload.session.boundsPolicy))
-    setSequencedState(
-      applySequencedSnapshot({
-        tiles: payload.session.tiles,
-        lastOpSeq: payload.lastOpSeq,
-        revision: payload.revision,
-      }),
-    )
-    setCollaborators((prev) => mergeCollaboratorsFromSnapshot(prev, payload.clients))
-  }, [])
-
   const onQuiltProtocol = useCallback((payload: QuiltProtocolHandshake): void => {
     setQuiltProtocol(payload)
     if (payload.selectedProtocolVersion !== 2 || !payload.topology) return
 
-    setRealtimeCapabilities(null)
     setWorldBounds({
       minX: 0,
       maxX: payload.topology.patchColumns * payload.topology.patchWidth,
@@ -768,118 +717,6 @@ function ProtectedApp() {
     setQuiltSubscriptionEpoch((previous) => previous + 1)
   }, [])
 
-  const onTilePlaced = useCallback((payload: TilePlacedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTilePlaced(prev, {
-        tile: { ...payload.tile, placedBy: payload.placedBy },
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
-
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onTileRemoved = useCallback((payload: TileRemovedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTileRemoved(prev, {
-        tileId: payload.tileId,
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
-
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onResyncRequired = useCallback((payload: ResyncRequiredPayload): void => {
-    clientTelemetryRef.current.resyncEvents += 1
-    console.warn('resync_required received:', { reason: payload.reason, currentOpSeq: payload.currentOpSeq })
-    requestSnapshot()
-  }, [requestSnapshot])
-
-  const onChunkSnapshot = useCallback((payload: ChunkSnapshotPayload): void => {
-    setSequencedState((prev) => {
-      const incomingChunkIds = new Set(payload.chunks.map((chunk) => chunk.chunkId))
-      const replaceChunkTiles = shouldReplaceChunkTilesForSnapshot(payload.payloadMode)
-      const keptTiles = replaceChunkTiles
-        ? prev.tiles.filter((tile) =>
-          !incomingChunkIds.has(worldToChunkId(tile.transform.position.x, tile.transform.position.y, CHUNK_WORLD_SIZE)))
-        : prev.tiles
-      const incomingTiles = payload.chunks.flatMap((chunk) => chunk.tiles)
-      const mergedTiles = [...keptTiles, ...incomingTiles]
-
-      return {
-        tiles: mergedTiles,
-        lastOpSeq: Math.max(prev.lastOpSeq, payload.serverOpSeq),
-        revision: Math.max(prev.revision, payload.serverRevision),
-        requiresSnapshot: false,
-      }
-    })
-  }, [])
-
-  const onChunkTilePlaced = useCallback((payload: ChunkTilePlacedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTilePlaced(prev, {
-        tile: { ...payload.tile, placedBy: payload.placedBy },
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
-
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onChunkTileRemoved = useCallback((payload: ChunkTileRemovedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTileRemoved(prev, {
-        tileId: payload.tileId,
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
-
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onChunkResyncRequired = useCallback((payload: ChunkResyncRequiredPayload): void => {
-    clientTelemetryRef.current.resyncEvents += 1
-    console.info('chunk_resync_required_telemetry', {
-      chunkId: payload.chunkId,
-      reason: payload.reason,
-      payloadMode: payload.payloadMode,
-      currentOpSeq: payload.currentOpSeq,
-      currentRevision: payload.currentRevision,
-      totalResyncEvents: clientTelemetryRef.current.resyncEvents,
-    })
-
-    setQuiltSubscriptionEpoch((previous) => previous + 1)
-  }, [])
-
-  const onPointerUpdate = useCallback((payload: PointerUpdatePayload): void => {
-    setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
-      present: true,
-      pointer: payload.position,
-      lastSeenAt: Date.now(),
-    }))
-  }, [])
-
   const onClientJoined = useCallback((payload: ClientJoinedPayload): void => {
     setCollaborators((prev) => updateCollaborator(prev, payload.client.clientId, {
       present: true,
@@ -893,15 +730,6 @@ function ProtectedApp() {
       present: false,
       pointer: undefined,
       selectionTileId: undefined,
-      lastSeenAt: Date.now(),
-    }))
-  }, [])
-
-  const onSelectionUpdate = useCallback((payload: SelectionUpdatePayload): void => {
-    setQuiltCache((previous) => setQuiltSelection(previous, payload.clientId, payload.tileId))
-    setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
-      present: true,
-      selectionTileId: payload.tileId,
       lastSeenAt: Date.now(),
     }))
   }, [])
@@ -954,20 +782,9 @@ function ProtectedApp() {
     auth.apiOrigin,
     canonicalDescriptor,
     clientId,
-    onSnapshot,
-    onTilePlaced,
-    onTileRemoved,
-    onResyncRequired,
     socketActionRef,
-    onPointerUpdate,
     onClientJoined,
     onClientLeft,
-    onSelectionUpdate,
-    onChunkSnapshot,
-    onChunkTilePlaced,
-    onChunkTileRemoved,
-    onChunkResyncRequired,
-    realtimeCapabilities?.chunkStreamingEnabled ?? false,
     onQuiltProtocol,
     onQuiltPatchSnapshot,
     onQuiltPatchEvent,
@@ -977,7 +794,6 @@ function ProtectedApp() {
     true,
     onCanonicalProtocolMismatch,
     setConnectionEpoch,
-    entryAttemptId,
   )
 
   const connectionState = useConnectionStatus(socketRef)
@@ -990,7 +806,7 @@ function ProtectedApp() {
       if (!socket?.connected) return
       socket.emit('quilt_client_runtime_metrics', {
         sampleId: crypto.randomUUID(),
-        entryAttemptId,
+        entryAttemptId: canonicalDescriptor?.entryAttemptId ?? '',
         canonicalGeneration: canonicalDescriptor?.generation ?? 0,
         quiltId: quiltProtocol.topology!.quiltId,
         retainedPatchCount: Object.keys(quiltCache.patches).length,
@@ -1000,7 +816,7 @@ function ProtectedApp() {
     }, 10_000)
 
     return () => window.clearInterval(intervalId)
-  }, [canonicalDescriptor?.generation, entryAttemptId, quiltCache.patches, quiltProtocol, visibleTiles.length])
+  }, [canonicalDescriptor?.entryAttemptId, canonicalDescriptor?.generation, quiltCache.patches, quiltProtocol, visibleTiles.length])
 
   const onViewportChanged = useCallback((payload: {
     center: { x: number; y: number }
@@ -1078,24 +894,12 @@ function ProtectedApp() {
       chunkIds: entry.chunks,
     }))
 
-    const resubscribeStartedAt = performance.now()
     socket.emit('subscribe_quilt_area', {
       quiltId: topology.quiltId,
       rooms,
       cursors: selectQuiltCursors(quiltCache),
     }, (ack) => {
       quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
-      const acceptedRooms = ack.outcomes.filter((outcome) => outcome.status === 'accepted').length
-      const resyncRequired = ack.outcomes.filter((outcome) => outcome.status === 'accepted' && outcome.cursor === undefined).length
-      socket.emit('canonical_telemetry', {
-        name: 'canonical_resubscribe',
-        outcome: ack.outcomes.every((outcome) => outcome.status === 'accepted') ? 'completed' : 'failed',
-        durationMs: performance.now() - resubscribeStartedAt,
-        requestedRooms: rooms.length,
-        acceptedRooms,
-        rejectedRooms: ack.outcomes.length - acceptedRooms,
-        resyncRequired,
-      })
     })
   }, [activeChunkIds, connectionEpoch, quiltCache, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
 

@@ -5,22 +5,12 @@ import type {
   ClientJoinedPayload,
   ClientLeftPayload,
   ClientToServerEvents,
-  PointerUpdatePayload,
-  SelectionUpdatePayload,
   ServerToClientEvents,
-  ResyncRequiredPayload,
-  SessionSnapshotPayload,
-  TilePlacedPayload,
-  TileRemovedPayload,
-  ChunkSnapshotPayload,
-  ChunkTilePlacedPayload,
-  ChunkTileRemovedPayload,
-  ChunkResyncRequiredPayload,
   QuiltPatchEventPayload,
   QuiltPatchResyncRequiredPayload,
   QuiltProtocolHandshake,
   QuiltScopedSnapshotPayload,
-  CanonicalWorldDescriptor,
+  CanonicalWorldEntryDescriptor,
   CanonicalClientTelemetry,
 } from '../../../server/src/contracts'
 import { SCHEMA_VERSION } from '../../../server/src/contracts'
@@ -30,22 +20,11 @@ export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
 
 export const useSocketConnection = (
   serverUrl: string,
-  canonicalWorld: CanonicalWorldDescriptor | string | null,
+  canonicalWorld: CanonicalWorldEntryDescriptor | string | null,
   clientId: string,
-  onSnapshot: (payload: SessionSnapshotPayload) => void,
-  onTilePlaced: (payload: TilePlacedPayload) => void,
-  onTileRemoved: (payload: TileRemovedPayload) => void,
-  onResyncRequired?: (payload: ResyncRequiredPayload) => void,
   socketActionRef?: React.MutableRefObject<AppSocket | null>,
-  onPointerUpdate?: (payload: PointerUpdatePayload) => void,
   onClientJoined?: (payload: ClientJoinedPayload) => void,
   onClientLeft?: (payload: ClientLeftPayload) => void,
-  onSelectionUpdate?: (payload: SelectionUpdatePayload) => void,
-  onChunkSnapshot?: (payload: ChunkSnapshotPayload) => void,
-  onChunkTilePlaced?: (payload: ChunkTilePlacedPayload) => void,
-  onChunkTileRemoved?: (payload: ChunkTileRemovedPayload) => void,
-  onChunkResyncRequired?: (payload: ChunkResyncRequiredPayload) => void,
-  enableChunkStreaming: boolean = true,
   onQuiltProtocol?: (payload: QuiltProtocolHandshake) => void,
   onQuiltPatchSnapshot?: (payload: QuiltScopedSnapshotPayload) => void,
   onQuiltPatchEvent?: (payload: QuiltPatchEventPayload) => void,
@@ -55,7 +34,7 @@ export const useSocketConnection = (
   expectedProtocolV2: boolean = false,
   onProtocolMismatch?: () => void,
   onConnectionEpoch?: (epoch: number) => void,
-  entryAttemptId: string = crypto.randomUUID(),
+  suppliedEntryAttemptId?: string,
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
 
@@ -63,6 +42,8 @@ export const useSocketConnection = (
     if (!canonicalWorld || !acquireAccessToken) return
     const quiltId = typeof canonicalWorld === 'string' ? canonicalWorld : canonicalWorld.quiltId
     const canonicalGeneration = typeof canonicalWorld === 'string' ? 1 : canonicalWorld.generation
+    const entryAttemptId = typeof canonicalWorld === 'string' ? suppliedEntryAttemptId : canonicalWorld.entryAttemptId
+    if (!entryAttemptId) return
 
     let cancelled = false
     let renewalAttempted = false
@@ -106,14 +87,30 @@ export const useSocketConnection = (
       }
       try {
         const token = await acquireAccessToken()
+        let attemptId = entryAttemptId
+        let body: CanonicalClientTelemetry & { parentAttemptId?: string } = payload
+        if (payload.name !== 'canonical_entry') {
+          const attemptResponse = await fetch(new URL('/quilts/canonical/attempts', serverUrl || location.origin), {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${token}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ kind: payload.name === 'canonical_reconnect' ? 'reconnect' : 'resubscribe', parentAttemptId: entryAttemptId }),
+            keepalive: true,
+          })
+          if (!attemptResponse.ok) return
+          attemptId = (await attemptResponse.json() as { attemptId: string }).attemptId
+          body = { ...payload, parentAttemptId: entryAttemptId }
+        }
         await fetch(new URL('/quilts/canonical/telemetry', serverUrl || location.origin), {
           method: 'POST',
           headers: {
             authorization: `Bearer ${token}`,
             'content-type': 'application/json',
-            'x-canonical-attempt-id': entryAttemptId,
+            'x-canonical-attempt-id': attemptId,
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
           keepalive: true,
         })
       } catch {
@@ -269,20 +266,9 @@ export const useSocketConnection = (
     serverUrl,
     canonicalWorld,
     clientId,
-    onSnapshot,
-    onTilePlaced,
-    onTileRemoved,
-    onResyncRequired,
     socketActionRef,
-    onPointerUpdate,
     onClientJoined,
     onClientLeft,
-    onSelectionUpdate,
-    onChunkSnapshot,
-    onChunkTilePlaced,
-    onChunkTileRemoved,
-    onChunkResyncRequired,
-    enableChunkStreaming,
     onQuiltProtocol,
     onQuiltPatchSnapshot,
     onQuiltPatchEvent,
@@ -292,7 +278,7 @@ export const useSocketConnection = (
     expectedProtocolV2,
     onProtocolMismatch,
     onConnectionEpoch,
-    entryAttemptId,
+    suppliedEntryAttemptId,
   ])
 
   return socketRef

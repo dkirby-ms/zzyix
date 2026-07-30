@@ -1,4 +1,4 @@
-import type { Session } from '../contracts.js'
+import type { LegacySession as Session } from '../domain/legacySession.js'
 import { getLatestSnapshot, listOperationsAfter, listPatchIds, savePatchSnapshot, saveSnapshot } from './repository.js'
 
 const SNAPSHOT_EVERY_OPS = Number(process.env.SNAPSHOT_EVERY_OPS ?? 25)

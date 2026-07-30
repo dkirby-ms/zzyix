@@ -9,7 +9,8 @@
 
 Implementation review found the canonical product path present but release-blocked by
 retirement-evidence, telemetry-integrity, final-state compatibility, activation-provenance,
-presence-lifecycle, and integration-coverage defects. Phase 6 remediation is in progress.
+presence-lifecycle, and integration-coverage defects. Phase 7 remediation is in progress
+after resumed review found three critical, four major, and one minor release blocker.
 
 ## Changes
 
@@ -30,6 +31,11 @@ presence-lifecycle, and integration-coverage defects. Phase 6 remediation is in 
 * `apps/server/migrations/meta/0008_snapshot.json` - Recorded the presence lease schema snapshot
 * `apps/server/src/operations/canonicalRetirementReportCli.ts` - Added strict NDJSON evidence validation and deterministic digest-bound retirement reports
 * `apps/server/src/operations/canonicalRetirementReportCli.test.ts` - Covered deduplication, rates, percentiles, rollback windows, strict validation, and repeated runtime samples
+* `apps/server/src/domain/legacySession.ts` - Retained internal-only database compatibility types outside the public runtime contract
+* `apps/server/src/migration/canonicalAttempts.ts` - Added PostgreSQL-backed, principal-bound canonical attempt issuance and atomic consumption
+* `apps/server/src/migration/canonicalAttempts.postgres.integration.test.ts` - Covered cross-replica issuance, concurrency, ownership, expiry, and child lineage
+* `apps/server/migrations/0009_charming_siren.sql` - Added expand-only shared canonical attempt persistence
+* `apps/server/migrations/meta/0009_snapshot.json` - Recorded the canonical attempt schema snapshot
 
 ### Modified
 
@@ -53,6 +59,21 @@ presence-lifecycle, and integration-coverage defects. Phase 6 remediation is in 
 * `scripts/release-contract.test.mjs` - Enforced immutable evidence wiring and absence of final canary flags
 * Focused client and server tests - Covered evidence derivation, telemetry binding, live HTTP and Socket.IO boundaries, activation provenance, lease loss, and unconditional entry
 * `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md` - Corrected keyword frontmatter indentation
+* `.github/workflows/cd.yml` - Installed immutable retirement evidence in both existing-app and create deployment branches
+* `scripts/release-contract.test.mjs` - Distinguished and enforced evidence installation in both deployment branches
+* `apps/server/src/contracts.ts` - Removed residual public session and snapshot contracts and added attempt lineage contracts
+* `apps/server/src/index.ts` - Enforced shared attempt ownership and consumption across live HTTP and Socket.IO boundaries
+* `apps/server/src/index.integration.test.ts` - Composed real authentication, compatibility, telemetry, navigation, claim, and presence boundaries
+* `apps/server/src/operations/canonicalRetirementReportCli.ts` - Accepted unique child attempt terminals while preserving parent entry eligibility
+* `apps/client/src/network/useSocketConnection.ts` - Requested server-issued reconnect and resubscribe child attempts
+* `apps/client/src/App.tsx` - Removed residual retired snapshot handling and restored durable placement accounting
+* `e2e/quilt-reconnect.spec.ts` - Acquired authenticated server-issued attempts for cross-replica reconnect
+* `e2e/quilt-seams.spec.ts` - Acquired authenticated server-issued attempts for direct socket coverage
+* `apps/server/src/db/schema.ts` - Added canonical attempt table constraints and indexes
+* `apps/server/src/db/schema.test.ts` - Covered canonical attempt schema invariants
+* `apps/server/src/db/migrate.test.ts` - Updated migration-count compatibility for migration 0009
+* `apps/server/migrations/meta/_journal.json` - Registered migration 0009
+* `scripts/verify-quilt-migration.sh` - Extended migration rehearsal through canonical attempt persistence
 
 * `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md` - Established one newly provisioned 32-by-32 canonical quilt, durable navigation and claim behavior, ownership limits, and database-backed presence leases
 * `.copilot-tracking/plans/2026-07-29/canonical-infinite-canvas-convergence-plan.instructions.md` - Marked Phase 0 complete
@@ -150,8 +171,8 @@ presence-lifecycle, and integration-coverage defects. Phase 6 remediation is in 
 
 * The 2026-07-29 implementation review invalidated the prior release-ready conclusion
 	* Five critical, six major, and one minor finding are tracked in Phase 6
-* Phase 6 environment-backed validation is incomplete
-	* Loopback PostgreSQL refused connections and Docker is unavailable, so PostgreSQL, Playwright, multi-replica, and migration rehearsal remain open
+* Phase 6 environment-backed validation resumed after loopback PostgreSQL became available
+	* Canonical PostgreSQL, full workspace, standard Playwright, multi-replica Playwright, and migration rehearsal all passed
 
 * Local Markdown lint was skipped because `markdownlint-cli2` is not installed
 	* `git diff --check` and VS Code diagnostics passed for the ADR
@@ -169,12 +190,15 @@ presence-lifecycle, and integration-coverage defects. Phase 6 remediation is in 
 	* Direct quilt reset now clears authoritative state, multi-user setup uses quilt identity, and seam sockets use the V2 schema and baseline claim policy
 * The first full test run could not reach loopback PostgreSQL
 	* The repository PostgreSQL service was started for validation, all tests passed, and the container was removed afterward
+* Initial Phase 7 attempt storage used a process-local registry
+	* Multi-replica routing requires shared authorization, so the final implementation uses PostgreSQL with atomic cross-replica consumption
 
 ## Release Summary
 
-Release readiness is blocked pending Phase 6 Step 6.4. Source remediation for IV-001 through
-IV-012 is complete. Focused server validation passed 40 tests, focused client validation
-passed 33 tests with eight retired-path skips, release-contract validation passed nine tests,
-lint and production builds passed, and `git diff --check` passed. PostgreSQL-backed tests,
-standard and multi-replica Playwright, and migration rehearsal still require an available
-loopback PostgreSQL environment. Ports 3001 and 5173 are clear.
+All seven implementation phases are complete. Phase 7 closes resumed findings IV-003,
+IV-004, IV-007, IV-010, IV-011, IV-012, IV-013, and IV-014 with shared attempt persistence,
+complete deployment evidence wiring, retired public contracts, composed live boundaries,
+and repaired placement acceptance. Final validation passed 367 workspace tests with 17
+skipped, 14 standard Playwright tests, one multi-replica Playwright test, 10 migration and
+recovery rehearsal tests, nine release-contract checks, lint, production builds, and
+`git diff --check`. Ports 3001 and 5173 are clear; PostgreSQL remains healthy and running.

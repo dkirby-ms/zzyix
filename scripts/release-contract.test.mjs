@@ -19,6 +19,26 @@ const execFileAsync = promisify(execFile)
 
 const readWorkflow = () => readFile(workflowPath, 'utf8')
 
+const extractServerDeploymentBranches = (workflow) => {
+  const deploymentStart = workflow.indexOf('      - name: Deploy Server Container App')
+  const deploymentEnd = workflow.indexOf('      - name: Deploy Client Container App', deploymentStart)
+  assert.notEqual(deploymentStart, -1, 'workflow must deploy the server container app')
+  assert.notEqual(deploymentEnd, -1, 'workflow must delimit the server deployment step')
+
+  const deployment = workflow.slice(deploymentStart, deploymentEnd)
+  const updateStart = deployment.indexOf('            if az containerapp show \\\n')
+  const createStart = deployment.indexOf('            else\n              CREATE_REGISTRY_ARGS=()', updateStart)
+  const branchesEnd = deployment.indexOf('\n            server_ingress_external=', createStart)
+  assert.notEqual(updateStart, -1, 'server deployment must detect an existing app')
+  assert.notEqual(createStart, -1, 'server deployment must include a create branch')
+  assert.notEqual(branchesEnd, -1, 'server deployment branches must end before ingress validation')
+
+  return {
+    update: deployment.slice(updateStart, createStart),
+    create: deployment.slice(createStart, branchesEnd),
+  }
+}
+
 const extractCommand = (workflow, command) => {
   const start = workflow.indexOf(`az containerapp job ${command} \\\n`)
   assert.notEqual(start, -1, `workflow must invoke az containerapp job ${command}`)
@@ -36,6 +56,7 @@ test('CD releases queue without cancelling an in-flight migration owner', async 
 
 test('production rollout requires immutable retirement evidence and keeps mutation disabled', async () => {
   const workflow = await readWorkflow()
+  const deploymentBranches = extractServerDeploymentBranches(workflow)
 
   for (const approval of [
     'AUTH_TELEMETRY_GATE_APPROVED',
@@ -60,7 +81,18 @@ test('production rollout requires immutable retirement evidence and keeps mutati
   ]) {
     assert.match(workflow, new RegExp(evidenceSetting))
   }
-  assert.match(workflow, /legacy-retirement-report=\$\{\{ secrets\.LEGACY_RETIREMENT_REPORT_BASE64 \}\}/)
+  for (const [branchName, branch] of Object.entries(deploymentBranches)) {
+    assert.match(
+      branch,
+      /legacy-retirement-report=\$\{\{ secrets\.LEGACY_RETIREMENT_REPORT_BASE64 \}\}/,
+      `${branchName} deployment must install immutable retirement evidence`,
+    )
+    assert.match(
+      branch,
+      /LEGACY_RETIREMENT_REPORT_BASE64=secretref:legacy-retirement-report/,
+      `${branchName} deployment must reference the installed retirement evidence`,
+    )
+  }
   assert.equal(workflow.match(/LEGACY_RETIREMENT_REPORT_PATH=\$\{LEGACY_RETIREMENT_REPORT_PATH\}/g)?.length, 3)
   assert.doesNotMatch(workflow, /FEATURE_CANONICAL_DISCOVERY_ENABLED|FEATURE_CANONICAL_ENTRY_ENABLED/)
 })

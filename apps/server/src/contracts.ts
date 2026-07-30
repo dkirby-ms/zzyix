@@ -80,16 +80,6 @@ export type TileInstance = {
   placedBy?: string
 }
 
-// ─── Session ──────────────────────────────────────────────────────────────────
-
-export type Session = {
-  id: string
-  tiles: TileInstance[]
-  boundsPolicy?: BoundsPolicy
-  createdAt: number
-  updatedAt: number
-}
-
 export type ClientPresence = {
   clientId: string
   joinedAt: number
@@ -165,11 +155,6 @@ export type CanvasSize = {
   height: number
 }
 
-export type SessionCanvasConfig = {
-  canvasSize: CanvasSize
-  boundsPolicy: BoundsPolicy
-}
-
 export type SafePrincipalProfile = {
   displayName?: string
   email?: string
@@ -221,6 +206,19 @@ export type CanonicalWorldDescriptor = {
     row: number
     column: number
   }
+}
+
+export type CanonicalWorldEntryDescriptor = CanonicalWorldDescriptor & {
+  entryAttemptId: string
+}
+
+export type CanonicalAttemptIssueRequest = {
+  kind: 'reconnect' | 'resubscribe'
+  parentAttemptId: string
+}
+
+export type CanonicalAttemptIssueResponse = {
+  attemptId: string
 }
 
 export type CanonicalWorldUnavailableError = SafeApiError & {
@@ -447,26 +445,6 @@ export type QuiltPlaceTileAck =
 
 export type QuiltRemoveTileAck = QuiltMutationAcceptedAck | QuiltMutationRejectedAck
 
-export type PointerMovePayload = {
-  position: Vec2
-}
-
-export type SessionSnapshotPayload = {
-  session: Session
-  canvasConfig?: SessionCanvasConfig
-  realtimeCapabilities?: RealtimeCapabilities
-  clients: ClientPresence[]
-  lastOpSeq: number
-  revision: number
-}
-
-export type RealtimeCapabilities = {
-  chunkStreamingEnabled: boolean
-  aggregateSnapshotEnabled: boolean
-  chunkCanaryEnabled: boolean
-  multiReplicaReady: boolean
-}
-
 export type TilePlacedPayload = {
   tile: TileInstance
   placedBy: string
@@ -481,18 +459,6 @@ export type TileRemovedPayload = {
   revision: number
 }
 
-export type PointerUpdatePayload = {
-  clientId: string
-  position: Vec2
-}
-
-export type SelectionUpdatePayload = {
-  canvasId: string
-  clientId: string
-  tileId?: string
-  updatedAt: number
-}
-
 export type ClientJoinedPayload = {
   client: ClientPresence
 }
@@ -501,44 +467,13 @@ export type ClientLeftPayload = {
   clientId: string
 }
 
-export type ResyncRequiredPayload = {
-  /** The server's current authoritative opSeq at the time of the resync signal. */
-  currentOpSeq: number
-  reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
-}
-
 export type ChunkId = `${number}:${number}`
 
 export type ChunkPayloadMode = 'fine' | 'aggregate'
 
-export type ChunkCoordinationMetadata = {
-  replicaId: string
-  membershipScope: 'process-local' | 'adapter-shared'
-  membershipAssumption: 'best-effort' | 'authoritative'
-  emittedAt: number
-}
-
 export type ChunkCursor = {
   opSeq: number
   revision: number
-}
-
-export type SubscribeChunksPayload = {
-  canvasId: string
-  chunks: ChunkId[]
-  payloadMode?: ChunkPayloadMode
-  clientOffsetByChunk?: Partial<Record<ChunkId, ChunkCursor>>
-}
-
-export type UnsubscribeChunksPayload = {
-  canvasId: string
-  chunks: ChunkId[]
-}
-
-export type RequestChunkSnapshotPayload = {
-  canvasId: string
-  chunks: ChunkId[]
-  payloadMode?: ChunkPayloadMode
 }
 
 export type ChunkSnapshotEntry = {
@@ -551,43 +486,6 @@ export type ChunkSnapshotEntry = {
   }
   opSeq: number
   revision: number
-}
-
-export type ChunkSnapshotPayload = {
-  canvasId: string
-  payloadMode: ChunkPayloadMode
-  coordination: ChunkCoordinationMetadata
-  chunks: ChunkSnapshotEntry[]
-  serverOpSeq: number
-  serverRevision: number
-}
-
-export type ChunkTilePlacedPayload = {
-  canvasId: string
-  chunkId: ChunkId
-  tile: TileInstance
-  placedBy: string
-  opSeq: number
-  revision: number
-}
-
-export type ChunkTileRemovedPayload = {
-  canvasId: string
-  chunkId: ChunkId
-  tileId: string
-  removedBy: string
-  opSeq: number
-  revision: number
-}
-
-export type ChunkResyncRequiredPayload = {
-  canvasId: string
-  chunkId: ChunkId
-  payloadMode: ChunkPayloadMode
-  coordination: ChunkCoordinationMetadata
-  currentOpSeq: number
-  currentRevision: number
-  reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
 }
 
 export type QuiltTopologyHandshake = {

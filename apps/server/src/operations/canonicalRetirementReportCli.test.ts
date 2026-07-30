@@ -19,8 +19,8 @@ const evidence = (): Buffer => {
     const occurredAt = new Date(Date.parse('2026-07-28T00:00:00.000Z') + index * 1_000).toISOString()
     events.push({ ...base(index + 1, index + 1, occurredAt), name: 'canonical_discovery', outcome: 'success', durationMs: index, httpStatus: 200 })
     events.push({ ...base(index + 101, index + 1, occurredAt), name: 'canonical_entry', outcome: 'ready', durationMs: index, selectedProtocolVersion: 2 })
-    events.push({ ...base(index + 201, index + 1, occurredAt), name: 'canonical_reconnect', outcome: 'recovered', durationMs: index === 99 ? 9_000 : index, attempts: 1 })
-    events.push({ ...base(index + 301, index + 1, occurredAt), name: 'canonical_resubscribe', outcome: 'completed', durationMs: index, requestedRooms: 1, acceptedRooms: 1, rejectedRooms: 0, resyncRequired: 0 })
+    events.push({ ...base(index + 201, index + 1_001, occurredAt), parentAttemptId: uuid(index + 1), name: 'canonical_reconnect', outcome: 'recovered', durationMs: index === 99 ? 9_000 : index, attempts: 1 })
+    events.push({ ...base(index + 301, index + 2_001, occurredAt), parentAttemptId: uuid(index + 1), name: 'canonical_resubscribe', outcome: 'completed', durationMs: index, requestedRooms: 1, acceptedRooms: 1, rejectedRooms: 0, resyncRequired: 0 })
   }
   events.push({ ...base(401, 401, '2026-07-28T00:02:00.000Z'), name: 'client_runtime', outcome: 'sampled', frameTimeMs: 16, retainedPatchCount: 1, retainedTileCount: 1, sceneObjectCount: 1, drawCalls: 1 })
   return Buffer.from(`${events.map((event) => JSON.stringify(event)).join('\n')}\n`)
@@ -109,6 +109,23 @@ describe('canonical retirement report', () => {
       clientFrameSampleCount: 2,
       frameTimeP95Ms: 30,
     })
+  })
+
+  it('accepts multiple reconnect and resubscribe children for one entry attempt', () => {
+    const events = [
+      { ...base(1, 1, '2026-07-28T00:00:01.000Z'), name: 'canonical_entry', outcome: 'ready', durationMs: 1, selectedProtocolVersion: 2 },
+      { ...base(2, 2, '2026-07-28T00:00:02.000Z'), parentAttemptId: uuid(1), name: 'canonical_reconnect', outcome: 'recovered', durationMs: 10, attempts: 1 },
+      { ...base(3, 3, '2026-07-28T00:00:03.000Z'), parentAttemptId: uuid(1), name: 'canonical_reconnect', outcome: 'recovered', durationMs: 20, attempts: 2 },
+      { ...base(4, 4, '2026-07-28T00:00:04.000Z'), parentAttemptId: uuid(1), name: 'canonical_resubscribe', outcome: 'completed', durationMs: 5, requestedRooms: 1, acceptedRooms: 1, rejectedRooms: 0, resyncRequired: 0 },
+      { ...base(5, 5, '2026-07-28T00:00:05.000Z'), parentAttemptId: uuid(1), name: 'canonical_resubscribe', outcome: 'completed', durationMs: 6, requestedRooms: 2, acceptedRooms: 2, rejectedRooms: 0, resyncRequired: 0 },
+    ]
+    const report = buildCanonicalRetirementReport(
+      Buffer.from(`${events.map((event) => JSON.stringify(event)).join('\n')}\n`),
+      '2026-07-28T00:00:00.000Z',
+      '2026-07-29T00:00:00.000Z',
+    )
+
+    expect(report.groups[0].eventCounts).toMatchObject({ canonical_reconnect: 2, canonical_resubscribe: 2 })
   })
 
   it('uses half-open five-minute windows and rejects out-of-window records', () => {

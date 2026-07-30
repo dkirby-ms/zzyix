@@ -2,6 +2,7 @@ import { getTableConfig } from 'drizzle-orm/pg-core'
 import { describe, expect, it } from 'vitest'
 import {
   authorizationAuditEvents,
+  canonicalAttempts,
   canonicalWorld,
   externalPrincipalMappings,
   patchClaimQuotaRecords,
@@ -15,6 +16,23 @@ import {
 const configFor = (table: Parameters<typeof getTableConfig>[0]) => getTableConfig(table)
 
 describe('authentication and authorization schema', () => {
+  it('defines durable principal-bound canonical attempts', () => {
+    const config = configFor(canonicalAttempts)
+
+    expect(config.columns.find((column) => column.name === 'id')?.primary).toBe(true)
+    expect(config.columns.find((column) => column.name === 'consumed')?.default).toBe(false)
+    expect(config.foreignKeys).toHaveLength(2)
+    expect(config.checks.map((constraint) => constraint.name)).toEqual(expect.arrayContaining([
+      'canonical_attempts_kind_check',
+      'canonical_attempts_parent_check',
+    ]))
+    expect(config.indexes.map((index) => index.config.name)).toEqual(expect.arrayContaining([
+      'canonical_attempts_principal_kind_expiry_idx',
+      'canonical_attempts_expiry_idx',
+      'canonical_attempts_parent_attempt_id_idx',
+    ]))
+  })
+
   it('defines the constrained and indexed canonical singleton pointer', () => {
     const config = configFor(canonicalWorld)
 

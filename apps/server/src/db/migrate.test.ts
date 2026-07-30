@@ -5,23 +5,23 @@ import { assertMigrationStatusCompatible } from './migrate.js'
 describe('database schema compatibility', () => {
   it('accepts an exact migration count match', () => {
     expect(() => assertMigrationStatusCompatible({
-      localMigrationCount: 8,
-      appliedMigrationCount: 8,
+      localMigrationCount: 9,
+      appliedMigrationCount: 9,
     })).not.toThrow()
   })
 
   it('rejects production startup when migrations are pending', () => {
     expect(() => assertMigrationStatusCompatible({
-      localMigrationCount: 8,
-      appliedMigrationCount: 7,
+      localMigrationCount: 9,
+      appliedMigrationCount: 8,
     })).toThrow(/Run the one-shot db:apply command/)
   })
 
   it('rejects startup when the database is ahead of the application image', () => {
     expect(() => assertMigrationStatusCompatible({
-      localMigrationCount: 8,
-      appliedMigrationCount: 9,
-    })).toThrow(/expected 8 applied migrations, found 9/)
+      localMigrationCount: 9,
+      appliedMigrationCount: 10,
+    })).toThrow(/expected 9 applied migrations, found 10/)
   })
 })
 

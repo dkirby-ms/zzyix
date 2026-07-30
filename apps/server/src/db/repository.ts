@@ -7,10 +7,9 @@ import type {
   CanonicalWorldDescriptor,
   ClientPresence,
   EligibleCanonicalPatchesResponse,
-  Session,
-  SessionCanvasConfig,
   TileInstance,
 } from '../contracts.js'
+import type { LegacySession as Session, LegacySessionCanvasConfig as SessionCanvasConfig } from '../domain/legacySession.js'
 import type { PlaceTilePayload, RemoveTilePayload, TilePlacedPayload, TileRemovedPayload } from '../contracts.js'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../contracts.js'
 import {

@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
+import { sql } from 'drizzle-orm'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import express from 'express'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -31,6 +32,29 @@ import { vec2 } from './domain/math2d.js'
 import { configureQuiltTelemetry } from './migration/quiltTelemetry.js'
 import { createHttpAuth } from './auth/httpAuth.js'
 import { AuthenticationError } from './auth/errors.js'
+import { createSocketAuth } from './auth/socketAuth.js'
+import {
+  consumeCanonicalAttempt,
+  issueCanonicalAttempt,
+} from './migration/canonicalAttempts.js'
+import { createPostgresTestDatabase, type PostgresTestDatabase } from './test/postgresTestDatabase.js'
+
+let attemptDatabase: PostgresTestDatabase
+
+beforeAll(async () => {
+  attemptDatabase = await createPostgresTestDatabase('zzyix_index_attempts')
+}, 30_000)
+
+beforeEach(async () => {
+  await attemptDatabase.db.execute(sql`truncate table canonical_attempts, principals cascade`)
+  await attemptDatabase.db.execute(sql`
+    insert into principals (id, kind) values
+      ('11111111-1111-4111-8111-111111111111', 'human'),
+      ('22222222-2222-4222-8222-222222222222', 'human')
+  `)
+})
+
+afterAll(async () => attemptDatabase?.dispose(), 30_000)
 
 describe('Socket.IO handshake origin boundary', () => {
   const allowedOrigin = 'https://app.example.com'
@@ -190,9 +214,14 @@ describe('live retired session HTTP boundary', () => {
 })
 
 describe('live Socket.IO compatibility boundary', () => {
+  const principalId = '11111111-1111-4111-8111-111111111111'
   const listen = async (onConnection?: (socket: Parameters<typeof registerCanonicalTelemetryHandler>[0]) => void) => {
     const server = createServer()
     const socketServer = new SocketServer(server, { transports: ['websocket'] })
+    socketServer.use(createSocketAuth(
+      vi.fn().mockResolvedValue({ expiresAt: new Date(Date.now() + 60_000) }) as never,
+      vi.fn().mockResolvedValue({ principalId, status: 'active', tokenExpiresAt: new Date(Date.now() + 60_000) }) as never,
+    ))
     socketServer.use(enforceCanonicalSocketCompatibility)
     if (onConnection) socketServer.on('connection', onConnection as never)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -233,7 +262,7 @@ describe('live Socket.IO compatibility boundary', () => {
   it('binds telemetry to the authenticated handshake attempt and rejects client attempt overrides', async () => {
     const observed = vi.fn()
     configureQuiltTelemetry(observed)
-    const entryAttemptId = '20000000-0000-4000-8000-000000000001'
+    const entryAttemptId = (await issueCanonicalAttempt(principalId, 'entry'))!
     const { socketServer, url } = await listen(registerCanonicalTelemetryHandler)
     const client = createSocketClient(url, {
       transports: ['websocket'],
@@ -263,11 +292,20 @@ describe('live Socket.IO compatibility boundary', () => {
         durationMs: 1,
         selectedProtocolVersion: 2,
       })
-      await vi.waitFor(() => expect(observed).toHaveBeenCalledTimes(1))
+      const entryEvents = () => observed.mock.calls.filter(([event]) => event.name === 'canonical_entry')
+      await vi.waitFor(() => expect(entryEvents()).toHaveLength(1))
       expect(observed).toHaveBeenCalledWith(expect.objectContaining({
         name: 'canonical_entry',
         attemptId: entryAttemptId,
       }))
+      client.emit('canonical_telemetry', {
+        name: 'canonical_entry',
+        outcome: 'ready',
+        durationMs: 2,
+        selectedProtocolVersion: 2,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(entryEvents()).toHaveLength(1)
     } finally {
       configureQuiltTelemetry()
       await close(client, socketServer)
@@ -276,6 +314,24 @@ describe('live Socket.IO compatibility boundary', () => {
 })
 
 describe('protocol-v2 authorization boundary', () => {
+  it('rejects replayed, foreign, and fabricated server-issued attempts', async () => {
+    const principalId = '11111111-1111-4111-8111-111111111111'
+    const attemptId = (await issueCanonicalAttempt(principalId, 'entry'))!
+
+    await expect(consumeCanonicalAttempt(
+      attemptId,
+      '22222222-2222-4222-8222-222222222222',
+      'entry',
+    )).resolves.toBe(false)
+    await expect(consumeCanonicalAttempt(
+      '30000000-0000-4000-8000-000000000001',
+      principalId,
+      'entry',
+    )).resolves.toBe(false)
+    await expect(consumeCanonicalAttempt(attemptId, principalId, 'entry')).resolves.toBe(true)
+    await expect(consumeCanonicalAttempt(attemptId, principalId, 'entry')).resolves.toBe(false)
+  })
+
   it('owns canonical telemetry envelope fields and rejects unknown client fields', () => {
     const observer = vi.fn()
     configureQuiltTelemetry(observer)
@@ -287,7 +343,7 @@ describe('protocol-v2 authorization boundary', () => {
         selectedProtocolVersion: 2,
       }
       expect(recordCanonicalClientTelemetry(payload, {
-        entryAttemptId: '10000000-0000-4000-8000-000000000001',
+        attemptId: '10000000-0000-4000-8000-000000000001',
         quiltId: '20000000-0000-4000-8000-000000000001',
         canonicalGeneration: 3,
         cohort: 'global',
@@ -303,7 +359,7 @@ describe('protocol-v2 authorization boundary', () => {
         cohort: 'global',
       }))
       expect(recordCanonicalClientTelemetry({ ...payload, principalId: 'forbidden' }, {
-        entryAttemptId: '10000000-0000-4000-8000-000000000001',
+        attemptId: '10000000-0000-4000-8000-000000000001',
         quiltId: '20000000-0000-4000-8000-000000000001',
         canonicalGeneration: 3,
         cohort: 'global',
@@ -312,7 +368,7 @@ describe('protocol-v2 authorization boundary', () => {
         ...payload,
         attemptId: '30000000-0000-4000-8000-000000000001',
       }, {
-        entryAttemptId: '10000000-0000-4000-8000-000000000001',
+        attemptId: '10000000-0000-4000-8000-000000000001',
         quiltId: '20000000-0000-4000-8000-000000000001',
         canonicalGeneration: 3,
         cohort: 'global',

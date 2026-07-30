@@ -591,7 +591,7 @@ jobs:
               az containerapp secret set \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}"
 
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
                 az containerapp registry set \

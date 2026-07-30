@@ -48,14 +48,28 @@ const createMockSocket = (): MockSocket => ({
 const accessTokenProvider = vi.fn(async () => 'access-token')
 
 const renderAuthenticatedSocket = (
-  parameters: Parameters<typeof useSocketConnection>,
+  parameters: unknown[],
   acquireAccessToken = accessTokenProvider,
   onAuthLoss = vi.fn(),
 ) => {
-  const paddedParameters: unknown[] = [...parameters]
-  while (paddedParameters.length < 21) paddedParameters.push(undefined)
-  paddedParameters[21] = acquireAccessToken
-  paddedParameters[22] = onAuthLoss
+  const paddedParameters: unknown[] = [
+    parameters[0],
+    parameters[1],
+    parameters[2],
+    parameters[7],
+    parameters[9],
+    parameters[10],
+    parameters[17],
+    parameters[18],
+    parameters[19],
+    parameters[20],
+    acquireAccessToken,
+    onAuthLoss,
+    parameters[23],
+    parameters[24],
+    parameters[25],
+    typeof parameters[1] === 'string' ? '20000000-0000-4000-8000-000000000001' : undefined,
+  ]
   const invokeHook = useSocketConnection as unknown as (...args: unknown[]) => ReturnType<typeof useSocketConnection>
   return renderHook(() => invokeHook(...paddedParameters))
 }
@@ -114,7 +128,12 @@ describe('useSocketConnection collaboration subscriptions', () => {
   })
 
   it('delivers bounded reconnect recovery and exhaustion terminals', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }))
+    const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+      const url = input.toString()
+      return url.endsWith('/attempts')
+        ? new Response(JSON.stringify({ attemptId: '30000000-0000-4000-8000-000000000001' }), { status: 201 })
+        : new Response(null, { status: 202 })
+    })
     vi.stubGlobal('fetch', fetchMock)
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)
@@ -137,16 +156,23 @@ describe('useSocketConnection collaboration subscriptions', () => {
     reconnectAttempt()
     reconnectFailed()
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      new URL('http://localhost:3001/quilts/canonical/attempts'),
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining('"kind":"reconnect"'),
+      }),
+    ))
+    expect(fetchMock).toHaveBeenCalledWith(
       new URL('http://localhost:3001/quilts/canonical/telemetry'),
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
           authorization: 'Bearer access-token',
-          'x-canonical-attempt-id': expect.any(String),
+          'x-canonical-attempt-id': '30000000-0000-4000-8000-000000000001',
         }),
         body: expect.stringContaining('"outcome":"exhausted"'),
       }),
-    ))
+    )
   })
 
   it('does not restore retired chunk events when the legacy option is enabled', () => {
@@ -285,10 +311,11 @@ describe('useSocketConnection collaboration subscriptions', () => {
       vi.fn(),
       vi.fn(),
     ]
-    while (parameters.length < 23) parameters.push(undefined)
-    parameters[21] = accessTokenProvider
-    parameters[23] = true
-    parameters[24] = onProtocolMismatch
+    while (parameters.length < 16) parameters.push(undefined)
+    parameters[10] = accessTokenProvider
+    parameters[12] = true
+    parameters[13] = onProtocolMismatch
+    parameters[15] = '20000000-0000-4000-8000-000000000001'
     const invokeHook = useSocketConnection as unknown as (...args: unknown[]) => ReturnType<typeof useSocketConnection>
     renderHook(() => invokeHook(...parameters))
 
@@ -366,9 +393,10 @@ describe('useSocketConnection collaboration subscriptions', () => {
       vi.fn(),
       vi.fn(),
     ]
-    while (parameters.length < 26) parameters.push(undefined)
-    parameters[21] = accessTokenProvider
-    parameters[25] = onConnectionEpoch
+    while (parameters.length < 16) parameters.push(undefined)
+    parameters[10] = accessTokenProvider
+    parameters[14] = onConnectionEpoch
+    parameters[15] = '20000000-0000-4000-8000-000000000001'
     const invokeHook = useSocketConnection as unknown as (...args: unknown[]) => ReturnType<typeof useSocketConnection>
     renderHook(() => invokeHook(...parameters))
 

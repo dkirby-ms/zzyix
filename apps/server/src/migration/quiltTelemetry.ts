@@ -21,6 +21,7 @@ export type CanonicalTelemetryBase = {
   schemaVersion: 1
   eventId: string
   attemptId: string
+  parentAttemptId?: string
   occurredAt: string
   quiltId: string | null
   canonicalGeneration: number | null

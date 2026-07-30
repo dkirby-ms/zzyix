@@ -641,6 +641,107 @@ Success criteria:
 * PostgreSQL, standard Playwright, multi-replica Playwright, and migration evidence is retained
 * Release artifacts report readiness only after every critical and major finding is closed
 
+## Implementation Phase 7: Close Resumed Review Findings
+
+<!-- parallelizable: false -->
+
+Source:
+
+* `.copilot-tracking/reviews/2026-07-29/canonical-infinite-canvas-convergence-plan-quality-phase6.md`
+
+### Step 7.1: Install retirement evidence on every deployment path
+
+Install the current immutable retirement report secret in both the existing-app update path
+and the create path before either branch references it. Extend release-contract validation
+to distinguish and assert both branches. Correct the ADR keyword indentation while touching
+the release surfaces.
+
+Files:
+
+* `.github/workflows/cd.yml`
+* `scripts/release-contract.test.mjs`
+* `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md`
+
+Success criteria:
+
+* Existing and new deployments install the exact digest-bound report before startup
+* Release-contract tests fail if either deployment branch omits evidence installation
+* ADR frontmatter has valid keyword indentation
+
+### Step 7.2: Issue server-owned entry and reconnect attempt lineage
+
+Replace caller-selected HTTP fallback attempt IDs with server-issued, principal-bound,
+single-use entry attempts. Issue unique server-bound child attempts for each reconnect and
+resubscribe cycle, preserving parent lineage without allowing a client to manufacture
+promotion volume. Ensure every cycle can record one deliverable terminal and report
+generation accepts multiple valid cycles.
+
+Files:
+
+* `apps/server/src/contracts.ts`
+* `apps/server/src/index.ts`
+* `apps/server/src/migration/quiltTelemetry.ts`
+* `apps/server/src/operations/canonicalRetirementReportCli.ts`
+* `apps/server/src/index.integration.test.ts`
+* `apps/server/src/operations/canonicalRetirementReportCli.test.ts`
+* `apps/client/src/network/useSocketConnection.ts`
+* `apps/client/src/network/useSocketConnection.test.ts`
+
+Success criteria:
+
+* HTTP fallback accepts only a server-issued attempt owned by the authenticated principal
+* Entry, reconnect, and resubscribe cycles each have unique server-bound identity
+* Replayed, foreign, or fabricated attempts cannot increase retirement eligibility
+* Multiple reconnect and resubscribe cycles produce valid distinct terminal evidence
+
+### Step 7.3: Remove residual contracts and compose live product boundaries
+
+Remove compiled session and snapshot contracts plus client imports and handlers that remain
+after retirement. Build integration fixtures through the real HTTP and Socket.IO
+authentication chain, then cover unsupported clients, telemetry binding, navigation, claim,
+and presence lifecycle through live routes and sockets rather than exported helpers.
+
+Files:
+
+* `apps/server/src/contracts.ts`
+* `apps/server/src/index.ts`
+* `apps/server/src/index.integration.test.ts`
+* `apps/client/src/network/useSocketConnection.ts`
+* Related client snapshot consumers and tests identified by symbol references
+
+Success criteria:
+
+* Retired session and snapshot public contracts have no compiled runtime references
+* Socket.IO boundary tests compose real authentication and compatibility middleware
+* Navigation, claim, and presence lifecycle tests traverse live product boundaries
+
+### Step 7.4: Repair placement acceptance and rerun release validation
+
+Fix the root cause of the authenticated product workflow remaining at `0 placed` after a
+tile is rendered. Rerun the isolated test first, then all required focused and release
+validation. Preserve machine-readable evidence and keep release status blocked if any
+critical or major acceptance check fails.
+
+Validation commands:
+
+* `npm run test:release-contract`
+* `npm exec --workspace=apps/server -- vitest run src/operations/canonicalRetirementReportCli.test.ts src/startup/rolloutGates.test.ts src/index.integration.test.ts src/db/canonicalWorld.postgres.integration.test.ts`
+* `npm exec --workspace=apps/client -- vitest run src/App.test.tsx src/network/useSocketConnection.test.ts`
+* `npm run lint`
+* `npm run build`
+* `npm test`
+* `npm run test:e2e -- e2e/authentication.spec.ts`
+* `npm run test:e2e`
+* `TEST_DATABASE_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run test:e2e:multi-replica`
+* `./scripts/verify-quilt-migration.sh rehearse`
+
+Success criteria:
+
+* Authenticated claim-and-place updates the durable placed count to one
+* Every critical and major resumed review finding is covered by a passing regression
+* Standard and multi-replica Playwright, PostgreSQL suites, and migration rehearsal pass
+* Release artifacts match observed validation outcomes
+
 ## Dependencies
 
 * Product acceptance of one finite toroidal canonical world
@@ -648,6 +749,7 @@ Success criteria:
 * Disposable loopback PostgreSQL for migration and repository integration tests
 * Existing quilt protocol-V2, authorization, recovery, and telemetry mechanisms
 * Implementation review findings IV-001 through IV-012
+* Resumed implementation review findings IV-003, IV-004, IV-007, and IV-010 through IV-014
 
 ## Success Criteria
 

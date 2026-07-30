@@ -265,6 +265,35 @@ $$;
 SQL
 }
 
+verify_canonical_attempt_schema() {
+  local database_url="$1"
+  psql "${database_url}" --no-psqlrc --set ON_ERROR_STOP=1 <<'SQL'
+DO $$
+BEGIN
+  IF to_regclass('public.canonical_attempts') IS NULL THEN
+    RAISE EXCEPTION 'Canonical attempt table is missing';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'canonical_attempts_parent_attempt_id_canonical_attempts_id_fk'
+      AND contype = 'f'
+  ) THEN
+    RAISE EXCEPTION 'Canonical attempt parent lineage foreign key is missing';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'canonical_attempts_parent_check'
+      AND contype = 'c'
+  ) THEN
+    RAISE EXCEPTION 'Canonical attempt parent-kind constraint is missing';
+  END IF;
+END
+$$;
+SQL
+}
+
 run_canonical_command() {
   local database_url="$1"
   shift
@@ -447,6 +476,8 @@ rehearse() {
   verify_authentication_schema "${upgrade_database_url}"
   verify_canonical_pointer_upgrade "${fresh_database_url}"
   verify_canonical_pointer_upgrade "${upgrade_database_url}"
+  verify_canonical_attempt_schema "${fresh_database_url}"
+  verify_canonical_attempt_schema "${upgrade_database_url}"
   verify_canonical_control_plane "${fresh_database_url}"
 
   backfill "${upgrade_database_url}"

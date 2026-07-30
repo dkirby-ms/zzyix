@@ -47,7 +47,8 @@ export const parseCanonicalTelemetryEvent = (value: unknown): CanonicalTelemetry
   const preWorld = value.quiltId === null && value.canonicalGeneration === null
   if (!worldScoped && !preWorld) throw new Error('Invalid canonical telemetry envelope')
   const required = [...base]
-  const optional: string[] = []
+  const optional: string[] = ['parentAttemptId']
+  if (value.parentAttemptId !== undefined && !UUID.test(String(value.parentAttemptId))) throw new Error('Invalid canonical telemetry envelope')
   switch (value.name) {
     case 'canonical_discovery':
       required.push('durationMs', 'httpStatus'); optional.push('reasonCode')
@@ -61,12 +62,12 @@ export const parseCanonicalTelemetryEvent = (value: unknown): CanonicalTelemetry
       break
     case 'canonical_reconnect':
       required.push('durationMs', 'attempts')
-      if (!finite(value.durationMs) || !safeInteger(value.attempts) || !['recovered', 'exhausted'].includes(String(value.outcome))) throw new Error('Invalid canonical reconnect event')
+      if (!finite(value.durationMs) || !safeInteger(value.attempts) || !UUID.test(String(value.parentAttemptId)) || !['recovered', 'exhausted'].includes(String(value.outcome))) throw new Error('Invalid canonical reconnect event')
       break
     case 'canonical_resubscribe':
       required.push('durationMs', 'requestedRooms', 'acceptedRooms', 'rejectedRooms', 'resyncRequired')
       if (!finite(value.durationMs) || ![value.requestedRooms, value.acceptedRooms, value.rejectedRooms, value.resyncRequired].every(safeInteger)
-        || !['completed', 'failed'].includes(String(value.outcome))) throw new Error('Invalid canonical resubscribe event')
+        || !UUID.test(String(value.parentAttemptId)) || !['completed', 'failed'].includes(String(value.outcome))) throw new Error('Invalid canonical resubscribe event')
       break
     case 'canonical_old_client_rejected':
       required.push('transport'); optional.push('requestedSchemaVersion', 'requestedProtocolVersion')

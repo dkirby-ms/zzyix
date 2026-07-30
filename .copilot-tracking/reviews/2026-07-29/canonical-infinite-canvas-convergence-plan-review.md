@@ -9,7 +9,7 @@
 * Changes log: `.copilot-tracking/changes/2026-07-29/canonical-infinite-canvas-convergence-changes.md`
 * Research: `.copilot-tracking/research/2026-07-29/canonical-infinite-canvas-convergence-research.md`
 * Reviewer: Task Reviewer
-* Scope: Full implementation review across Phases 0 through 5
+* Scope: Full implementation review across Phases 0 through 6, resumed after remediation
 
 ## Prior Review Context
 
@@ -19,14 +19,16 @@ replaces that planning-only status with implementation validation.
 
 ## Findings Summary
 
-* Critical: 5
-* Major: 6
+* Critical: 3
+* Major: 4
 * Minor: 1
 
-The controlling release blockers are optional retirement evidence enforcement, trust in
-non-derived report conclusions, forgeable entry-attempt telemetry, missing failure terminals,
-and residual canary controls in the final product path. Full evidence is recorded in
-`.copilot-tracking/reviews/2026-07-29/canonical-infinite-canvas-convergence-plan-quality.md`.
+Phase 6 closes six of the twelve prior findings, but release readiness remains blocked by
+an incomplete existing-app evidence deployment path, forgeable entry-attempt telemetry,
+invalid reconnect terminal lineage, residual session contracts, incomplete live boundary
+coverage, a reproducible standard-E2E placement failure, and overstated release artifacts.
+Current evidence is recorded in
+`.copilot-tracking/reviews/2026-07-29/canonical-infinite-canvas-convergence-plan-quality-phase6.md`.
 
 ## RPI Validation
 
@@ -51,7 +53,21 @@ and residual canary controls in the final product path. Full evidence is recorde
 
 Phase artifacts are stored under
 `.copilot-tracking/reviews/rpi/2026-07-29/canonical-infinite-canvas-convergence-plan-000-validation.md`
-through `canonical-infinite-canvas-convergence-plan-005-validation.md`.
+through `canonical-infinite-canvas-convergence-plan-006-validation.md`.
+
+## Phase 6 RPI Validation
+
+* Step 6.1: Partial. Mandatory evidence, derived report conclusions, and final canary removal
+	are present, but the existing-app CD branch references the retirement-report secret without
+	installing its current value.
+* Step 6.2: Failed. HTTP fallback attempt IDs remain caller-controlled, and reconnect cycles
+	do not have unique server-bound child lineage.
+* Step 6.3: Partial. Activation provenance and lease-loss handling are corrected, but retired
+	session contracts remain compiled and the ADR indentation defect remains.
+* Step 6.4: Failed. The full Socket.IO authentication chain and live product boundaries are
+	not composed in integration tests, release claims remain inaccurate, and standard E2E fails.
+
+Closed prior findings: IV-001, IV-002, IV-005, IV-006, IV-008, and IV-009.
 
 ## Implementation Quality
 
@@ -87,6 +103,22 @@ were merged:
 Standard Playwright, multi-replica Playwright, PostgreSQL-backed suites, and the migration
 rehearsal were not rerun because loopback PostgreSQL and Docker integration are unavailable.
 
+## Fresh Phase 6 Validation
+
+* Focused server and client remediation suites: Passed.
+* `npm run test:release-contract`: Passed, 9 tests.
+* `npm run lint`: Passed.
+* `npm run build`: Passed with the existing Vite chunk-size warning.
+* `npm test`: Passed, 368 tests with 9 skipped across 66 files.
+* `npm run test:e2e`: Failed, 13 passed and 1 failed. The authenticated product workflow
+	remained at `0 placed` after placement.
+* Isolated failed Playwright test: Failed again with the same missing `1 placed` assertion.
+* Multi-replica Playwright: Passed, 1 test.
+* Migration rehearsal: Passed, 10 tests.
+* `git diff --check`: Passed before review artifact updates.
+* VS Code diagnostics: Passed on reviewed source, workflow, and ADR files.
+* Ports 3001 and 5173: Clear. PostgreSQL was preserved.
+
 ## Missing Work and Deviations
 
 * Enforce and deploy immutable retirement evidence before compatibility can be retired.
@@ -115,7 +147,9 @@ rehearsal were not rerun because loopback PostgreSQL and Docker integration are 
 
 ## Overall Status
 
-Needs Rework. Five critical findings permit compatibility retirement without trustworthy
-promotion evidence or produce misleading promotion metrics. Correct the critical and major
-findings, then rerun PostgreSQL-backed tests, both Playwright suites, and migration rehearsal
-before treating the implementation as release-ready.
+Needs Rework. Three critical findings leave retirement evidence undeployable on the normal
+update path or permit misleading promotion metrics. Four major findings leave runtime
+retirement, composed integration coverage, release reporting, and the primary product
+placement acceptance incomplete. Correct all Critical and Major findings, then rerun the
+focused suites, release contracts, full workspace tests, both Playwright suites, and migration
+rehearsal before treating the implementation as release-ready.

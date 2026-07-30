@@ -2,7 +2,8 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import type { Pool, PoolClient } from 'pg'
 import { closeDatabaseBundle, getDatabaseBundle } from './client.js'
-import { RUNTIME_CHUNK_WORLD_SIZE, type SessionCanvasConfig, type TileInstance } from '../contracts.js'
+import { RUNTIME_CHUNK_WORLD_SIZE, type TileInstance } from '../contracts.js'
+import type { LegacySessionCanvasConfig as SessionCanvasConfig } from '../domain/legacySession.js'
 import { transformTile } from '../domain/tileGeometry.js'
 
 const DEFAULT_WIDTH = 10.4

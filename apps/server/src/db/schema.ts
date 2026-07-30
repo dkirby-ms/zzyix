@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -15,7 +16,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core'
-import type { SessionCanvasConfig } from '../contracts.js'
+import type { LegacySessionCanvasConfig as SessionCanvasConfig } from '../domain/legacySession.js'
 import {
   authorizationAuditChannelValues,
   authorizationAuditOutcomeValues,
@@ -158,6 +159,39 @@ export const canonicalWorld = pgTable(
     productKeyCheck: check('canonical_world_product_key_check', sql`${table.productKey} = 'canonical'`),
     statusCheck: check('canonical_world_status_check', sql`${table.status} in ('inactive', 'active')`),
     generationCheck: check('canonical_world_generation_check', sql`${table.generation} > 0`),
+  }),
+)
+
+export const canonicalAttempts = pgTable(
+  'canonical_attempts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    principalId: uuid('principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    parentAttemptId: uuid('parent_attempt_id').references(
+      (): AnyPgColumn => canonicalAttempts.id,
+      { onDelete: 'cascade' },
+    ),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumed: boolean('consumed').default(false).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    principalKindExpiryIndex: index('canonical_attempts_principal_kind_expiry_idx').on(
+      table.principalId,
+      table.kind,
+      table.expiresAt,
+    ),
+    expiryIndex: index('canonical_attempts_expiry_idx').on(table.expiresAt),
+    parentIndex: index('canonical_attempts_parent_attempt_id_idx').on(table.parentAttemptId),
+    kindCheck: check('canonical_attempts_kind_check', sql`${table.kind} in ('entry', 'reconnect', 'resubscribe')`),
+    parentCheck: check(
+      'canonical_attempts_parent_check',
+      sql`(${table.kind} = 'entry' and ${table.parentAttemptId} is null)
+        or (${table.kind} <> 'entry' and ${table.parentAttemptId} is not null)`,
+    ),
   }),
 )
 

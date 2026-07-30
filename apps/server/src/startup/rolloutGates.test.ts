@@ -34,8 +34,8 @@ const retirementEnvironment = (recommendation: 'promote' | 'hold' = 'promote') =
     return [
       { ...envelope, eventId: uuid(index + 1), name: 'canonical_discovery', outcome: 'success', durationMs: 1, httpStatus: 200 },
       { ...envelope, eventId: uuid(index + 101), name: 'canonical_entry', outcome: 'ready', durationMs: 1, selectedProtocolVersion: 2 },
-      { ...envelope, eventId: uuid(index + 201), name: 'canonical_reconnect', outcome: 'recovered', durationMs: 1, attempts: 1 },
-      { ...envelope, eventId: uuid(index + 301), name: 'canonical_resubscribe', outcome: 'completed', durationMs: 1, requestedRooms: 1, acceptedRooms: 1, rejectedRooms: 0, resyncRequired: 0 },
+      { ...envelope, eventId: uuid(index + 201), attemptId: uuid(index + 1_001), parentAttemptId: envelope.attemptId, name: 'canonical_reconnect', outcome: 'recovered', durationMs: 1, attempts: 1 },
+      { ...envelope, eventId: uuid(index + 301), attemptId: uuid(index + 2_001), parentAttemptId: envelope.attemptId, name: 'canonical_resubscribe', outcome: 'completed', durationMs: 1, requestedRooms: 1, acceptedRooms: 1, rejectedRooms: 0, resyncRequired: 0 },
     ]
   }).flat()
   events.push({

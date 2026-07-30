@@ -43,6 +43,12 @@ const issueToken = async (subject: string): Promise<string> => {
 }
 
 const connect = async (quiltId: string, token: string): Promise<{ socket: TestSocket; protocol: QuiltProtocolHandshake }> => {
+  const discovery = await fetch(new URL('/quilts/canonical', SERVER_URL), {
+    headers: { authorization: `Bearer ${token}` },
+  })
+  expect(discovery.ok).toBe(true)
+  const descriptor = await discovery.json() as { quiltId: string; generation: number; entryAttemptId: string }
+  expect(descriptor.quiltId).toBe(quiltId)
   const socket: TestSocket = io(SERVER_URL, {
     auth: {
       token,
@@ -50,8 +56,8 @@ const connect = async (quiltId: string, token: string): Promise<{ socket: TestSo
       clientId: `seam-${crypto.randomUUID()}`,
       schemaVersion: '2.0.0',
       protocolVersion: 2,
-      canonicalGeneration: 1,
-      entryAttemptId: crypto.randomUUID(),
+      canonicalGeneration: descriptor.generation,
+      entryAttemptId: descriptor.entryAttemptId,
     },
     transports: ['websocket'],
     reconnection: false,

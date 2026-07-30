@@ -1,6 +1,6 @@
 import type {
   CanonicalPatchNavigation,
-  CanonicalWorldDescriptor,
+  CanonicalWorldEntryDescriptor,
   EligibleCanonicalPatchesResponse,
   OwnershipCommandResponse,
 } from '../../../server/src/contracts'
@@ -38,16 +38,17 @@ export const claimPatch = async (
 export const discoverCanonicalWorld = async (
   authenticatedFetch: typeof fetch,
   apiOrigin: string,
-): Promise<CanonicalWorldDescriptor> => {
+): Promise<CanonicalWorldEntryDescriptor> => {
   const response = await authenticatedFetch(`${apiOrigin}/quilts/canonical`, { method: 'GET' })
   if (!response.ok) throw new Error(`Canonical world is unavailable (${response.status})`)
 
-  const descriptor = await response.json() as Partial<CanonicalWorldDescriptor>
-  if (descriptor.protocolVersion !== 2 || typeof descriptor.quiltId !== 'string' || descriptor.quiltId === '') {
+  const descriptor = await response.json() as Partial<CanonicalWorldEntryDescriptor>
+  if (descriptor.protocolVersion !== 2 || typeof descriptor.quiltId !== 'string' || descriptor.quiltId === ''
+    || typeof descriptor.entryAttemptId !== 'string' || descriptor.entryAttemptId === '') {
     throw new Error('Canonical world descriptor is invalid')
   }
 
-  return descriptor as CanonicalWorldDescriptor
+  return descriptor as CanonicalWorldEntryDescriptor
 }
 
 export const discoverEligibleCanonicalPatches = async (
