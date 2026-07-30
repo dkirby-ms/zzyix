@@ -983,7 +983,7 @@ app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
       if (!descriptor || !assignment) return null
       return {
         ...descriptor,
-        initialPatch: {
+        assignedPatch: {
           id: assignment.patchId,
           row: assignment.row,
           column: assignment.column,

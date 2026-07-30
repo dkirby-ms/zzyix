@@ -31,7 +31,7 @@ const browserPost = async (
   return { status: response.status, body: await response.json() as Record<string, unknown> }
 }, { url: `${SERVER_URL}${path}`, accessToken: token, body: data })
 
-test('signs in, creates a session, claims its patch, and places through the product UI', async ({ page }) => {
+test('assigns a stable patch on first sign-in and places without claim controls', async ({ page }) => {
   await page.addInitScript((subject) => {
     localStorage.removeItem('zzyix:e2e-authenticated')
     localStorage.setItem('zzyix:e2e-subject', subject)
@@ -40,7 +40,10 @@ test('signs in, creates a session, claims its patch, and places through the prod
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
-  await page.getByRole('button', { name: /^Claim / }).first().click()
+  const assignedPatch = page.getByText(/^Patch \d+, \d+$/)
+  await expect(assignedPatch).toBeVisible()
+  const assignedPatchLabel = await assignedPatch.textContent()
+  await expect(page.getByRole('button', { name: /^Claim / })).toHaveCount(0)
   const canvas = page.locator('canvas')
   await canvas.hover()
   await canvas.click()
@@ -53,6 +56,7 @@ test('signs in, creates a session, claims its patch, and places through the prod
   await expect(page.getByRole('heading', { name: 'Mosaic Atelier' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(assignedPatchLabel!)).toBeVisible()
 })
 
 test('renews after signed token expiry and keeps protected state available', async ({ page }) => {

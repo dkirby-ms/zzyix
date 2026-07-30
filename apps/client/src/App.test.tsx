@@ -85,6 +85,7 @@ const canonicalDescriptor = {
   generation: 2,
   entryAttemptId: '40000000-0000-4000-8000-000000000001',
   initialPatch: { id: '30000000-0000-4000-8000-000000000001', row: 0, column: 0 },
+  assignedPatch: { id: '30000000-0000-4000-8000-000000000001', row: 0, column: 0 },
 }
 
 const enterCanonicalCanvas = async (): Promise<void> => {
@@ -277,6 +278,7 @@ describe('App canonical canvas behavior', () => {
       originY: 0,
       generation: 1,
       initialPatch: { id: 'patch-root', row: 0, column: 0 },
+      assignedPatch: { id: 'patch-assigned', row: 0, column: 0 },
     })
 
     render(<App />)
@@ -309,7 +311,7 @@ describe('App canonical canvas behavior', () => {
     expect(await screen.findByTestId('mosaic-scene')).toBeInTheDocument()
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '5,5')
     expect(screen.getByRole('region', { name: 'Canonical patch navigation' })).toBeInTheDocument()
-    expect(setCanonicalPatchLinkMock).toHaveBeenCalledWith(expect.objectContaining({ patchId: 'patch-root' }))
+    expect(setCanonicalPatchLinkMock).toHaveBeenCalledWith(expect.objectContaining({ patchId: 'patch-assigned' }))
     expect(screen.queryByText('Choose a Canvas')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '← Back' })).not.toBeInTheDocument()
   })
@@ -319,6 +321,7 @@ describe('App canonical canvas behavior', () => {
       quiltId: 'quilt-1', legacyCanvasId: 'canonical-canvas', topology: 'toroidal', protocolVersion: 2,
       patchRows: 2, patchColumns: 2, patchWidth: 10, patchHeight: 10, originX: 0, originY: 0,
       generation: 1, initialPatch: { id: 'patch-root', row: 0, column: 0 },
+      assignedPatch: { id: 'patch-assigned', row: 0, column: 1 },
     })
     getCanonicalPatchLinkMock.mockReturnValue({ quiltId: 'quilt-1', patchId: 'patch-deep' })
     resolveCanonicalPatchNavigationMock.mockResolvedValue({

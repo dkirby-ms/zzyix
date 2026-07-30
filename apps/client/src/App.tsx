@@ -546,18 +546,18 @@ function ProtectedApp() {
     if (!canonicalDescriptor?.quiltId) return
 
     let cancelled = false
-    const rootPatch: CanonicalPatchNavigation = {
+    const assignedPatch: CanonicalPatchNavigation = {
       quiltId: canonicalDescriptor.quiltId,
-      patchId: canonicalDescriptor.initialPatch.id,
-      row: canonicalDescriptor.initialPatch.row,
-      column: canonicalDescriptor.initialPatch.column,
-      centerX: canonicalDescriptor.originX + (canonicalDescriptor.initialPatch.column + 0.5) * canonicalDescriptor.patchWidth,
-      centerY: canonicalDescriptor.originY + (canonicalDescriptor.initialPatch.row + 0.5) * canonicalDescriptor.patchHeight,
+      patchId: canonicalDescriptor.assignedPatch.id,
+      row: canonicalDescriptor.assignedPatch.row,
+      column: canonicalDescriptor.assignedPatch.column,
+      centerX: canonicalDescriptor.originX + (canonicalDescriptor.assignedPatch.column + 0.5) * canonicalDescriptor.patchWidth,
+      centerY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 0.5) * canonicalDescriptor.patchHeight,
     }
     const durableLink = getCanonicalPatchLink()
 
     if (!durableLink || durableLink.quiltId !== canonicalDescriptor.quiltId) {
-      focusCanonicalPatch(rootPatch)
+      focusCanonicalPatch(assignedPatch)
     } else {
       void resolveCanonicalPatchNavigation(
         auth.authenticatedFetch,
@@ -567,7 +567,7 @@ function ProtectedApp() {
       ).then((navigation) => {
         if (!cancelled) focusCanonicalPatch(navigation)
       }).catch(() => {
-        if (!cancelled) focusCanonicalPatch(rootPatch)
+        if (!cancelled) focusCanonicalPatch(assignedPatch)
       })
     }
 

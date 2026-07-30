@@ -43,7 +43,8 @@ export const discoverCanonicalWorld = async (
 
   const descriptor = await response.json() as Partial<CanonicalWorldEntryDescriptor>
   if (descriptor.protocolVersion !== 2 || typeof descriptor.quiltId !== 'string' || descriptor.quiltId === ''
-    || typeof descriptor.entryAttemptId !== 'string' || descriptor.entryAttemptId === '') {
+    || typeof descriptor.entryAttemptId !== 'string' || descriptor.entryAttemptId === ''
+    || typeof descriptor.assignedPatch?.id !== 'string' || descriptor.assignedPatch.id === '') {
     throw new Error('Canonical world descriptor is invalid')
   }
 

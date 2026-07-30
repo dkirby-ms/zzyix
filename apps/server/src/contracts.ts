@@ -182,6 +182,11 @@ export type CanonicalWorldDescriptor = {
 
 export type CanonicalWorldEntryDescriptor = CanonicalWorldDescriptor & {
   entryAttemptId: string
+  assignedPatch: {
+    id: string
+    row: number
+    column: number
+  }
 }
 
 export type CanonicalWorldUnavailableError = SafeApiError & {
