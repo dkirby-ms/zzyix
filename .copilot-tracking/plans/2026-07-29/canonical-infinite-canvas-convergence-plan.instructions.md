@@ -118,6 +118,19 @@ Steps 3.1 and 3.2 execute sequentially because both integrate through `App.tsx` 
 * [x] Step 5.3: Report issues requiring new product or architecture planning
   * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Lines 533-538)
 
+### [ ] Implementation Phase 6: Remediate Implementation Review Findings
+
+<!-- parallelizable: false -->
+
+* [x] Step 6.1: Enforce trustworthy retirement evidence and final-state deployment
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 6, Step 6.1)
+* [x] Step 6.2: Bind telemetry identity and make every terminal outcome observable
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 6, Step 6.2)
+* [x] Step 6.3: Enforce canonical provenance, presence lease loss, and runtime retirement
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 6, Step 6.3)
+* [ ] Step 6.4: Add composed boundary coverage and rerun release validation
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 6, Step 6.4)
+
 ## Planning Log
 
 See `.copilot-tracking/plans/logs/2026-07-29/canonical-infinite-canvas-convergence-log.md`
@@ -130,6 +143,7 @@ for discrepancy tracking, implementation paths considered, and suggested follow-
 * Disposable loopback PostgreSQL for migration and integration tests
 * Existing protocol-V2, patch authorization, recovery, and telemetry mechanisms
 * Runtime client configuration and Azure Container Apps deployment propagation
+* Phase 6 implementation review findings IV-001 through IV-012
 
 ## Success Criteria
 

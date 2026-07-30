@@ -3,39 +3,22 @@ import { lookup } from 'node:dns/promises'
 import express from 'express'
 import { sql } from 'drizzle-orm'
 import { createServer } from 'http'
-import { Server } from 'socket.io'
+import { Server, type Socket } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
 import { rateLimit } from 'express-rate-limit'
-import { RUNTIME_CHUNK_WORLD_SIZE, SCHEMA_VERSION, QUILT_PROTOCOL_VERSION } from './contracts.js'
+import { SCHEMA_VERSION, QUILT_PROTOCOL_VERSION } from './contracts.js'
 import type {
-  CanvasSizePreset,
-  CreateSessionRequest,
   ClientToServerEvents,
   ServerToClientEvents,
   InterServerEvents,
   SocketData,
   ConnectionAuth,
   Session,
-  ClientPresence,
   PlaceTilePayload,
-  PlaceTileAck,
-  PlaceTileRejectReason,
   RemoveTilePayload,
-  RemoveTileAck,
-  TilePlacedPayload,
-  TileRemovedPayload,
-  ListSessionsResponse,
   SelectionUpdatePayload,
-  BoundsPolicy,
-  SessionCanvasConfig,
   ChunkId,
-  SubscribeChunksPayload,
-  UnsubscribeChunksPayload,
-  RequestChunkSnapshotPayload,
   ChunkSnapshotPayload,
-  ChunkPayloadMode,
-  RealtimeCapabilities,
-  ChunkCoordinationMetadata,
   QuiltProtocolLimits,
   QuiltRoomRequest,
   SubscribeQuiltAreaAck,
@@ -57,20 +40,10 @@ import type {
 import {
   closeDatabaseBundle,
   getDatabaseBundle,
-  listTilesByChunksWithParity,
-  listActiveParticipants,
-  loadSessionReplayRecord,
-  loadSessionRecord,
   loadPatchDeliverySnapshot,
   loadPatchDeliveryOperationsAfter,
   loadQuiltDeliveryContext,
-  markParticipantJoined,
-  markParticipantLeft,
-  persistSnapshotIfNeeded,
-  persistTilePlacement,
-  persistTileRemoval,
   loadPrincipalProfile,
-  createProtectedSession,
   abandonPatch,
   acceptOwnershipTransfer,
   cancelOwnershipTransfer,
@@ -91,15 +64,13 @@ import {
   reapExpiredQuiltPresenceLeases,
 } from './db/index.js'
 import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
-import { ResourceNotFoundError, type SessionSummaryRecord } from './db/repository.js'
+import { ResourceNotFoundError } from './db/repository.js'
 import type { PatchDeliveryOperation, QuiltDeliveryContext } from './db/repository.js'
-import { defaultBounds, validatePlacement } from './domain/placementSolver.js'
 import { startRetentionJob } from './jobs/retention.js'
 import { buildPatchRoomAccess, resolveQuiltRooms } from './realtime/quiltRooms.js'
 import { loadAuthenticationConfig } from './auth/config.js'
 import { createTokenVerifier, type TokenVerifier } from './auth/tokenVerifier.js'
 import {
-  resolveCanonicalDiscoveryEnabled,
   resolveProtocolV2MutationEnabled,
   validateProductionRolloutGates,
 } from './startup/rolloutGates.js'
@@ -114,67 +85,18 @@ import {
 } from './auth/httpAuth.js'
 import { AuthenticationError } from './auth/errors.js'
 import { createSocketAuth } from './auth/socketAuth.js'
-import {
-  decideLegacyRetirement,
-  loadLegacyRetirementGates,
-} from './migration/quiltRollout.js'
 import { configureQuiltTelemetry, emitQuiltTelemetry } from './migration/quiltTelemetry.js'
 import { parseCanonicalTelemetryEvent } from './operations/canonicalRetirementReportCli.js'
 
-type AuthoritativeSessionState = {
-  session: Session
-  canvasConfig: SessionCanvasConfig
-  clients: Map<string, ClientPresence>
-  lastOpSeq: number
-}
-
-type PresenceRepository = {
-  listActiveParticipants: typeof listActiveParticipants
-  loadSessionReplayRecord: typeof loadSessionReplayRecord
-  markParticipantJoined: typeof markParticipantJoined
-  markParticipantLeft: typeof markParticipantLeft
-}
-
-const sessions = new Map<string, AuthoritativeSessionState>()
-const sessionClientSockets = new Map<string, Map<string, Set<string>>>()
-const defaultPresenceRepository: PresenceRepository = {
-  listActiveParticipants,
-  loadSessionReplayRecord,
-  markParticipantJoined,
-  markParticipantLeft,
-}
 const TILE_SHAPES = new Set<PlaceTilePayload['shape']>(['square', 'triangle', 'rectangle', 'l-shape'])
 const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'glass', 'stone'])
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
-const DEFAULT_SESSION_STALE_MS = 30 * 60 * 1000
 const QUILT_PRESENCE_LEASE_TTL_MS = Number(process.env.QUILT_PRESENCE_LEASE_TTL_MS ?? 45_000)
 const QUILT_PRESENCE_HEARTBEAT_MS = Number(process.env.QUILT_PRESENCE_HEARTBEAT_MS ?? 15_000)
 const CANONICAL_TARGET_VALIDATION_INTERVAL_MS = Number(process.env.CANONICAL_TARGET_VALIDATION_INTERVAL_MS ?? 30_000)
-const registerRetiredCanvasHandlers = false
-const CANVAS_WIDTH = defaultBounds.maxX - defaultBounds.minX
-const CANVAS_HEIGHT = defaultBounds.maxY - defaultBounds.minY
-const DEFAULT_BOUNDS_POLICY: BoundsPolicy = {
-  mode: 'bounded',
-  bounds: defaultBounds,
-}
-const DEFAULT_CANVAS_CONFIG: SessionCanvasConfig = {
-  canvasSize: {
-    width: CANVAS_WIDTH,
-    height: CANVAS_HEIGHT,
-  },
-  boundsPolicy: DEFAULT_BOUNDS_POLICY,
-}
 
-const CANVAS_PRESET_MULTIPLIER: Record<CanvasSizePreset, number> = {
-  classic: 1,
-  expanded: 2,
-  vast: 3,
-}
-
-const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
-const CHUNK_ROOM_PREFIX = 'chunk'
 const REPLICA_ID = process.env.REPLICA_ID ?? process.env.HOSTNAME ?? `local-${process.pid}`
 const SOCKET_AUTH_RATE_LIMIT_WINDOW_MS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_WINDOW_MS ?? 60_000)
 const SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.SOCKET_AUTH_RATE_LIMIT_MAX_ATTEMPTS ?? 60)
@@ -227,14 +149,7 @@ const isAggregatePayloadEnabledByDefault = parseBooleanFlag(process.env.FEATURE_
 const isChunkCanaryEnabled = parseBooleanFlag(process.env.FEATURE_CHUNK_CANARY_ENABLED, false)
 const canarySessionIds = parseCanarySessions(process.env.FEATURE_CHUNK_CANARY_SESSION_IDS)
 const isMultiReplicaReady = parseBooleanFlag(process.env.FEATURE_MULTI_REPLICA_READY, false)
-const isLegacyMutationCompatibilityEnabled = parseBooleanFlag(
-  process.env.FEATURE_LEGACY_MUTATION_COMPATIBILITY_ENABLED,
-  true,
-)
 const isProtocolV2MutationEnabled = resolveProtocolV2MutationEnabled()
-const isCanonicalDiscoveryEnabled = resolveCanonicalDiscoveryEnabled()
-const legacyRetirementGates = loadLegacyRetirementGates()
-const legacyRetirementDecision = decideLegacyRetirement(legacyRetirementGates)
 const QUILT_PROTOCOL_LIMITS: QuiltProtocolLimits = {
   maxRoomsPerConnection: Number(process.env.QUILT_V2_MAX_ROOMS_PER_CONNECTION ?? 64),
   maxRoomsPerRequest: Number(process.env.QUILT_V2_MAX_ROOMS_PER_REQUEST ?? 32),
@@ -314,14 +229,15 @@ export const recordQuiltClientRuntimeMetrics = (
 
 export const recordCanonicalClientTelemetry = (
   payload: unknown,
-  context: { quiltId: string; canonicalGeneration: number; cohort: 'canary' | 'global' },
+  context: { entryAttemptId: string; quiltId: string; canonicalGeneration: number; cohort: 'canary' | 'global' },
 ): boolean => {
-  if (!isObjectRecord(payload) || typeof payload.attemptId !== 'string' || !UUID_PATTERN.test(payload.attemptId)) return false
+  if (!isObjectRecord(payload) || Object.hasOwn(payload, 'attemptId')) return false
   try {
     const event = parseCanonicalTelemetryEvent({
       ...payload,
       schemaVersion: 1,
       eventId: crypto.randomUUID(),
+      attemptId: context.entryAttemptId,
       occurredAt: new Date().toISOString(),
       quiltId: context.quiltId,
       canonicalGeneration: context.canonicalGeneration,
@@ -333,6 +249,19 @@ export const recordCanonicalClientTelemetry = (
   } catch {
     return false
   }
+}
+
+export const renewPresenceLeaseOrDisconnect = async (
+  renew: () => Promise<boolean>,
+  disconnect: () => void,
+): Promise<boolean> => {
+  try {
+    if (await renew()) return true
+  } catch {
+    // Rejected renewals and missing rows both mean the server no longer owns this lease.
+  }
+  disconnect()
+  return false
 }
 
 export const recordCanonicalSafetyTelemetry = (
@@ -372,61 +301,6 @@ export const resolveLegacySocketAccess = (context: QuiltDeliveryContext | null):
   }
 }
 
-const getRealtimeCapabilities = (sessionId: string): RealtimeCapabilities => {
-  const canarySessionEnabled = !isChunkCanaryEnabled || canarySessionIds.has(sessionId)
-  const chunkStreamingEnabled = isChunkStreamingEnabledByDefault && canarySessionEnabled
-  const aggregateSnapshotEnabled = isAggregatePayloadEnabledByDefault && chunkStreamingEnabled
-
-  return {
-    chunkStreamingEnabled,
-    aggregateSnapshotEnabled,
-    chunkCanaryEnabled: isChunkCanaryEnabled,
-    multiReplicaReady: isMultiReplicaReady,
-  }
-}
-
-const resolvePayloadMode = (
-  requestedMode: ChunkPayloadMode | undefined,
-  capabilities: RealtimeCapabilities,
-): ChunkPayloadMode => {
-  if (requestedMode === 'aggregate' && capabilities.aggregateSnapshotEnabled) {
-    return 'aggregate'
-  }
-
-  return 'fine'
-}
-
-const buildCoordinationMetadata = (): ChunkCoordinationMetadata => ({
-  replicaId: REPLICA_ID,
-  membershipScope: isMultiReplicaReady ? 'adapter-shared' : 'process-local',
-  membershipAssumption: isMultiReplicaReady ? 'authoritative' : 'best-effort',
-  emittedAt: Date.now(),
-})
-
-const chunkTelemetry = {
-  subscribeEvents: 0,
-  unsubscribeEvents: 0,
-  resyncEvents: 0,
-  snapshotEvents: 0,
-  snapshotBytesFine: 0,
-  snapshotBytesAggregate: 0,
-}
-
-const emitChunkTelemetry = (
-  event: 'chunk_subscribe' | 'chunk_unsubscribe' | 'chunk_snapshot' | 'chunk_resync_required',
-  payload: Record<string, unknown>,
-): void => {
-  writeLog('info', event, payload)
-}
-
-const toChunkId = (x: number, y: number): ChunkId => `${x}:${y}`
-
-const worldToChunk = (x: number, y: number, chunkWorldSize: number = CHUNK_WORLD_SIZE): ChunkId => {
-  const chunkX = Math.floor(x / chunkWorldSize)
-  const chunkY = Math.floor(y / chunkWorldSize)
-  return toChunkId(chunkX, chunkY)
-}
-
 const parseChunkId = (chunkId: string): { x: number; y: number } | null => {
   const [rawX, rawY] = chunkId.split(':')
   const x = Number(rawX)
@@ -438,156 +312,8 @@ const parseChunkId = (chunkId: string): { x: number; y: number } | null => {
   return { x, y }
 }
 
-const chunkRoomName = (sessionId: string, chunkId: ChunkId): string => `${CHUNK_ROOM_PREFIX}:${sessionId}:${chunkId}`
-
-const chunkIdsToCoordinates = (chunkIds: ChunkId[]): Array<{ x: number; y: number }> =>
-  chunkIds
-    .map((chunkId) => parseChunkId(chunkId))
-    .filter((chunk): chunk is { x: number; y: number } => chunk !== null)
-
 const isChunkId = (value: unknown): value is ChunkId =>
   typeof value === 'string' && parseChunkId(value) !== null
-
-const isChunkCursor = (value: unknown): value is { opSeq: number; revision: number } => {
-  if (!isObjectRecord(value)) {
-    return false
-  }
-
-  const opSeq = value.opSeq
-  const revision = value.revision
-  return (
-    typeof opSeq === 'number'
-    && Number.isInteger(opSeq)
-    && opSeq >= 0
-    && typeof revision === 'number'
-    && Number.isInteger(revision)
-    && revision >= 0
-  )
-}
-
-const isSubscribeChunksPayload = (value: unknown): value is SubscribeChunksPayload => {
-  if (!isObjectRecord(value)) {
-    return false
-  }
-
-  if (typeof value.canvasId !== 'string' || value.canvasId.length === 0) {
-    return false
-  }
-
-  if (!Array.isArray(value.chunks) || value.chunks.some((chunkId) => !isChunkId(chunkId))) {
-    return false
-  }
-
-  if (value.payloadMode !== undefined && value.payloadMode !== 'fine' && value.payloadMode !== 'aggregate') {
-    return false
-  }
-
-  if (value.clientOffsetByChunk !== undefined) {
-    if (!isObjectRecord(value.clientOffsetByChunk)) {
-      return false
-    }
-
-    for (const [chunkId, cursor] of Object.entries(value.clientOffsetByChunk)) {
-      if (!isChunkId(chunkId) || !isChunkCursor(cursor)) {
-        return false
-      }
-    }
-  }
-
-  return true
-}
-
-const isUnsubscribeChunksPayload = (value: unknown): value is UnsubscribeChunksPayload => {
-  if (!isObjectRecord(value)) {
-    return false
-  }
-
-  if (typeof value.canvasId !== 'string' || value.canvasId.length === 0) {
-    return false
-  }
-
-  if (!Array.isArray(value.chunks) || value.chunks.some((chunkId) => !isChunkId(chunkId))) {
-    return false
-  }
-
-  return true
-}
-
-const isRequestChunkSnapshotPayload = (value: unknown): value is RequestChunkSnapshotPayload => {
-  if (!isObjectRecord(value)) {
-    return false
-  }
-
-  if (typeof value.canvasId !== 'string' || value.canvasId.length === 0) {
-    return false
-  }
-
-  if (!Array.isArray(value.chunks) || value.chunks.some((chunkId) => !isChunkId(chunkId))) {
-    return false
-  }
-
-  if (value.payloadMode !== undefined && value.payloadMode !== 'fine' && value.payloadMode !== 'aggregate') {
-    return false
-  }
-
-  return true
-}
-
-const buildChunkSnapshot = (
-  canvasId: string,
-  chunks: ChunkId[],
-  sessionTiles: Session['tiles'],
-  currentOpSeq: number,
-  currentRevision: number,
-  payloadMode: ChunkPayloadMode,
-): ChunkSnapshotPayload => {
-  const uniqueChunks = Array.from(new Set(chunks))
-  const tileGroups = new Map<ChunkId, Session['tiles']>()
-
-  for (const chunkId of uniqueChunks) {
-    tileGroups.set(chunkId, [])
-  }
-
-  for (const tile of sessionTiles) {
-    const tileChunk = worldToChunk(tile.transform.position.x, tile.transform.position.y)
-    if (!tileGroups.has(tileChunk)) {
-      continue
-    }
-
-    tileGroups.get(tileChunk)?.push(tile)
-  }
-
-  return {
-    canvasId,
-    payloadMode,
-    coordination: buildCoordinationMetadata(),
-    chunks: uniqueChunks.map((chunkId) => ({
-      chunkId,
-      tiles: payloadMode === 'aggregate' ? [] : (tileGroups.get(chunkId) ?? []),
-      aggregate: payloadMode === 'aggregate'
-        ? (() => {
-            const groupedTiles = tileGroups.get(chunkId) ?? []
-            const byShape: Partial<Record<PlaceTilePayload['shape'], number>> = {}
-            const byMaterial: Partial<Record<PlaceTilePayload['material'], number>> = {}
-            for (const tile of groupedTiles) {
-              byShape[tile.shape] = (byShape[tile.shape] ?? 0) + 1
-              byMaterial[tile.material] = (byMaterial[tile.material] ?? 0) + 1
-            }
-
-            return {
-              tileCount: groupedTiles.length,
-              byShape,
-              byMaterial,
-            }
-          })()
-        : undefined,
-      opSeq: currentOpSeq,
-      revision: currentRevision,
-    })),
-    serverOpSeq: currentOpSeq,
-    serverRevision: currentRevision,
-  }
-}
 
 export const buildChunkAggregate = (tiles: Session['tiles']) => {
   const byShape: NonNullable<ChunkSnapshotPayload['chunks'][number]['aggregate']>['byShape'] = {}
@@ -625,39 +351,6 @@ export const quiltChunkRoomName = (canonicalRoomId: string, chunkId: ChunkId): s
   `${canonicalRoomId}:chunk:${chunkId}`
 
 export const quiltPresenceRoomName = (quiltId: string): string => `quilt:${quiltId}:presence`
-
-const cloneCanvasConfig = (config: SessionCanvasConfig): SessionCanvasConfig => ({
-  canvasSize: {
-    width: config.canvasSize.width,
-    height: config.canvasSize.height,
-  },
-  boundsPolicy: config.boundsPolicy.mode === 'bounded'
-    ? {
-        mode: 'bounded',
-        bounds: {
-          ...config.boundsPolicy.bounds,
-        },
-      }
-    : {
-        mode: 'unbounded',
-      },
-})
-
-export const buildListSessionsResponse = (summaries: SessionSummaryRecord[]): ListSessionsResponse => ({
-  sessions: summaries.map((summary) => {
-    const resolvedCanvasConfig = sessions.get(summary.id)?.canvasConfig ?? summary.canvasConfig ?? DEFAULT_CANVAS_CONFIG
-    return {
-      id: summary.id,
-      displayName: `Canvas ${summary.id.slice(0, 8)}`,
-      participantCount: summary.participantCount,
-      canvasConfig: cloneCanvasConfig(resolvedCanvasConfig),
-      canvasSize: {
-        width: resolvedCanvasConfig.canvasSize.width,
-        height: resolvedCanvasConfig.canvasSize.height,
-      },
-    }
-  }),
-})
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
@@ -914,42 +607,6 @@ export const isValidTileId = (tileId: string): boolean => UUID_PATTERN.test(tile
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
 
-const isCanvasSizePreset = (value: unknown): value is CanvasSizePreset =>
-  value === 'classic' || value === 'expanded' || value === 'vast'
-
-export const isCreateSessionRequest = (value: unknown): value is CreateSessionRequest => {
-  if (!isObjectRecord(value)) {
-    return false
-  }
-
-  if (value.canvasPreset === undefined) {
-    return true
-  }
-
-  return isCanvasSizePreset(value.canvasPreset)
-}
-
-export const resolveCanvasConfigFromPreset = (preset: CanvasSizePreset | undefined): SessionCanvasConfig => {
-  const normalizedPreset: CanvasSizePreset = preset ?? 'expanded'
-  const multiplier = CANVAS_PRESET_MULTIPLIER[normalizedPreset] ?? CANVAS_PRESET_MULTIPLIER.expanded
-
-  return {
-    canvasSize: {
-      width: Number((CANVAS_WIDTH * multiplier).toFixed(4)),
-      height: Number((CANVAS_HEIGHT * multiplier).toFixed(4)),
-    },
-    boundsPolicy: {
-      mode: 'bounded',
-      bounds: {
-        minX: Number((defaultBounds.minX * multiplier).toFixed(4)),
-        maxX: Number((defaultBounds.maxX * multiplier).toFixed(4)),
-        minY: Number((defaultBounds.minY * multiplier).toFixed(4)),
-        maxY: Number((defaultBounds.maxY * multiplier).toFixed(4)),
-      },
-    },
-  }
-}
-
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value)
 
@@ -1058,19 +715,6 @@ export const isQuiltRemoveTileRequest = (payload: unknown): payload is QuiltRemo
   && typeof payload.tileId === 'string'
   && UUID_PATTERN.test(payload.tileId)
 
-const isPointerMovePayload = (payload: unknown): payload is { position: { x: number; y: number } } => {
-  if (!isObjectRecord(payload)) {
-    return false
-  }
-
-  const position = payload.position
-  if (!isObjectRecord(position)) {
-    return false
-  }
-
-  return isFiniteNumber(position.x) && isFiniteNumber(position.y)
-}
-
 export const isSelectionUpdatePayload = (payload: unknown): payload is SelectionUpdatePayload => {
   if (!isObjectRecord(payload)) {
     return false
@@ -1140,323 +784,6 @@ export const isSocketHandshakeOriginAllowed = (
   return typeof requestOrigin === 'string'
     && requestOrigin !== 'null'
     && isOriginAllowed(requestOrigin, allowedOrigin)
-}
-
-export const toRejectReason = (reason: string): PlaceTileRejectReason => {
-  if (reason.startsWith('out-of-bounds')) {
-    return 'OUT_OF_BOUNDS'
-  }
-  if (reason.startsWith('overlap')) {
-    return 'OVERLAP'
-  }
-  if (reason.startsWith('gap too large')) {
-    return 'GAP_TOO_LARGE'
-  }
-  return 'PLACEMENT_REJECTED'
-}
-
-export const createAuthoritativeSessionState = (
-  sessionId: string,
-  now: number = Date.now(),
-  canvasConfig: SessionCanvasConfig = DEFAULT_CANVAS_CONFIG,
-): AuthoritativeSessionState => {
-  const resolvedCanvasConfig = cloneCanvasConfig(canvasConfig)
-
-  return {
-    session: {
-      id: sessionId,
-      tiles: [],
-      boundsPolicy: resolvedCanvasConfig.boundsPolicy,
-      createdAt: now,
-      updatedAt: now,
-    },
-    canvasConfig: resolvedCanvasConfig,
-    clients: new Map(),
-    lastOpSeq: 0,
-  }
-}
-
-export const shouldCleanupSession = (
-  state: AuthoritativeSessionState,
-  now: number,
-  staleAfterMs: number,
-): boolean => {
-  if (state.clients.size > 0) {
-    return false
-  }
-
-  if (state.session.tiles.length === 0) {
-    return true
-  }
-
-  return now - state.session.updatedAt >= staleAfterMs
-}
-
-export const cleanupSessions = (
-  now: number = Date.now(),
-  staleAfterMs: number = DEFAULT_SESSION_STALE_MS,
-  preserveSessionId?: string,
-): string[] => {
-  const removedSessionIds: string[] = []
-
-  for (const [sessionId, state] of sessions) {
-    if (preserveSessionId && sessionId === preserveSessionId) {
-      continue
-    }
-
-    if (shouldCleanupSession(state, now, staleAfterMs)) {
-      sessions.delete(sessionId)
-      removedSessionIds.push(sessionId)
-    }
-  }
-
-  return removedSessionIds
-}
-
-export const getSessionState = (sessionId: string): AuthoritativeSessionState => {
-  cleanupSessions(Date.now(), DEFAULT_SESSION_STALE_MS, sessionId)
-
-  const existing = sessions.get(sessionId)
-  if (existing) {
-    return existing
-  }
-
-  const created = createAuthoritativeSessionState(sessionId)
-  sessions.set(sessionId, created)
-  return created
-}
-
-export const registerClientSocket = (
-  sessionId: string,
-  clientId: string,
-  socketId: string,
-): number => {
-  let sessionMembership = sessionClientSockets.get(sessionId)
-  if (!sessionMembership) {
-    sessionMembership = new Map<string, Set<string>>()
-    sessionClientSockets.set(sessionId, sessionMembership)
-  }
-
-  let clientSockets = sessionMembership.get(clientId)
-  if (!clientSockets) {
-    clientSockets = new Set<string>()
-    sessionMembership.set(clientId, clientSockets)
-  }
-
-  clientSockets.add(socketId)
-  return clientSockets.size
-}
-
-export const unregisterClientSocket = (
-  sessionId: string,
-  clientId: string,
-  socketId: string,
-): number => {
-  const sessionMembership = sessionClientSockets.get(sessionId)
-  if (!sessionMembership) {
-    return 0
-  }
-
-  const clientSockets = sessionMembership.get(clientId)
-  if (!clientSockets) {
-    return 0
-  }
-
-  clientSockets.delete(socketId)
-  const remainingSockets = clientSockets.size
-
-  if (remainingSockets === 0) {
-    sessionMembership.delete(clientId)
-  }
-
-  if (sessionMembership.size === 0) {
-    sessionClientSockets.delete(sessionId)
-  }
-
-  return remainingSockets
-}
-
-export const initializeParticipantPresence = async (
-  sessionId: string,
-  clientId: string,
-  joinedAt: number,
-  repository: PresenceRepository = defaultPresenceRepository,
-): Promise<{
-  joinedClient: ClientPresence
-  snapshot: {
-    session: Session
-    canvasConfig: SessionCanvasConfig
-    clients: ClientPresence[]
-    lastOpSeq: number
-    revision: number
-  }
-}> => {
-  const joinedClient = await repository.markParticipantJoined(sessionId, clientId, joinedAt)
-  const record = await repository.loadSessionReplayRecord(sessionId)
-
-  return {
-    joinedClient,
-    snapshot: {
-      session: record.session,
-      canvasConfig: cloneCanvasConfig(record.canvasConfig ?? DEFAULT_CANVAS_CONFIG),
-      clients: record.clients,
-      lastOpSeq: record.lastOpSeq,
-      revision: record.revision,
-    },
-  }
-}
-
-export const finalizeParticipantPresence = async (
-  sessionId: string,
-  clientId: string,
-  leftAt: number,
-  repository: PresenceRepository = defaultPresenceRepository,
-): Promise<{
-  activeClients: ClientPresence[]
-  shouldCleanup: boolean
-}> => {
-  await repository.markParticipantLeft(sessionId, clientId, leftAt)
-  const activeClients = await repository.listActiveParticipants(sessionId)
-
-  return {
-    activeClients,
-    shouldCleanup: activeClients.length === 0,
-  }
-}
-
-const nextOpSeq = (state: AuthoritativeSessionState): number => {
-  state.lastOpSeq += 1
-  return state.lastOpSeq
-}
-
-export const applyPlaceTile = (
-  state: AuthoritativeSessionState,
-  payload: PlaceTilePayload,
-  placedBy: string,
-): {
-  opSeq: number
-  ack: PlaceTileAck
-  event?: TilePlacedPayload
-} => {
-  const opSeq = nextOpSeq(state)
-  const validation = validatePlacement(payload.shape, payload.transform, state.session.tiles, state.canvasConfig.boundsPolicy)
-
-  if (!validation.valid) {
-    return {
-      opSeq,
-      ack: {
-        placed: null,
-        rejected: true,
-        reason: toRejectReason(validation.reason),
-      },
-    }
-  }
-
-  const tile = {
-    id: payload.tileId,
-    ...payload,
-    createdAt: Date.now(),
-  }
-
-  state.session.tiles.push(tile)
-  state.session.updatedAt = Date.now()
-
-  return {
-    opSeq,
-    ack: {
-      placed: tile,
-      rejected: false,
-      opSeq,
-      newRevision: opSeq,
-    },
-    event: {
-      tile,
-      placedBy,
-      opSeq,
-      revision: opSeq,
-    },
-  }
-}
-
-export const applyRemoveTile = (
-  state: AuthoritativeSessionState,
-  payload: RemoveTilePayload,
-  removedBy: string,
-): {
-  opSeq: number
-  ack: RemoveTileAck
-  event?: TileRemovedPayload
-} => {
-  const opSeq = nextOpSeq(state)
-
-  if (!isValidTileId(payload.tileId)) {
-    return {
-      opSeq,
-      ack: { removed: false },
-    }
-  }
-
-  const index = state.session.tiles.findIndex((tile) => tile.id === payload.tileId)
-  if (index === -1) {
-    return {
-      opSeq,
-      ack: { removed: false },
-    }
-  }
-
-  state.session.tiles.splice(index, 1)
-  state.session.updatedAt = Date.now()
-
-  return {
-    opSeq,
-    ack: { removed: true, opSeq, newRevision: opSeq },
-    event: {
-      tileId: payload.tileId,
-      removedBy,
-      opSeq,
-      revision: opSeq,
-    },
-  }
-}
-
-export const handlePlaceTileRequest = (
-  state: AuthoritativeSessionState,
-  payload: unknown,
-  placedBy: string,
-): {
-  opSeq?: number
-  ack: PlaceTileAck
-  event?: TilePlacedPayload
-} => {
-  if (!isPlaceTilePayload(payload)) {
-    return {
-      ack: {
-        placed: null,
-        rejected: true,
-        reason: 'PLACEMENT_REJECTED',
-      },
-    }
-  }
-
-  return applyPlaceTile(state, payload, placedBy)
-}
-
-export const handleRemoveTileRequest = (
-  state: AuthoritativeSessionState,
-  payload: unknown,
-  removedBy: string,
-): {
-  opSeq?: number
-  ack: RemoveTileAck
-  event?: TileRemovedPayload
-} => {
-  if (!isRemoveTilePayload(payload)) {
-    return {
-      ack: { removed: false },
-    }
-  }
-
-  return applyRemoveTile(state, payload, removedBy)
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -1643,8 +970,8 @@ export const sendCanonicalWorldDiscovery = async (
       eventId: crypto.randomUUID(),
       attemptId: UUID_PATTERN.test(attemptId) ? attemptId : crypto.randomUUID(),
       occurredAt: new Date().toISOString(),
-      quiltId: descriptor?.quiltId ?? '00000000-0000-4000-8000-000000000000',
-      canonicalGeneration: descriptor?.generation ?? 1,
+      quiltId: descriptor?.quiltId ?? null,
+      canonicalGeneration: descriptor?.generation ?? null,
       cohort: 'global',
       name: 'canonical_discovery',
       outcome,
@@ -1657,21 +984,11 @@ export const sendCanonicalWorldDiscovery = async (
 
 app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
   getPrincipalContext(req)
-  await sendCanonicalWorldDiscovery(res, discoverCanonicalWorld, isCanonicalDiscoveryEnabled, req.header('x-canonical-attempt-id'))
+  await sendCanonicalWorldDiscovery(res, discoverCanonicalWorld, true, req.header('x-canonical-attempt-id'))
 })
 
 app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, async (req, res) => {
   const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
-  if (!isCanonicalDiscoveryEnabled) {
-    res.status(503).json({
-      code: 'canonical_world_unavailable',
-      message: 'The canonical world is temporarily unavailable.',
-      requestId,
-      retryAfterSeconds: 30,
-    } satisfies CanonicalWorldUnavailableError)
-    return
-  }
-
   const result = await listEligibleCanonicalPatches(getPrincipalContext(req).principalId)
   if (!result) {
     res.status(503).json({
@@ -1683,6 +1000,27 @@ app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, async (req, 
     return
   }
   res.status(200).json(result)
+})
+
+app.post('/quilts/canonical/telemetry', requireHttpPrincipal, async (req, res) => {
+  getPrincipalContext(req)
+  const entryAttemptId = req.header('x-canonical-attempt-id')
+  const descriptor = await discoverCanonicalWorld()
+  if (!descriptor || !entryAttemptId || !UUID_PATTERN.test(entryAttemptId)
+    || !recordCanonicalClientTelemetry(req.body, {
+      entryAttemptId,
+      quiltId: descriptor.quiltId,
+      canonicalGeneration: descriptor.generation,
+      cohort: 'global',
+    })) {
+    res.status(400).json({
+      code: 'invalid_request',
+      message: 'The request payload is invalid.',
+      requestId: res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID(),
+    } satisfies SafeApiError)
+    return
+  }
+  res.status(202).end()
 })
 
 app.get('/quilts/:quiltId/patches/:patchId/navigation', requireHttpPrincipal, async (req, res) => {
@@ -1771,8 +1109,8 @@ export const sendClientUpgradeRequired = (response: express.Response, requestId:
     eventId: crypto.randomUUID(),
     attemptId: crypto.randomUUID(),
     occurredAt: new Date().toISOString(),
-    quiltId: '00000000-0000-4000-8000-000000000000',
-    canonicalGeneration: 1,
+    quiltId: null,
+    canonicalGeneration: null,
     cohort: 'global',
     name: 'canonical_old_client_rejected',
     outcome: 'rejected',
@@ -1789,18 +1127,20 @@ export const sendClientUpgradeRequired = (response: express.Response, requestId:
   } satisfies ClientUpgradeRequiredError)
 }
 
-app.get('/sessions', requireHttpPrincipal, (_req, res) => {
-  sendClientUpgradeRequired(res, res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID())
-})
+export const createRetiredSessionsRouter = (authenticate: express.RequestHandler): express.Router => {
+  const router = express.Router()
+  const reject = (_req: express.Request, res: express.Response): void => {
+    sendClientUpgradeRequired(res, res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID())
+  }
+  router.get('/', authenticate, reject)
+  router.post('/', authenticate, reject)
+  return router
+}
 
-app.post('/sessions', requireHttpPrincipal, (_req, res) => {
-  sendClientUpgradeRequired(res, res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID())
-})
+app.use('/sessions', createRetiredSessionsRouter(requireHttpPrincipal))
 
 type TestResetRequest = {
-  createSession?: boolean
   createCanonicalWorld?: boolean
-  canvasPreset?: CanvasSizePreset
   ownerExternalSubject?: string
 }
 
@@ -1809,15 +1149,7 @@ const isTestResetRequest = (value: unknown): value is TestResetRequest => {
     return false
   }
 
-  if (value.createSession !== undefined && typeof value.createSession !== 'boolean') {
-    return false
-  }
-
   if (value.createCanonicalWorld !== undefined && typeof value.createCanonicalWorld !== 'boolean') {
-    return false
-  }
-
-  if (value.canvasPreset !== undefined && !isCanvasSizePreset(value.canvasPreset)) {
     return false
   }
 
@@ -1829,8 +1161,6 @@ const isTestResetRequest = (value: unknown): value is TestResetRequest => {
 }
 
 const resetAuthoritativeState = async (): Promise<void> => {
-  sessions.clear()
-  sessionClientSockets.clear()
   socketAuthRateLimitBuckets.clear()
 
   for (const socket of await io.fetchSockets()) {
@@ -1871,9 +1201,7 @@ if (isTestControlEnabled) {
       return
     }
 
-    const createSessionForRun = req.body?.createSession ?? false
     const createCanonicalWorldForRun = req.body?.createCanonicalWorld ?? false
-    const canvasPreset = req.body?.canvasPreset
     const ownerExternalSubject = req.body?.ownerExternalSubject
 
     try {
@@ -1934,51 +1262,7 @@ if (isTestControlEnabled) {
         return
       }
 
-      if (!createSessionForRun) {
-        res.status(200).json({ reset: true })
-        return
-      }
-
-      const sessionId = crypto.randomUUID()
-      const canvasConfig = resolveCanvasConfigFromPreset(canvasPreset)
-      const sessionState = createAuthoritativeSessionState(sessionId, Date.now(), canvasConfig)
-      sessions.set(sessionId, sessionState)
-      await createProtectedSession(sessionId, canvasConfig)
-
-      if (ownerExternalSubject) {
-        const providerNamespace = process.env.AUTH_TRUSTED_ISSUER
-        if (!providerNamespace) throw new Error('AUTH_TRUSTED_ISSUER is required to seed a test owner')
-        const principalId = crypto.randomUUID()
-        await getDatabaseBundle().db.transaction(async (tx) => {
-          await tx.execute(sql`
-            INSERT INTO principals (id, kind)
-            VALUES (${principalId}, 'human')
-          `)
-          await tx.execute(sql`
-            INSERT INTO external_principal_mappings (provider_namespace, external_subject, principal_id)
-            VALUES (${providerNamespace}, ${ownerExternalSubject}, ${principalId})
-          `)
-          await tx.execute(sql`
-            UPDATE patches
-            SET owner_principal_id = ${principalId}, state = 'active'
-            WHERE quilt_id = (SELECT id FROM quilts WHERE legacy_canvas_id = ${sessionId})
-          `)
-          await tx.execute(sql`
-            INSERT INTO patch_memberships (patch_id, principal_id, role)
-            SELECT id, ${principalId}, 'owner'
-            FROM patches
-            WHERE quilt_id = (SELECT id FROM quilts WHERE legacy_canvas_id = ${sessionId})
-          `)
-        })
-      }
-
-      res.status(200).json({
-        reset: true,
-        session: {
-          id: sessionId,
-          canvasConfig,
-        },
-      })
+      res.status(200).json({ reset: true })
     } catch (error) {
       writeLog('error', 'test_reset_failed', { error })
       res.status(500).json({ error: 'Failed to reset test state' })
@@ -2197,6 +1481,8 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEve
   },
 )
 
+type CanonicalSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>
+
 const configureRealtimeAdapter = (): void => {
   if (!process.env.DATABASE_URL) {
     if (process.env.NODE_ENV === 'test') {
@@ -2244,7 +1530,7 @@ export const buildClientUpgradeRequiredSocketError = (): Error & { data: Record<
 
 io.use(createSocketAuth(verifyAccessToken, resolveOrProvisionPrincipal))
 
-io.use((socket, next) => {
+export const enforceCanonicalSocketCompatibility = (socket: CanonicalSocket, next: (error?: Error) => void): void => {
   const auth = socket.handshake.auth as unknown as Partial<ConnectionAuth>
   if (!isSupportedCanonicalConnectionAuth(auth)) {
     emitQuiltTelemetry({
@@ -2252,8 +1538,8 @@ io.use((socket, next) => {
       eventId: crypto.randomUUID(),
       attemptId: typeof auth?.entryAttemptId === 'string' && UUID_PATTERN.test(auth.entryAttemptId) ? auth.entryAttemptId : crypto.randomUUID(),
       occurredAt: new Date().toISOString(),
-      quiltId: typeof auth?.quiltId === 'string' && UUID_PATTERN.test(auth.quiltId) ? auth.quiltId : '00000000-0000-4000-8000-000000000000',
-      canonicalGeneration: Number.isSafeInteger(auth?.canonicalGeneration) && Number(auth?.canonicalGeneration) > 0 ? Number(auth.canonicalGeneration) : 1,
+      quiltId: null,
+      canonicalGeneration: null,
       cohort: 'global',
       name: 'canonical_old_client_rejected',
       outcome: 'rejected',
@@ -2272,7 +1558,9 @@ io.use((socket, next) => {
   socket.data.entryAttemptId = auth.entryAttemptId
 
   next()
-})
+}
+
+io.use(enforceCanonicalSocketCompatibility)
 
 io.use((socket, next) => {
   const now = Date.now()
@@ -2298,6 +1586,19 @@ io.use((socket, next) => {
   next()
 })
 
+export const registerCanonicalTelemetryHandler = (socket: CanonicalSocket): void => {
+  const terminalNames = new Set<string>()
+  socket.on('canonical_telemetry', (payload: CanonicalClientTelemetry) => {
+    if (terminalNames.has(payload?.name)) return
+    if (recordCanonicalClientTelemetry(payload, {
+      entryAttemptId: socket.data.entryAttemptId,
+      quiltId: socket.data.quiltId,
+      canonicalGeneration: socket.data.canonicalGeneration,
+      cohort: 'global',
+    })) terminalNames.add(payload.name)
+  })
+}
+
 // ─── Connection Handlers ─────────────────────────────────────────────────────
 
 io.on('connection', (socket) => {
@@ -2312,11 +1613,12 @@ io.on('connection', (socket) => {
   let presenceHeartbeat: NodeJS.Timeout | null = null
   let canonicalTargetValidation: NodeJS.Timeout | null = null
   let safetyViolationDetected = false
-  const canonicalTerminalKeys = new Set<string>()
   let quiltRoomIds = new Set<string>()
     let quiltAdapterRoomIds = new Set<string>()
   let roomChurnWindowStartedAt = Date.now()
   let roomChurnInWindow = 0
+
+  registerCanonicalTelemetryHandler(socket)
 
   socket.onAny((eventName, ...args) => {
     writeLog('debug', 'socket_event_received', {
@@ -2361,7 +1663,12 @@ io.on('connection', (socket) => {
     await socket.join(presenceRoom)
     const presence = await acquireQuiltPresenceLease({ socketId: socket.id, quiltId: selectedQuiltId, principalId: selectedPrincipalId, clientId, now: joinedAt, ttlMs: QUILT_PRESENCE_LEASE_TTL_MS })
     presenceLeaseActive = true
-    presenceHeartbeat = setInterval(() => { void renewQuiltPresenceLease(socket.id, Date.now(), QUILT_PRESENCE_LEASE_TTL_MS) }, QUILT_PRESENCE_HEARTBEAT_MS)
+    presenceHeartbeat = setInterval(() => {
+      void renewPresenceLeaseOrDisconnect(
+        () => renewQuiltPresenceLease(socket.id, Date.now(), QUILT_PRESENCE_LEASE_TTL_MS),
+        () => socket.disconnect(true),
+      )
+    }, QUILT_PRESENCE_HEARTBEAT_MS)
     canonicalTargetValidation = setInterval(() => {
       void discoverCanonicalWorld().then((descriptor) => {
         if (safetyViolationDetected || (descriptor?.quiltId === quiltId && descriptor.generation === socket.data.canonicalGeneration)) return
@@ -2381,6 +1688,16 @@ io.on('connection', (socket) => {
   }
 
   void initializeConnection().catch((error) => {
+    recordCanonicalClientTelemetry({
+      name: 'canonical_entry',
+      outcome: 'initial_sync_failed',
+      durationMs: 0,
+    }, {
+      entryAttemptId: socket.data.entryAttemptId,
+      quiltId: socket.data.quiltId,
+      canonicalGeneration: socket.data.canonicalGeneration,
+      cohort: 'global',
+    })
     writeLog('error', 'socket_initialize_failed', {
       sessionId,
       clientId,
@@ -2390,216 +1707,6 @@ io.on('connection', (socket) => {
   })
 
   // ── Event Handlers ────────────────────────────────────────────────────────
-
-  if (registerRetiredCanvasHandlers) {
-  socket.on('place_tile', async (payload, ack) => {
-    writeLog('debug', 'place_tile_received', {
-      sessionId,
-      clientId,
-      payload,
-    })
-
-    if (!isPlaceTilePayload(payload)) {
-      invokeAckSafely(ack, {
-        placed: null,
-        rejected: true,
-        reason: 'PLACEMENT_REJECTED',
-      })
-      return
-    }
-
-    if (selectedProtocolVersion === 2 || !isLegacyMutationCompatibilityEnabled) {
-      invokeAckSafely(ack, {
-        placed: null,
-        rejected: true,
-        reason: 'PLACEMENT_REJECTED',
-      })
-      return
-    }
-
-    try {
-      const record = await loadSessionRecord(sessionId)
-
-      if (payload.expectedRevision !== undefined) {
-        if (payload.expectedRevision < record.revision) {
-          invokeAckSafely(ack, {
-            placed: null,
-            rejected: true,
-            reason: 'STALE_REVISION',
-          })
-          socket.emit('resync_required', { currentOpSeq: record.revision, reason: 'REVISION_MISMATCH' })
-          return
-        }
-
-        if (payload.expectedRevision > record.revision) {
-          invokeAckSafely(ack, {
-            placed: null,
-            rejected: true,
-            reason: 'OUT_OF_ORDER_REVISION',
-          })
-          return
-        }
-      }
-
-      const sessionState = getSessionState(sessionId)
-      const validation = validatePlacement(
-        payload.shape,
-        payload.transform,
-        record.session.tiles,
-        sessionState.canvasConfig.boundsPolicy,
-      )
-
-      if (!validation.valid) {
-        writeLog('info', 'place_tile_rejected', {
-          sessionId,
-          clientId,
-          reason: validation.reason,
-          tileId: payload.tileId,
-        })
-        invokeAckSafely(ack, {
-          placed: null,
-          rejected: true,
-          reason: toRejectReason(validation.reason),
-        })
-        return
-      }
-
-      const result = await persistTilePlacement({
-        sessionId,
-        payload,
-        principalId: socket.data.principalId,
-        placedBy: clientId,
-      })
-
-      const placeAck: PlaceTileAck = result.ack.rejected
-        ? result.ack
-        : { ...result.ack, newRevision: result.revision }
-
-      writeLog('info', 'place_tile_processed', {
-        sessionId,
-        clientId,
-        tileId: payload.tileId,
-        rejected: placeAck.rejected,
-        idempotent: placeAck.rejected ? false : (placeAck.idempotent ?? false),
-        opSeq: 'opSeq' in result ? result.opSeq : null,
-      })
-
-      invokeAckSafely(ack, placeAck)
-
-      // Retries should acknowledge deterministically but must not rebroadcast
-      // already applied operations.
-      if (result.event && 'tile' in result.event && 'opSeq' in result && !placeAck.rejected && !placeAck.idempotent) {
-        io.to(sessionId).emit('tile_placed', result.event)
-        const chunkId = worldToChunk(result.event.tile.transform.position.x, result.event.tile.transform.position.y)
-        io.to(chunkRoomName(sessionId, chunkId)).emit('chunk_tile_placed', {
-          canvasId: sessionId,
-          chunkId,
-          tile: result.event.tile,
-          placedBy: result.event.placedBy,
-          opSeq: result.event.opSeq,
-          revision: result.event.revision,
-        })
-        await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
-      }
-    } catch (error) {
-      writeLog('error', 'place_tile_failed', {
-        sessionId,
-        clientId,
-        error,
-      })
-      invokeAckSafely(ack, {
-        placed: null,
-        rejected: true,
-        reason: 'PLACEMENT_REJECTED',
-      })
-    }
-  })
-
-  socket.on('remove_tile', async (payload, ack) => {
-    writeLog('debug', 'remove_tile_received', {
-      sessionId,
-      clientId,
-      payload,
-    })
-
-    if (
-      selectedProtocolVersion === 2
-      || !isLegacyMutationCompatibilityEnabled
-      || !isRemoveTilePayload(payload)
-      || !isValidTileId(payload.tileId)
-    ) {
-      invokeAckSafely(ack, { removed: false })
-      return
-    }
-
-    try {
-      const record = await loadSessionRecord(sessionId)
-
-      if (payload.expectedRevision !== undefined) {
-        if (payload.expectedRevision < record.revision) {
-          invokeAckSafely(ack, { removed: false, reason: 'STALE_REVISION' })
-          socket.emit('resync_required', { currentOpSeq: record.revision, reason: 'REVISION_MISMATCH' })
-          return
-        }
-
-        if (payload.expectedRevision > record.revision) {
-          invokeAckSafely(ack, { removed: false, reason: 'OUT_OF_ORDER_REVISION' })
-          socket.emit('resync_required', { currentOpSeq: record.revision, reason: 'REVISION_MISMATCH' })
-          return
-        }
-      }
-
-      const result = await persistTileRemoval({
-        sessionId,
-        payload,
-        principalId: socket.data.principalId,
-        removedBy: clientId,
-      })
-
-      const removeAck: RemoveTileAck = result.ack.removed
-        ? { ...result.ack, newRevision: result.revision }
-        : result.ack
-
-      writeLog('info', 'remove_tile_processed', {
-        sessionId,
-        clientId,
-        tileId: payload.tileId,
-        removed: removeAck.removed,
-        reason: removeAck.removed ? undefined : removeAck.reason,
-        idempotent: removeAck.removed ? (removeAck.idempotent ?? false) : false,
-        opSeq: 'opSeq' in result ? result.opSeq : null,
-      })
-
-      invokeAckSafely(ack, removeAck)
-
-      // Duplicate remove replays reuse opSeq and ack, but should not emit a
-      // second tile_removed broadcast.
-      if (result.event && 'tileId' in result.event && 'opSeq' in result && removeAck.removed && !removeAck.idempotent) {
-        io.to(sessionId).emit('tile_removed', result.event)
-        const removedTile = record.session.tiles.find((tile) => tile.id === payload.tileId)
-        if (removedTile) {
-          const chunkId = worldToChunk(removedTile.transform.position.x, removedTile.transform.position.y)
-          io.to(chunkRoomName(sessionId, chunkId)).emit('chunk_tile_removed', {
-            canvasId: sessionId,
-            chunkId,
-            tileId: result.event.tileId,
-            removedBy: result.event.removedBy,
-            opSeq: result.event.opSeq,
-            revision: result.event.revision,
-          })
-        }
-        await persistSnapshotIfNeeded(sessionId, result.opSeq, result.session)
-      }
-    } catch (error) {
-      writeLog('error', 'remove_tile_failed', {
-        sessionId,
-        clientId,
-        error,
-      })
-      invokeAckSafely(ack, { removed: false })
-    }
-  })
-  }
 
   const rejectQuiltMutation = <T extends QuiltPlaceTileAck | QuiltRemoveTileAck>(
     ack: unknown,
@@ -2755,293 +1862,6 @@ io.on('connection', (socket) => {
     }
   })
 
-  if (registerRetiredCanvasHandlers) {
-  socket.on('pointer_move', (payload) => {
-    if (selectedProtocolVersion === 2) return
-    if (!isPointerMovePayload(payload)) {
-      return
-    }
-
-    writeLog('debug', 'pointer_move', {
-      sessionId,
-      clientId,
-      position: payload.position,
-    })
-
-    socket.to(sessionId).emit('pointer_update', {
-      clientId,
-      position: payload.position,
-    })
-  })
-
-  socket.on('subscribe_chunks', async (payload) => {
-    if (selectedProtocolVersion === 2) return
-    if (!isSubscribeChunksPayload(payload) || payload.canvasId !== sessionId) {
-      return
-    }
-
-    const capabilities = getRealtimeCapabilities(sessionId)
-    if (!capabilities.chunkStreamingEnabled) {
-      writeLog('debug', 'subscribe_chunks_ignored_by_flag', {
-        sessionId,
-        clientId,
-      })
-      return
-    }
-
-    const chunks = Array.from(new Set(payload.chunks))
-    const payloadMode = resolvePayloadMode(payload.payloadMode, capabilities)
-    for (const chunkId of chunks) {
-      socket.join(chunkRoomName(sessionId, chunkId))
-    }
-
-    chunkTelemetry.subscribeEvents += chunks.length
-    emitChunkTelemetry('chunk_subscribe', {
-      sessionId,
-      clientId,
-      chunkCount: chunks.length,
-      payloadMode,
-      totalSubscribeEvents: chunkTelemetry.subscribeEvents,
-    })
-
-    try {
-      const chunkRead = await listTilesByChunksWithParity(sessionId, chunkIdsToCoordinates(chunks))
-      const snapshot = buildChunkSnapshot(
-        sessionId,
-        chunks,
-        chunkRead.tiles,
-        chunkRead.opSeq,
-        chunkRead.revision,
-        payloadMode,
-      )
-
-      const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), 'utf8')
-      chunkTelemetry.snapshotEvents += 1
-      if (payloadMode === 'aggregate') {
-        chunkTelemetry.snapshotBytesAggregate += snapshotBytes
-      } else {
-        chunkTelemetry.snapshotBytesFine += snapshotBytes
-      }
-
-      emitChunkTelemetry('chunk_snapshot', {
-        sessionId,
-        clientId,
-        payloadMode,
-        chunkCount: chunks.length,
-        snapshotBytes,
-        totalSnapshotEvents: chunkTelemetry.snapshotEvents,
-        snapshotBytesFine: chunkTelemetry.snapshotBytesFine,
-        snapshotBytesAggregate: chunkTelemetry.snapshotBytesAggregate,
-      })
-
-      socket.emit('chunk_snapshot', snapshot)
-
-      if (!chunkRead.parityMatched) {
-        writeLog('warn', 'chunk_snapshot_parity_fallback', {
-          sessionId,
-          clientId,
-          chunks,
-          parityReport: chunkRead.parityReport,
-        })
-      }
-
-      if (payload.clientOffsetByChunk) {
-        for (const chunkId of chunks) {
-          const clientCursor = payload.clientOffsetByChunk[chunkId]
-          if (!clientCursor) {
-            continue
-          }
-
-          if (clientCursor.opSeq > chunkRead.opSeq || clientCursor.revision > chunkRead.revision) {
-            chunkTelemetry.resyncEvents += 1
-            emitQuiltTelemetry({
-              name: 'resync',
-              canary: false,
-              measurements: { totalResyncEvents: chunkTelemetry.resyncEvents },
-              dimensions: { protocol: 'chunk-v1', reason: 'REVISION_MISMATCH' },
-            })
-            emitChunkTelemetry('chunk_resync_required', {
-              sessionId,
-              clientId,
-              chunkId,
-              payloadMode,
-              currentOpSeq: chunkRead.opSeq,
-              currentRevision: chunkRead.revision,
-              totalResyncEvents: chunkTelemetry.resyncEvents,
-            })
-            socket.emit('chunk_resync_required', {
-              canvasId: sessionId,
-              chunkId,
-              payloadMode,
-              coordination: buildCoordinationMetadata(),
-              currentOpSeq: chunkRead.opSeq,
-              currentRevision: chunkRead.revision,
-              reason: 'REVISION_MISMATCH',
-            })
-          }
-        }
-      }
-    } catch (error) {
-      writeLog('error', 'subscribe_chunks_failed', {
-        sessionId,
-        clientId,
-        error,
-      })
-    }
-  })
-
-  socket.on('unsubscribe_chunks', (payload) => {
-    if (selectedProtocolVersion === 2) return
-    if (!isUnsubscribeChunksPayload(payload) || payload.canvasId !== sessionId) {
-      return
-    }
-
-    const capabilities = getRealtimeCapabilities(sessionId)
-    if (!capabilities.chunkStreamingEnabled) {
-      return
-    }
-
-    const chunks = Array.from(new Set(payload.chunks))
-    chunkTelemetry.unsubscribeEvents += chunks.length
-    emitChunkTelemetry('chunk_unsubscribe', {
-      sessionId,
-      clientId,
-      chunkCount: chunks.length,
-      totalUnsubscribeEvents: chunkTelemetry.unsubscribeEvents,
-    })
-
-    for (const chunkId of chunks) {
-      socket.leave(chunkRoomName(sessionId, chunkId))
-    }
-  })
-
-  socket.on('request_chunk_snapshot', async (payload) => {
-    if (selectedProtocolVersion === 2) return
-    if (!isRequestChunkSnapshotPayload(payload) || payload.canvasId !== sessionId) {
-      return
-    }
-
-    const capabilities = getRealtimeCapabilities(sessionId)
-    if (!capabilities.chunkStreamingEnabled) {
-      return
-    }
-
-    try {
-      const chunkRead = await listTilesByChunksWithParity(sessionId, chunkIdsToCoordinates(payload.chunks))
-      const payloadMode = resolvePayloadMode(payload.payloadMode, capabilities)
-      const snapshot = buildChunkSnapshot(
-        sessionId,
-        payload.chunks,
-        chunkRead.tiles,
-        chunkRead.opSeq,
-        chunkRead.revision,
-        payloadMode,
-      )
-
-      const snapshotBytes = Buffer.byteLength(JSON.stringify(snapshot), 'utf8')
-      chunkTelemetry.snapshotEvents += 1
-      if (payloadMode === 'aggregate') {
-        chunkTelemetry.snapshotBytesAggregate += snapshotBytes
-      } else {
-        chunkTelemetry.snapshotBytesFine += snapshotBytes
-      }
-
-      emitChunkTelemetry('chunk_snapshot', {
-        sessionId,
-        clientId,
-        payloadMode,
-        chunkCount: payload.chunks.length,
-        snapshotBytes,
-        totalSnapshotEvents: chunkTelemetry.snapshotEvents,
-        snapshotBytesFine: chunkTelemetry.snapshotBytesFine,
-        snapshotBytesAggregate: chunkTelemetry.snapshotBytesAggregate,
-      })
-
-      socket.emit('chunk_snapshot', snapshot)
-
-      if (!chunkRead.parityMatched) {
-        writeLog('warn', 'chunk_snapshot_parity_fallback', {
-          sessionId,
-          clientId,
-          chunks: payload.chunks,
-            parityReport: chunkRead.parityReport,
-        })
-      }
-    } catch (error) {
-      writeLog('error', 'request_chunk_snapshot_failed', {
-        sessionId,
-        clientId,
-        error,
-      })
-    }
-  })
-
-  socket.on('selection_update', (payload) => {
-    if (selectedProtocolVersion === 2) return
-    if (!isSelectionUpdatePayload(payload)) {
-      return
-    }
-
-    if (payload.canvasId !== sessionId || payload.clientId !== clientId) {
-      writeLog('warn', 'selection_update_ignored_invalid_membership', {
-        sessionId,
-        clientId,
-        payloadCanvasId: payload.canvasId,
-        payloadClientId: payload.clientId,
-      })
-      return
-    }
-
-    writeLog('debug', 'selection_update', {
-      sessionId,
-      clientId,
-      tileId: payload.tileId,
-    })
-
-    socket.to(sessionId).emit('selection_update', {
-      canvasId: sessionId,
-      clientId,
-      tileId: payload.tileId,
-      updatedAt: payload.updatedAt,
-    })
-  })
-
-  socket.on('request_snapshot', async () => {
-    if (selectedProtocolVersion === 2) return
-    try {
-      const record = await loadSessionReplayRecord(sessionId)
-      const sessionState = getSessionState(sessionId)
-      sessionState.canvasConfig = cloneCanvasConfig(record.canvasConfig)
-      const snapshot = {
-        session: record.session,
-        canvasConfig: sessionState.canvasConfig,
-        clients: record.clients,
-        lastOpSeq: record.lastOpSeq,
-        revision: record.revision,
-      }
-
-      sessionState.session = snapshot.session
-      sessionState.session.boundsPolicy = sessionState.canvasConfig.boundsPolicy
-      sessionState.lastOpSeq = snapshot.lastOpSeq
-      sessionState.clients = new Map(snapshot.clients.map((client) => [client.clientId, client]))
-
-      socket.emit('session_snapshot', {
-        ...snapshot,
-        session: {
-          ...snapshot.session,
-          boundsPolicy: sessionState.canvasConfig.boundsPolicy,
-        },
-      })
-    } catch (error) {
-      writeLog('error', 'request_snapshot_failed', {
-        sessionId,
-        clientId,
-        error,
-      })
-    }
-  })
-  }
-
   socket.on('quilt_client_runtime_metrics', (payload) => {
     recordQuiltClientRuntimeMetrics(payload, {
       canaryTelemetryEnabled,
@@ -3050,16 +1870,6 @@ io.on('connection', (socket) => {
       canonicalGeneration: socket.data.canonicalGeneration,
       cohort: 'global',
     })
-  })
-
-  socket.on('canonical_telemetry', (payload: CanonicalClientTelemetry) => {
-    const terminalKey = `${payload?.name}:${payload?.attemptId}`
-    if (canonicalTerminalKeys.has(terminalKey)) return
-    if (recordCanonicalClientTelemetry(payload, {
-      quiltId: socket.data.quiltId,
-      canonicalGeneration: socket.data.canonicalGeneration,
-      cohort: 'global',
-    })) canonicalTerminalKeys.add(terminalKey)
   })
 
   socket.on('subscribe_quilt_area', async (payload, ack) => {
@@ -3295,7 +2105,6 @@ io.on('connection', (socket) => {
   // ── Disconnection ──────────────────────────────────────────────────────────
 
   socket.on('disconnect', async () => {
-    const remainingSockets = unregisterClientSocket(sessionId, clientId, socket.id)
     if (presenceHeartbeat) {
       clearInterval(presenceHeartbeat)
       presenceHeartbeat = null
@@ -3308,7 +2117,6 @@ io.on('connection', (socket) => {
     writeLog('info', 'socket_disconnected', {
       clientId,
       sessionId,
-      remainingSockets,
     })
 
     if (selectedProtocolVersion === 2 && selectedQuiltId && selectedPrincipalId && presenceLeaseActive) {
@@ -3330,39 +2138,6 @@ io.on('connection', (socket) => {
           error,
         })
       }
-      return
-    }
-
-    if (remainingSockets > 0) {
-      writeLog('debug', 'socket_disconnected_presence_deferred', {
-        sessionId,
-        clientId,
-        remainingSockets,
-      })
-      return
-    }
-
-    const connectedClientCount = (io.engine as { clientsCount?: number }).clientsCount ?? 0
-
-    if (connectedClientCount > 1) {
-      writeLog('warn', 'presence_leave_gating_process_local', {
-        sessionId,
-        clientId,
-        socketId: socket.id,
-        connectedClientCount,
-        note: 'last-socket leave gating is process-local; enforce sticky sessions or add shared membership state for multi-replica correctness',
-      })
-    }
-
-    try {
-      await finalizeParticipantPresence(sessionId, clientId, Date.now())
-      io.to(sessionId).emit('client_left', { clientId })
-    } catch (error) {
-      writeLog('error', 'socket_disconnect_persist_failed', {
-        sessionId,
-        clientId,
-        error,
-      })
     }
   })
 })
@@ -3425,15 +2200,6 @@ if (process.env.NODE_ENV !== 'test') {
     featureMultiReplicaReady: isMultiReplicaReady,
     replicaId: REPLICA_ID,
   })
-  writeLog(legacyRetirementGates.requested && !legacyRetirementDecision.retireLegacy ? 'warn' : 'info',
-    'legacy_retirement_status', {
-      requested: legacyRetirementGates.requested,
-      retireLegacy: legacyRetirementDecision.retireLegacy,
-      unmetGates: legacyRetirementDecision.unmetGates,
-      legacyProtocolAvailable: true,
-      legacyStorageAvailable: true,
-    })
-
   void verifyDatabaseConnectivity()
     .then(() => {
       return prepareDatabaseSchemaForStartup()

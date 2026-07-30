@@ -5,7 +5,6 @@ export type RuntimeAuthConfig = {
   apiOrigin: string
   redirectUri: string
   postLogoutRedirectUri: string
-  canonicalEntryEnabled: boolean
 }
 
 const requiredKeys = [
@@ -62,13 +61,8 @@ export const parseRuntimeAuthConfig = (value: unknown): RuntimeAuthConfig => {
     requiredKeys.map((key) => [key, requireConfiguredString(value[key], key)]),
   ) as Pick<RuntimeAuthConfig, typeof requiredKeys[number]>
 
-  if (typeof value.canonicalEntryEnabled !== 'boolean') {
-    throw new Error('Runtime auth configuration field "canonicalEntryEnabled" must be a JSON boolean')
-  }
-
   return {
     ...parsed,
-    canonicalEntryEnabled: value.canonicalEntryEnabled,
     authority: requireExactAbsoluteUrl(parsed.authority, 'authority').replace(/\/$/, ''),
     apiOrigin: requireNormalizedOrigin(parsed.apiOrigin, 'apiOrigin'),
     redirectUri: requireExactAbsoluteUrl(parsed.redirectUri, 'redirectUri'),

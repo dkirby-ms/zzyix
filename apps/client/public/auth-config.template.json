@@ -4,6 +4,5 @@
   "apiScope": "${AUTH_API_SCOPE}",
   "apiOrigin": "${AUTH_API_ORIGIN}",
   "redirectUri": "${AUTH_REDIRECT_URI}",
-  "postLogoutRedirectUri": "${AUTH_POST_LOGOUT_REDIRECT_URI}",
-  "canonicalEntryEnabled": false
+  "postLogoutRedirectUri": "${AUTH_POST_LOGOUT_REDIRECT_URI}"
 }

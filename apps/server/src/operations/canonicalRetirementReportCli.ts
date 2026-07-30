@@ -24,7 +24,7 @@ export type CanonicalRetirementReportV1 = {
   schemaVersion: 1; reportType: 'canonical-retirement'; generatedAt: string
   observationWindow: { from: string; to: string; durationSeconds: number }
   evidence: { inputSha256: string; acceptedEvents: number; exactDuplicatesIgnored: number }
-  thresholds: typeof RETIREMENT_THRESHOLDS; groups: CanonicalRetirementGroup[]
+  thresholds: typeof RETIREMENT_THRESHOLDS; events: CanonicalTelemetryEvent[]; groups: CanonicalRetirementGroup[]
   immediateRollbackTriggers: Array<{ code: 'accepted_v1_entry' | 'descriptor_leak' | 'target_invalidated'; occurredAt: string; eventId: string; canonicalGeneration: number; cohort: 'canary' | 'global' }>
   rollbackWindows: Array<{ metric: 'discovery_failure' | 'entry_failure' | 'reconnect_exhaustion'; from: string; to: string; attempts: number; failures: number; rate: number; canonicalGeneration: number; cohort: 'canary' | 'global' }>
   decision: { eligible: boolean; measuredWindowApproved: boolean; clientBudgetPassed: boolean; recommendation: 'promote' | 'hold' | 'rollback'; failedChecks: string[] }
@@ -42,8 +42,10 @@ const base = ['schemaVersion', 'eventId', 'attemptId', 'occurredAt', 'quiltId', 
 
 export const parseCanonicalTelemetryEvent = (value: unknown): CanonicalTelemetryEvent => {
   if (!isRecord(value) || value.schemaVersion !== 1 || !UUID.test(String(value.eventId)) || !UUID.test(String(value.attemptId))
-    || !utc(value.occurredAt) || !UUID.test(String(value.quiltId)) || !Number.isSafeInteger(value.canonicalGeneration)
-    || Number(value.canonicalGeneration) <= 0 || !['canary', 'global'].includes(String(value.cohort))) throw new Error('Invalid canonical telemetry envelope')
+    || !utc(value.occurredAt) || !['canary', 'global'].includes(String(value.cohort))) throw new Error('Invalid canonical telemetry envelope')
+  const worldScoped = UUID.test(String(value.quiltId)) && Number.isSafeInteger(value.canonicalGeneration) && Number(value.canonicalGeneration) > 0
+  const preWorld = value.quiltId === null && value.canonicalGeneration === null
+  if (!worldScoped && !preWorld) throw new Error('Invalid canonical telemetry envelope')
   const required = [...base]
   const optional: string[] = []
   switch (value.name) {
@@ -83,6 +85,9 @@ export const parseCanonicalTelemetryEvent = (value: unknown): CanonicalTelemetry
     default: throw new Error('Unknown canonical telemetry event')
   }
   if (!keys(value, required, optional)) throw new Error('Unknown canonical telemetry field')
+  if (preWorld && !((value.name === 'canonical_discovery' && value.outcome !== 'success') || value.name === 'canonical_old_client_rejected')) {
+    throw new Error('Invalid pre-world canonical telemetry event')
+  }
   return value as CanonicalTelemetryEvent
 }
 
@@ -93,13 +98,16 @@ export const serializeCanonicalReport = (value: CanonicalRetirementReportV1): st
 export const reportSha256 = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex')
 const rate = (successes: number, attempts: number): number | null => attempts === 0 ? null : successes / attempts
 const p95 = (values: number[]): number | null => values.length === 0 ? null : [...values].sort((a, b) => a - b)[Math.ceil(values.length * 0.95) - 1]
-const groupKey = (event: CanonicalTelemetryEvent): string => `${event.canonicalGeneration}:${event.cohort}`
+type WorldTelemetryEvent = CanonicalTelemetryEvent & { quiltId: string; canonicalGeneration: number }
+const isWorldTelemetryEvent = (event: CanonicalTelemetryEvent): event is WorldTelemetryEvent =>
+  event.quiltId !== null && event.canonicalGeneration !== null
+const groupKey = (event: WorldTelemetryEvent): string => `${event.canonicalGeneration}:${event.cohort}`
 
-const findRollbackWindows = (events: CanonicalTelemetryEvent[]): CanonicalRetirementReportV1['rollbackWindows'] => {
+const findRollbackWindows = (events: WorldTelemetryEvent[]): CanonicalRetirementReportV1['rollbackWindows'] => {
   const definitions = [
-    ['canonical_discovery', 'discovery_failure', (event: CanonicalTelemetryEvent) => event.name === 'canonical_discovery' && event.outcome !== 'success'],
-    ['canonical_entry', 'entry_failure', (event: CanonicalTelemetryEvent) => event.name === 'canonical_entry' && event.outcome !== 'ready'],
-    ['canonical_reconnect', 'reconnect_exhaustion', (event: CanonicalTelemetryEvent) => event.name === 'canonical_reconnect' && event.outcome === 'exhausted'],
+    ['canonical_discovery', 'discovery_failure', (event: WorldTelemetryEvent) => event.name === 'canonical_discovery' && event.outcome !== 'success'],
+    ['canonical_entry', 'entry_failure', (event: WorldTelemetryEvent) => event.name === 'canonical_entry' && event.outcome !== 'ready'],
+    ['canonical_reconnect', 'reconnect_exhaustion', (event: WorldTelemetryEvent) => event.name === 'canonical_reconnect' && event.outcome === 'exhausted'],
   ] as const
   const result: CanonicalRetirementReportV1['rollbackWindows'] = []
   for (const terminal of events) for (const [name, metric, failed] of definitions) {
@@ -138,34 +146,36 @@ export const buildCanonicalRetirementReport = (input: Buffer, from: string, to: 
     if (terminals.has(key)) throw new Error(`Duplicate terminal ${key}`)
     terminals.add(key)
   }
-  const grouped = new Map<string, CanonicalTelemetryEvent[]>()
-  for (const event of events) grouped.set(groupKey(event), [...(grouped.get(groupKey(event)) ?? []), event])
+  const worldEvents = events.filter(isWorldTelemetryEvent)
+  const grouped = new Map<string, WorldTelemetryEvent[]>()
+  for (const event of worldEvents) grouped.set(groupKey(event), [...(grouped.get(groupKey(event)) ?? []), event])
   const groups = [...grouped.values()].map((items): CanonicalRetirementGroup => {
     const first = items[0]; const discoveries = items.filter((event) => event.name === 'canonical_discovery'); const entries = items.filter((event) => event.name === 'canonical_entry'); const reconnects = items.filter((event) => event.name === 'canonical_reconnect')
     const ready = entries.filter((event) => event.name === 'canonical_entry' && event.outcome === 'ready')
-    const recovered = reconnects.filter((event): event is Extract<CanonicalTelemetryEvent, { name: 'canonical_reconnect' }> => event.name === 'canonical_reconnect' && event.outcome === 'recovered')
-    const samples = items.filter((event): event is Extract<CanonicalTelemetryEvent, { name: 'client_runtime' }> => event.name === 'client_runtime')
+    const recovered = reconnects.filter((event): event is Extract<WorldTelemetryEvent, { name: 'canonical_reconnect' }> => event.name === 'canonical_reconnect' && event.outcome === 'recovered')
+    const samples = items.filter((event): event is Extract<WorldTelemetryEvent, { name: 'client_runtime' }> => event.name === 'client_runtime')
     return { canonicalGeneration: first.canonicalGeneration, cohort: first.cohort, eventCounts: Object.fromEntries([...new Set(items.map((event) => event.name))].sort().map((name) => [name, items.filter((event) => event.name === name).length])), discoverySuccessRate: rate(discoveries.filter((event) => event.name === 'canonical_discovery' && event.outcome === 'success').length, discoveries.length), readyEntryRate: rate(ready.length, entries.length), acceptedV1Entries: ready.filter((event) => event.name === 'canonical_entry' && event.selectedProtocolVersion === 1).length, reconnectRecoveryRate: rate(recovered.length, reconnects.length), reconnectRecoveryP95Ms: p95(recovered.map((event) => event.durationMs)), resyncsPerReadyEntry: rate(items.reduce((sum, event) => sum + (event.name === 'canonical_resubscribe' ? event.resyncRequired : 0), 0), ready.length), clientFrameSampleCount: samples.length, frameTimeP95Ms: p95(samples.map((event) => event.frameTimeMs)) }
   }).sort((a, b) => a.canonicalGeneration - b.canonicalGeneration || a.cohort.localeCompare(b.cohort))
-  const triggers = events.flatMap((event): CanonicalRetirementReportV1['immediateRollbackTriggers'] => { const code = event.name === 'canonical_entry' && event.outcome === 'ready' && event.selectedProtocolVersion === 1 ? 'accepted_v1_entry' : event.name === 'canonical_safety' ? event.code : null; return code ? [{ code, occurredAt: event.occurredAt, eventId: event.eventId, canonicalGeneration: event.canonicalGeneration, cohort: event.cohort }] : [] })
-  const windows = findRollbackWindows(events); const durationSeconds = (Date.parse(to) - Date.parse(from)) / 1000
+  const triggers = worldEvents.flatMap((event): CanonicalRetirementReportV1['immediateRollbackTriggers'] => { const code = event.name === 'canonical_entry' && event.outcome === 'ready' && event.selectedProtocolVersion === 1 ? 'accepted_v1_entry' : event.name === 'canonical_safety' ? event.code : null; return code ? [{ code, occurredAt: event.occurredAt, eventId: event.eventId, canonicalGeneration: event.canonicalGeneration, cohort: event.cohort }] : [] })
+  const windows = findRollbackWindows(worldEvents); const durationSeconds = (Date.parse(to) - Date.parse(from)) / 1000
   const failedChecks: string[] = []
   if (durationSeconds < 86400) failedChecks.push('minimum_window')
   if (new Set(events.filter((event) => event.name === 'canonical_entry').map((event) => event.attemptId)).size < 100) failedChecks.push('minimum_authenticated_entry_attempts')
   if (!groups.some((group) => group.clientFrameSampleCount > 0)) failedChecks.push('minimum_frame_samples')
+  if (events.some((event) => event.name === 'canonical_discovery' && event.quiltId === null)) failedChecks.push('pre_world_discovery_failure')
   const groupThresholds = groups.length > 0 && groups.every((group) => group.discoverySuccessRate !== null && group.discoverySuccessRate >= 0.995 && group.readyEntryRate !== null && group.readyEntryRate >= 0.99 && group.acceptedV1Entries === 0 && group.reconnectRecoveryRate !== null && group.reconnectRecoveryRate >= 0.99 && group.reconnectRecoveryP95Ms !== null && group.reconnectRecoveryP95Ms <= 10000 && group.resyncsPerReadyEntry !== null && group.resyncsPerReadyEntry <= 0.01)
   if (!groupThresholds) failedChecks.push('group_thresholds')
   const clientBudgetPassed = groups.length > 0 && groups.every((group) => group.frameTimeP95Ms !== null && group.frameTimeP95Ms <= 33.3)
   if (!clientBudgetPassed) failedChecks.push('client_budget')
-  const eligible = !failedChecks.some((check) => ['minimum_window', 'minimum_authenticated_entry_attempts', 'minimum_frame_samples'].includes(check)) && groups.length > 0
+  const eligible = !failedChecks.some((check) => ['minimum_window', 'minimum_authenticated_entry_attempts', 'minimum_frame_samples', 'pre_world_discovery_failure'].includes(check)) && groups.length > 0
   const measuredWindowApproved = eligible && groupThresholds && triggers.length === 0 && windows.length === 0
   const rollback = triggers.length > 0 || windows.length > 0
-  return { schemaVersion: 1, reportType: 'canonical-retirement', generatedAt: to, observationWindow: { from, to, durationSeconds }, evidence: { inputSha256: reportSha256(input), acceptedEvents: events.length, exactDuplicatesIgnored }, thresholds: RETIREMENT_THRESHOLDS, groups, immediateRollbackTriggers: triggers, rollbackWindows: windows, decision: { eligible, measuredWindowApproved, clientBudgetPassed, recommendation: rollback ? 'rollback' : measuredWindowApproved && clientBudgetPassed ? 'promote' : 'hold', failedChecks: [...new Set(failedChecks)].sort() } }
+  return { schemaVersion: 1, reportType: 'canonical-retirement', generatedAt: to, observationWindow: { from, to, durationSeconds }, evidence: { inputSha256: reportSha256(input), acceptedEvents: events.length, exactDuplicatesIgnored }, thresholds: RETIREMENT_THRESHOLDS, events, groups, immediateRollbackTriggers: triggers, rollbackWindows: windows, decision: { eligible, measuredWindowApproved, clientBudgetPassed, recommendation: rollback ? 'rollback' : measuredWindowApproved && clientBudgetPassed ? 'promote' : 'hold', failedChecks: [...new Set(failedChecks)].sort() } }
 }
 
 export const parseCanonicalRetirementReport = (value: unknown): CanonicalRetirementReportV1 => {
   const invalid = (): never => { throw new Error('Invalid canonical retirement report') }
-  if (!isRecord(value) || !keys(value, ['schemaVersion', 'reportType', 'generatedAt', 'observationWindow', 'evidence', 'thresholds', 'groups', 'immediateRollbackTriggers', 'rollbackWindows', 'decision'])
+  if (!isRecord(value) || !keys(value, ['schemaVersion', 'reportType', 'generatedAt', 'observationWindow', 'evidence', 'thresholds', 'events', 'groups', 'immediateRollbackTriggers', 'rollbackWindows', 'decision'])
     || value.schemaVersion !== 1 || value.reportType !== 'canonical-retirement' || !utc(value.generatedAt)) throw new Error('Invalid canonical retirement report')
   const report = value
 
@@ -173,13 +183,19 @@ export const parseCanonicalRetirementReport = (value: unknown): CanonicalRetirem
   if (!isRecord(window) || !keys(window, ['from', 'to', 'durationSeconds']) || !utc(window.from) || !utc(window.to)
     || !finite(window.durationSeconds) || Date.parse(window.to) <= Date.parse(window.from)
     || window.durationSeconds !== (Date.parse(window.to) - Date.parse(window.from)) / 1000 || report.generatedAt !== window.to) invalid()
+  const validatedWindow = window as { from: string; to: string; durationSeconds: number }
 
   const evidence = report.evidence
   if (!isRecord(evidence) || !keys(evidence, ['inputSha256', 'acceptedEvents', 'exactDuplicatesIgnored'])
     || !SHA256.test(String(evidence.inputSha256)) || !safeInteger(evidence.acceptedEvents) || !safeInteger(evidence.exactDuplicatesIgnored)) invalid()
+  const validatedEvidence = evidence as { inputSha256: string; acceptedEvents: number; exactDuplicatesIgnored: number }
 
   if (!isRecord(report.thresholds) || !keys(report.thresholds, Object.keys(RETIREMENT_THRESHOLDS))
     || canonicalJson(report.thresholds) !== canonicalJson(RETIREMENT_THRESHOLDS)) invalid()
+
+  const eventValues = report.events
+  if (!Array.isArray(eventValues)) invalid()
+  const validatedEventValues = eventValues as unknown[]
 
   const nullableFinite = (candidate: unknown): boolean => candidate === null || finite(candidate)
   const nullableRate = (candidate: unknown): boolean => candidate === null || (finite(candidate) && candidate <= 1)
@@ -211,7 +227,17 @@ export const parseCanonicalRetirementReport = (value: unknown): CanonicalRetirem
     || typeof decision.eligible !== 'boolean' || typeof decision.measuredWindowApproved !== 'boolean' || typeof decision.clientBudgetPassed !== 'boolean'
     || !['promote', 'hold', 'rollback'].includes(String(decision.recommendation)) || !Array.isArray(decision.failedChecks)
     || !decision.failedChecks.every((check) => typeof check === 'string')) invalid()
-  return value as unknown as CanonicalRetirementReportV1
+  const acceptedEvents = validatedEventValues.map(parseCanonicalTelemetryEvent)
+  if (acceptedEvents.length !== validatedEvidence.acceptedEvents) invalid()
+  const acceptedInput = Buffer.from(`${acceptedEvents.map((event) => JSON.stringify(event)).join('\n')}${acceptedEvents.length > 0 ? '\n' : ''}`)
+  const derived = buildCanonicalRetirementReport(acceptedInput, validatedWindow.from, validatedWindow.to)
+  derived.evidence = {
+    inputSha256: validatedEvidence.inputSha256,
+    acceptedEvents: validatedEvidence.acceptedEvents,
+    exactDuplicatesIgnored: validatedEvidence.exactDuplicatesIgnored,
+  }
+  if (canonicalJson(derived) !== canonicalJson(report)) invalid()
+  return derived
 }
 
 const argumentsFrom = (args: string[]): { input: string; output: string; from: string; to: string } => {

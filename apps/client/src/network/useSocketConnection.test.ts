@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSocketConnection } from './useSocketConnection'
 
@@ -71,7 +71,7 @@ describe('useSocketConnection collaboration subscriptions', () => {
     vi.clearAllMocks()
   })
 
-  it('subscribes collaboration events when callbacks are provided', () => {
+  it('subscribes canonical presence events without retired session events', () => {
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)
 
@@ -103,17 +103,19 @@ describe('useSocketConnection collaboration subscriptions', () => {
 
     expect(ioMock).toHaveBeenCalledTimes(1)
     expect(socket.on).toHaveBeenCalledWith('quilt_protocol', expect.any(Function))
-    expect(socket.on).toHaveBeenCalledWith('session_snapshot', expect.any(Function))
-    expect(socket.on).toHaveBeenCalledWith('tile_placed', expect.any(Function))
-    expect(socket.on).toHaveBeenCalledWith('tile_removed', expect.any(Function))
-    expect(socket.on).toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
-    expect(socket.on).toHaveBeenCalledWith('pointer_update', callbacks.onPointerUpdate)
+    expect(socket.on).not.toHaveBeenCalledWith('session_snapshot', expect.any(Function))
+    expect(socket.on).not.toHaveBeenCalledWith('tile_placed', expect.any(Function))
+    expect(socket.on).not.toHaveBeenCalledWith('tile_removed', expect.any(Function))
+    expect(socket.on).not.toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
+    expect(socket.on).not.toHaveBeenCalledWith('pointer_update', callbacks.onPointerUpdate)
     expect(socket.on).toHaveBeenCalledWith('client_joined', callbacks.onClientJoined)
     expect(socket.on).toHaveBeenCalledWith('client_left', callbacks.onClientLeft)
-    expect(socket.on).toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
+    expect(socket.on).not.toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
   })
 
-  it('emits bounded reconnect recovery and exhaustion terminals', () => {
+  it('delivers bounded reconnect recovery and exhaustion terminals', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }))
+    vi.stubGlobal('fetch', fetchMock)
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)
     renderAuthenticatedSocket(['http://localhost:3001', 'session-1', 'client-1', vi.fn(), vi.fn(), vi.fn()])
@@ -134,12 +136,20 @@ describe('useSocketConnection collaboration subscriptions', () => {
     disconnect('transport close')
     reconnectAttempt()
     reconnectFailed()
-    expect(socket.emit).toHaveBeenCalledWith('canonical_telemetry', expect.objectContaining({
-      name: 'canonical_reconnect', outcome: 'exhausted', attempts: 1,
-    }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      new URL('http://localhost:3001/quilts/canonical/telemetry'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer access-token',
+          'x-canonical-attempt-id': expect.any(String),
+        }),
+        body: expect.stringContaining('"outcome":"exhausted"'),
+      }),
+    ))
   })
 
-  it('subscribes chunk events when chunk streaming is enabled', () => {
+  it('does not restore retired chunk events when the legacy option is enabled', () => {
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)
 
@@ -173,10 +183,10 @@ describe('useSocketConnection collaboration subscriptions', () => {
         true,
     ])
 
-    expect(socket.on).toHaveBeenCalledWith('chunk_snapshot', callbacks.onChunkSnapshot)
-    expect(socket.on).toHaveBeenCalledWith('chunk_tile_placed', callbacks.onChunkTilePlaced)
-    expect(socket.on).toHaveBeenCalledWith('chunk_tile_removed', callbacks.onChunkTileRemoved)
-    expect(socket.on).toHaveBeenCalledWith('chunk_resync_required', callbacks.onChunkResyncRequired)
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_snapshot', callbacks.onChunkSnapshot)
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_tile_placed', callbacks.onChunkTilePlaced)
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_tile_removed', callbacks.onChunkTileRemoved)
+    expect(socket.on).not.toHaveBeenCalledWith('chunk_resync_required', callbacks.onChunkResyncRequired)
   })
 
   it('does not subscribe chunk events when chunk streaming is disabled', () => {
@@ -252,62 +262,15 @@ describe('useSocketConnection collaboration subscriptions', () => {
     unmount()
 
     expect(socket.off).toHaveBeenCalledWith('quilt_protocol', expect.any(Function))
-    expect(socket.off).toHaveBeenCalledWith('session_snapshot', expect.any(Function))
-    expect(socket.off).toHaveBeenCalledWith('tile_placed', expect.any(Function))
-    expect(socket.off).toHaveBeenCalledWith('tile_removed', expect.any(Function))
-    expect(socket.off).toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
-    expect(socket.off).toHaveBeenCalledWith('pointer_update', callbacks.onPointerUpdate)
+    expect(socket.off).not.toHaveBeenCalledWith('session_snapshot', expect.any(Function))
+    expect(socket.off).not.toHaveBeenCalledWith('tile_placed', expect.any(Function))
+    expect(socket.off).not.toHaveBeenCalledWith('tile_removed', expect.any(Function))
+    expect(socket.off).not.toHaveBeenCalledWith('resync_required', callbacks.onResyncRequired)
+    expect(socket.off).not.toHaveBeenCalledWith('pointer_update', callbacks.onPointerUpdate)
     expect(socket.off).toHaveBeenCalledWith('client_joined', callbacks.onClientJoined)
     expect(socket.off).toHaveBeenCalledWith('client_left', callbacks.onClientLeft)
-    expect(socket.off).toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
+    expect(socket.off).not.toHaveBeenCalledWith('selection_update', callbacks.onSelectionUpdate)
     expect(socket.disconnect).toHaveBeenCalledTimes(1)
-  })
-
-  it('negotiates v2 and suppresses duplicate v1 durable events unless the server selects v1', () => {
-    const socket = createMockSocket()
-    ioMock.mockReturnValue(socket)
-    const onSnapshot = vi.fn()
-    const onTilePlaced = vi.fn()
-    const onTileRemoved = vi.fn()
-
-    renderAuthenticatedSocket([
-      'http://localhost:3001',
-      'session-1',
-      'client-1',
-      onSnapshot,
-      onTilePlaced,
-      onTileRemoved,
-    ])
-
-    expect(ioMock).toHaveBeenCalledWith('http://localhost:3001', expect.objectContaining({
-      auth: expect.any(Function),
-      autoConnect: false,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 5_000,
-    }))
-
-    const protocol = registeredHandler<(payload: { selectedProtocolVersion: 1 | 2 }) => void>(socket, 'quilt_protocol')
-    const snapshot = registeredHandler<(payload: unknown) => void>(socket, 'session_snapshot')
-    const placed = registeredHandler<(payload: unknown) => void>(socket, 'tile_placed')
-    const removed = registeredHandler<(payload: unknown) => void>(socket, 'tile_removed')
-
-    protocol({ selectedProtocolVersion: 2 })
-    snapshot({})
-    placed({})
-    removed({})
-    expect(onSnapshot).not.toHaveBeenCalled()
-    expect(onTilePlaced).not.toHaveBeenCalled()
-    expect(onTileRemoved).not.toHaveBeenCalled()
-
-    protocol({ selectedProtocolVersion: 1 })
-    snapshot({})
-    placed({})
-    removed({})
-    expect(onSnapshot).toHaveBeenCalledTimes(1)
-    expect(onTilePlaced).toHaveBeenCalledTimes(1)
-    expect(onTileRemoved).toHaveBeenCalledTimes(1)
   })
 
   it('rejects v1 negotiation when canonical entry requires v2', () => {

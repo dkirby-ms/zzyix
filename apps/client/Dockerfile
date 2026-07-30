@@ -33,7 +33,7 @@ COPY --from=build /app/apps/client/dist /usr/share/nginx/html
 RUN echo '#!/bin/sh' > /entrypoint.sh && \
     echo 'set -e' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] Starting nginx entrypoint..."' >> /entrypoint.sh && \
-    echo 'required_variables="BACKEND_SERVICE_HOSTNAME AUTH_AUTHORITY AUTH_CLIENT_ID AUTH_API_SCOPE AUTH_API_ORIGIN AUTH_REDIRECT_URI AUTH_POST_LOGOUT_REDIRECT_URI FEATURE_CANONICAL_ENTRY_ENABLED"' >> /entrypoint.sh && \
+    echo 'required_variables="BACKEND_SERVICE_HOSTNAME AUTH_AUTHORITY AUTH_CLIENT_ID AUTH_API_SCOPE AUTH_API_ORIGIN AUTH_REDIRECT_URI AUTH_POST_LOGOUT_REDIRECT_URI"' >> /entrypoint.sh && \
     echo 'for variable_name in $required_variables; do' >> /entrypoint.sh && \
     echo '  eval "variable_value=\${$variable_name:-}"' >> /entrypoint.sh && \
     echo '  if [ -z "$variable_value" ]; then' >> /entrypoint.sh && \
@@ -50,8 +50,7 @@ RUN echo '#!/bin/sh' > /entrypoint.sh && \
     echo '  --arg apiOrigin "$AUTH_API_ORIGIN" \' >> /entrypoint.sh && \
     echo '  --arg redirectUri "$AUTH_REDIRECT_URI" \' >> /entrypoint.sh && \
     echo '  --arg postLogoutRedirectUri "$AUTH_POST_LOGOUT_REDIRECT_URI" \' >> /entrypoint.sh && \
-    echo '  --argjson canonicalEntryEnabled "$FEATURE_CANONICAL_ENTRY_ENABLED" \' >> /entrypoint.sh && \
-    echo '  '\''{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri, canonicalEntryEnabled: $canonicalEntryEnabled}'\'' \' >> /entrypoint.sh && \
+    echo '  '\''{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri}'\'' \' >> /entrypoint.sh && \
     echo '  > /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
     echo 'jq empty /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
     echo 'envsubst "\${BACKEND_SERVICE_HOSTNAME}" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \

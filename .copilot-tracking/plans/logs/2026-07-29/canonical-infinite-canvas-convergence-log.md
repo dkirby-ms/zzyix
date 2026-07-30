@@ -29,7 +29,31 @@ research items.
 
 ### Final Validation Status
 
-Status: Passed. No known critical, major, or minor gap remains.
+Status: Needs Rework. The 2026-07-29 implementation review identified five critical, six
+major, and one minor finding. Phase 6 code remediation is complete, but release readiness
+remains blocked until PostgreSQL-backed, Playwright, multi-replica, and migration validation
+completes.
+
+### Implementation Review Deviations
+
+* DD-03: Retirement was not coupled to mandatory immutable evidence
+	* Plan specifies: Retirement startup fails without valid measured promotion evidence
+	* Implementation differs: Retired routes can run while evidence validation is optional and CD does not deploy the evidence contract
+	* Rationale: No valid deviation; tracked for correction in Phase 6
+* DD-04: Final runtime retained canary and legacy compatibility surfaces
+	* Plan specifies: Canonical entry is unconditional and retired runtime paths are removed
+	* Implementation differs: Discovery and entry controls plus compiled legacy handlers and contracts remain
+	* Rationale: No valid deviation; tracked for correction in Phase 6
+* DD-05: Telemetry does not provide trustworthy attempt lineage or complete terminals
+	* Plan specifies: Authenticated terminal telemetry supports promotion decisions
+	* Implementation differs: Client-selected attempt IDs, missing failure terminals, and fabricated world identity can bias reports
+	* Rationale: No valid deviation; tracked for correction in Phase 6
+
+### Implementation Review Remediation
+
+* IV-001 through IV-010 and IV-012 are corrected in Phase 6 source, deployment, documentation, and focused tests
+* IV-011 is corrected in the plan, changes log, and planning log by retaining blocked release status
+* Full closure remains pending environment-backed Step 6.4 validation
 
 ## Implementation Paths Considered
 
@@ -67,6 +91,9 @@ Items identified during planning that fall outside current scope.
 * WI-02: Add operational canonical-world dashboards and alerts - Visualize descriptor failures, protocol fallback rejection, reconnect exhaustion, room-resubscription lag, and presence lease health (medium priority, medium effort)
 	* Source: Canonical retirement telemetry contract
 	* Dependency: Canonical metrics and threshold ownership
+* WI-03: Preserve machine-readable release evidence - Retain PostgreSQL, Playwright, and migration-rehearsal outputs for independent verification (high priority, low effort)
+  * Source: Implementation review validation gaps
+  * Dependency: Phase 6 validation
 
 ## User Decisions
 
@@ -108,3 +135,9 @@ Items identified during planning that fall outside current scope.
 * Phase 5 release-contract validation passed nine tests
 * Phase 5 migration and recovery rehearsal passed 10 recovery tests and removed its disposable database
 * Final `git diff --check` and editor diagnostics passed; ports 3001 and 5173 were clear and no test containers remained
+* Phase 6 focused server validation passed 40 tests
+* Phase 6 focused client validation passed 33 tests with eight retired-path tests skipped
+* Phase 6 release-contract validation passed nine tests
+* Phase 6 lint and production builds passed with the existing Vite bundle-size warning
+* Phase 6 PostgreSQL-backed, standard Playwright, multi-replica Playwright, and migration rehearsal remain blocked because loopback PostgreSQL refused connections and Docker is unavailable
+* Phase 6 `git diff --check` passed, and ports 3001 and 5173 were clear

@@ -22,8 +22,8 @@ export type CanonicalTelemetryBase = {
   eventId: string
   attemptId: string
   occurredAt: string
-  quiltId: string
-  canonicalGeneration: number
+  quiltId: string | null
+  canonicalGeneration: number | null
   cohort: 'canary' | 'global'
 }
 

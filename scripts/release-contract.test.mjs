@@ -34,7 +34,7 @@ test('CD releases queue without cancelling an in-flight migration owner', async 
   assert.match(workflow, /properties\.status/)
 })
 
-test('production rollout requires operational approvals and keeps mutation disabled', async () => {
+test('production rollout requires immutable retirement evidence and keeps mutation disabled', async () => {
   const workflow = await readWorkflow()
 
   for (const approval of [
@@ -50,17 +50,19 @@ test('production rollout requires operational approvals and keeps mutation disab
   assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED: \$\{\{ vars\.FEATURE_PROTOCOL_V2_MUTATION_ENABLED \|\| 'false' \}\}/)
   assert.match(workflow, /AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED/)
   assert.match(workflow, /Mutation approval is not granted: \$\{approval_name\}/)
-  for (const featureFlag of [
-    'FEATURE_PROTOCOL_V2_MUTATION_ENABLED',
-    'FEATURE_QUILT_PROTOCOL_V2_ENABLED',
-    'FEATURE_CANONICAL_DISCOVERY_ENABLED',
-    'FEATURE_CANONICAL_ENTRY_ENABLED',
+  for (const evidenceSetting of [
+    'LEGACY_RETIREMENT_REPORT_SHA256',
+    'LEGACY_RETIREMENT_PARITY_PASSED',
+    'LEGACY_RETIREMENT_RECOVERY_PASSED',
+    'LEGACY_RETIREMENT_MULTI_REPLICA_PASSED',
+    'LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED',
+    'LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED',
   ]) {
-    assert.match(workflow, new RegExp(`${featureFlag}: \\$\\{\\{ vars\\.${featureFlag} \\|\\| 'false' \\}\\}`))
+    assert.match(workflow, new RegExp(evidenceSetting))
   }
-  assert.match(workflow, /Canonical entry requires protocol V2\./)
-  assert.equal(workflow.match(/FEATURE_CANONICAL_DISCOVERY_ENABLED=\$\{FEATURE_CANONICAL_DISCOVERY_ENABLED\}/g)?.length, 3)
-  assert.equal(workflow.match(/FEATURE_CANONICAL_ENTRY_ENABLED=\$\{FEATURE_CANONICAL_ENTRY_ENABLED\}/g)?.length, 2)
+  assert.match(workflow, /legacy-retirement-report=\$\{\{ secrets\.LEGACY_RETIREMENT_REPORT_BASE64 \}\}/)
+  assert.equal(workflow.match(/LEGACY_RETIREMENT_REPORT_PATH=\$\{LEGACY_RETIREMENT_REPORT_PATH\}/g)?.length, 3)
+  assert.doesNotMatch(workflow, /FEATURE_CANONICAL_DISCOVERY_ENABLED|FEATURE_CANONICAL_ENTRY_ENABLED/)
 })
 
 test('CI requires authenticated multi-replica E2E', async () => {
@@ -173,17 +175,16 @@ test('container runtime JSON generation escapes special characters', async () =>
     '--arg', 'apiOrigin', values[3],
     '--arg', 'redirectUri', values[4],
     '--arg', 'postLogoutRedirectUri', values[5],
-    '--argjson', 'canonicalEntryEnabled', 'true',
-    '{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri, canonicalEntryEnabled: $canonicalEntryEnabled}',
+    '{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri}',
   ]
   const { stdout } = await execFileAsync('jq', jqArguments)
 
-  assert.deepEqual(Object.values(JSON.parse(stdout)), [...values, true])
+  assert.deepEqual(Object.values(JSON.parse(stdout)), values)
   const dockerfile = await readFile(dockerfilePath, 'utf8')
   assert.match(dockerfile, /apk add --no-cache gettext jq/)
   assert.match(dockerfile, /jq empty \/usr\/share\/nginx\/html\/auth-config\.json/)
   assert.match(dockerfile, /nginx -t/)
-  assert.match(dockerfile, /--argjson canonicalEntryEnabled "\$FEATURE_CANONICAL_ENTRY_ENABLED"/)
+  assert.doesNotMatch(dockerfile, /FEATURE_CANONICAL_ENTRY_ENABLED|canonicalEntryEnabled/)
   assert.doesNotMatch(dockerfile, /auth-config\.template\.json/)
 })
 

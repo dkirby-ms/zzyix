@@ -17,7 +17,6 @@ import {
   createInitialSequencedTilesState,
   createServerTileId,
   isServerTileId,
-  reconcileOptimisticPlacementAck,
   reconcileSequencedTilePlaced,
   reconcileSequencedTileRemoved,
   stepGhost,
@@ -46,7 +45,6 @@ import type {
   CanonicalPatchNavigation,
   ClientJoinedPayload,
   ClientLeftPayload,
-  PlaceTileAck,
   PlaceTilePayload,
   PointerUpdatePayload,
   SelectionUpdatePayload,
@@ -83,7 +81,6 @@ import type { PaletteName } from './ui/palettes'
 import { TooltipProvider } from './ui/primitives/Tooltip'
 import { useAuthSession } from './auth/useAuthSession'
 import {
-  COLLABORATION_EMIT_INTERVAL_MS,
   COLLABORATOR_CLEANUP_INTERVAL_MS,
   evictStaleCollaboratorSignals,
   formatCollaboratorLabel,
@@ -689,10 +686,7 @@ function ProtectedApp() {
   }, [])
 
   const requestSnapshot = useCallback((): void => {
-    const socket = socketActionRef.current
-    if (!socket) return
-
-    socket.emit('request_snapshot')
+    setQuiltSubscriptionEpoch((previous) => previous + 1)
   }, [])
 
   const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
@@ -875,18 +869,8 @@ function ProtectedApp() {
       totalResyncEvents: clientTelemetryRef.current.resyncEvents,
     })
 
-    const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      requestSnapshot()
-      return
-    }
-
-    socket.emit('request_chunk_snapshot', {
-      canvasId: sessionId,
-      chunks: [payload.chunkId],
-      payloadMode: payload.payloadMode,
-    })
-  }, [requestSnapshot, sessionId])
+    setQuiltSubscriptionEpoch((previous) => previous + 1)
+  }, [])
 
   const onPointerUpdate = useCallback((payload: PointerUpdatePayload): void => {
     setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
@@ -959,93 +943,12 @@ function ProtectedApp() {
   }, [activeChunkIds, isQuiltV2])
 
   const emitPointerMove = useCallback((position: { x: number; y: number }): void => {
-    const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      return
-    }
-
-    const throttleState = pointerEmitThrottleRef.current
-    const now = Math.max(Date.now(), throttleState.lastSentAt)
-    const elapsed = now - throttleState.lastSentAt
-
-    const flushPointerMove = (nextPosition: { x: number; y: number }): void => {
-      socket.emit('pointer_move', { position: nextPosition })
-      throttleState.lastSentAt = Math.max(Date.now(), throttleState.lastSentAt)
-      throttleState.pendingPosition = undefined
-    }
-
-    if (elapsed >= COLLABORATION_EMIT_INTERVAL_MS) {
-      if (throttleState.timeoutId !== null) {
-        window.clearTimeout(throttleState.timeoutId)
-        throttleState.timeoutId = null
-      }
-      flushPointerMove(position)
-      return
-    }
-
-    throttleState.pendingPosition = position
-
-    if (throttleState.timeoutId !== null) {
-      return
-    }
-
-    throttleState.timeoutId = window.setTimeout(() => {
-      throttleState.timeoutId = null
-      const pendingPosition = throttleState.pendingPosition
-      if (!pendingPosition) {
-        return
-      }
-      flushPointerMove(pendingPosition)
-    }, Math.max(0, COLLABORATION_EMIT_INTERVAL_MS - elapsed))
-  }, [sessionId])
+    void position
+  }, [])
 
   const emitSelectionUpdate = useCallback((tileId?: string): void => {
-    const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      return
-    }
-
-    const throttleState = selectionEmitThrottleRef.current
-    const now = Math.max(Date.now(), throttleState.lastSentAt)
-    const elapsed = now - throttleState.lastSentAt
-
-    const flushSelectionUpdate = (nextTileId?: string): void => {
-      if (throttleState.lastTileId === nextTileId) {
-        throttleState.pendingTileId = undefined
-        return
-      }
-
-      socket.emit('selection_update', {
-        canvasId: sessionId,
-        clientId,
-        tileId: nextTileId,
-        updatedAt: Date.now(),
-      })
-
-      throttleState.lastSentAt = Math.max(Date.now(), throttleState.lastSentAt)
-      throttleState.lastTileId = nextTileId
-      throttleState.pendingTileId = undefined
-    }
-
-    if (elapsed >= COLLABORATION_EMIT_INTERVAL_MS) {
-      if (throttleState.timeoutId !== null) {
-        window.clearTimeout(throttleState.timeoutId)
-        throttleState.timeoutId = null
-      }
-      flushSelectionUpdate(tileId)
-      return
-    }
-
-    throttleState.pendingTileId = tileId
-    if (throttleState.timeoutId !== null) {
-      return
-    }
-
-    throttleState.timeoutId = window.setTimeout(() => {
-      throttleState.timeoutId = null
-      flushSelectionUpdate(throttleState.pendingTileId)
-    }, Math.max(0, COLLABORATION_EMIT_INTERVAL_MS - elapsed))
-  }, [clientId, sessionId])
+    void tileId
+  }, [])
 
   const socketRef = useSocketConnection(
     auth.apiOrigin,
@@ -1175,7 +1078,6 @@ function ProtectedApp() {
       chunkIds: entry.chunks,
     }))
 
-    const resubscribeAttemptId = crypto.randomUUID()
     const resubscribeStartedAt = performance.now()
     socket.emit('subscribe_quilt_area', {
       quiltId: topology.quiltId,
@@ -1187,7 +1089,6 @@ function ProtectedApp() {
       const resyncRequired = ack.outcomes.filter((outcome) => outcome.status === 'accepted' && outcome.cursor === undefined).length
       socket.emit('canonical_telemetry', {
         name: 'canonical_resubscribe',
-        attemptId: resubscribeAttemptId,
         outcome: ack.outcomes.every((outcome) => outcome.status === 'accepted') ? 'completed' : 'failed',
         durationMs: performance.now() - resubscribeStartedAt,
         requestedRooms: rooms.length,
@@ -1197,100 +1098,6 @@ function ProtectedApp() {
       })
     })
   }, [activeChunkIds, connectionEpoch, quiltCache, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
-
-  useEffect(() => {
-    const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      return
-    }
-
-    if (!realtimeCapabilities || !realtimeCapabilities.chunkStreamingEnabled) {
-      if (subscribedChunkIdsRef.current.size > 0) {
-        socket.emit('unsubscribe_chunks', {
-          canvasId: sessionId,
-          chunks: Array.from(subscribedChunkIdsRef.current),
-        })
-        subscribedChunkIdsRef.current = new Set()
-        setActiveChunkIds([])
-      }
-      return
-    }
-
-    const payloadMode: ChunkPayloadMode = zoomTier === 'aggregate' ? 'aggregate' : 'fine'
-
-    const previous = subscribedChunkIdsRef.current
-    const next = new Set(activeChunkIds)
-    const subscribe: ChunkId[] = []
-    const unsubscribe: ChunkId[] = []
-
-    for (const chunkId of next) {
-      if (!previous.has(chunkId)) {
-        subscribe.push(chunkId)
-      }
-    }
-
-    for (const chunkId of previous) {
-      if (!next.has(chunkId)) {
-        unsubscribe.push(chunkId)
-      }
-    }
-
-    if (unsubscribe.length > 0) {
-      socket.emit('unsubscribe_chunks', {
-        canvasId: sessionId,
-        chunks: unsubscribe,
-      })
-      clientTelemetryRef.current.unsubscribeEvents += unsubscribe.length
-    }
-
-    if (subscribe.length > 0) {
-      socket.emit('subscribe_chunks', {
-        canvasId: sessionId,
-        chunks: subscribe,
-        payloadMode,
-      })
-      clientTelemetryRef.current.subscribeEvents += subscribe.length
-    }
-
-    if (subscribe.length > 0 || unsubscribe.length > 0) {
-      console.info('chunk_subscription_churn', {
-        zoomTier,
-        payloadMode,
-        subscribeCount: subscribe.length,
-        unsubscribeCount: unsubscribe.length,
-        activeCount: next.size,
-        totalSubscribeEvents: clientTelemetryRef.current.subscribeEvents,
-        totalUnsubscribeEvents: clientTelemetryRef.current.unsubscribeEvents,
-      })
-    }
-
-    subscribedChunkIdsRef.current = next
-  }, [activeChunkIds, sessionId, zoomTier, realtimeCapabilities])
-
-  useEffect(() => {
-    const subscribedChunkIds = subscribedChunkIdsRef
-    const viewportRef = lastChunkViewportRef
-    const socketRef = socketActionRef
-
-    return () => {
-      if (!sessionId || subscribedChunkIds.current.size === 0) {
-        return
-      }
-
-      const socket = socketRef.current
-      if (!socket) {
-        return
-      }
-
-      socket.emit('unsubscribe_chunks', {
-        canvasId: sessionId,
-        chunks: Array.from(subscribedChunkIds.current),
-      })
-      subscribedChunkIds.current = new Set()
-      setActiveChunkIds([])
-      viewportRef.current = null
-    }
-  }, [sessionId])
 
   useEffect(() => {
     if (pointerEmitThrottleRef.current.timeoutId !== null) {
@@ -1350,35 +1157,7 @@ function ProtectedApp() {
       })
       return
     }
-
-    socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: sequencedState.revision }, (ack) => {
-      if (!ack.removed) {
-        if (!isQuiltV2) requestSnapshot()
-        return
-      }
-
-      if (isQuiltV2 && quiltUndo) {
-        setQuiltCache((previous) => clearQuiltUndoMetadata(
-          applyQuiltPatchRemoval(previous, quiltUndo.patchId, lastSettled.id, {
-            patchId: quiltUndo.patchId,
-            opSeq: ack.opSeq,
-            revision: ack.newRevision,
-          }),
-          lastSettled.id,
-        ))
-        return
-      }
-
-      setSequencedState((prev) => ({
-        ...reconcileSequencedTileRemoved(prev, {
-          tileId: lastSettled.id,
-          opSeq: ack.opSeq,
-          revision: ack.newRevision,
-        }),
-        revision: ack.newRevision,
-      }))
-    })
-  }, [clientId, isQuiltV2, quiltCache, quiltProtocol, requestSnapshot, sequencedState.revision, socketRef, visibleTiles])
+  }, [clientId, isQuiltV2, quiltCache, quiltProtocol, socketRef, visibleTiles])
 
   useEffect(() => {
     if (mode !== 'canvas') {
@@ -1467,7 +1246,7 @@ function ProtectedApp() {
     }))
   }, [activeTile.mirrored, activeTile.rotation, placementGuide.enabled])
 
-  const placeFromState = useCallback((tileState: ActiveTile, ghostState: typeof ghost, tileSequenceState: SequencedTilesState): void => {
+  const placeFromState = useCallback((tileState: ActiveTile, ghostState: typeof ghost): void => {
     const result = tryPlaceTile(tileState, ghostState, visibleTiles)
     if (!result.placed) {
       triggerInvalidPulse()
@@ -1534,32 +1313,8 @@ function ProtectedApp() {
         else emitSelectionUpdate(ack.tile.id)
       })
       return
-    } else {
-      setSequencedState((prev) => ({
-        ...prev,
-        tiles: [...prev.tiles, tempTile],
-      }))
     }
-
-    const payload: PlaceTilePayload = {
-      tileId,
-      shape: tempTile.shape,
-      color: tempTile.color,
-      material: tempTile.material,
-      transform: tempTile.transform,
-      expectedRevision: tileSequenceState.revision,
-    }
-
-    socket.emit('place_tile', payload, (ack: PlaceTileAck) => {
-      if (ack.rejected) {
-        setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
-        triggerInvalidPulse()
-        return
-      }
-
-      emitSelectionUpdate(ack.placed.id)
-      setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
-    })
+    triggerInvalidPulse()
   }, [clientId, emitSelectionUpdate, isQuiltV2, quiltCache, quiltProtocol, socketRef, triggerInvalidPulse, visibleTiles])
 
   const updatePointer = useCallback((x: number, y: number): void => {
@@ -1587,8 +1342,8 @@ function ProtectedApp() {
   }, [emitPointerMove, emitSelectionUpdate, ghostVisible, resolveGhostFromPointer, visibleTiles])
 
   const attemptPlace = useCallback((): void => {
-    placeFromState(activeTile, ghost, sequencedState)
-  }, [activeTile, ghost, placeFromState, sequencedState])
+    placeFromState(activeTile, ghost)
+  }, [activeTile, ghost, placeFromState])
 
   useEffect(() => registerCanvasTestApi({
     getState: () => ({
@@ -1653,7 +1408,7 @@ function ProtectedApp() {
       ghostRef.current = nextGhost
       setGhostVisible(true)
       setGhost(nextGhost)
-      placeFromState(activeTileRef.current, nextGhost, tileSequenceState)
+      placeFromState(activeTileRef.current, nextGhost)
     },
     placeTileAtWithAck: async (input) => {
       const pointer = vec2(input.position.x, input.position.y)
@@ -1773,30 +1528,8 @@ function ProtectedApp() {
         }
       }
 
-      const payload: PlaceTilePayload = {
-        tileId: createServerTileId(),
-        shape: tempTile.shape,
-        color: tempTile.color,
-        material: tempTile.material,
-        transform: tempTile.transform,
-        ...(input.includeExpectedRevision ?? true
-          ? { expectedRevision: input.expectedRevisionOverride ?? tileSequenceState.revision }
-          : {}),
-      }
-
-      const ack = await new Promise<PlaceTileAck>((resolve) => {
-        socket.emit('place_tile', payload, (nextAck: PlaceTileAck) => resolve(nextAck))
-      })
-
-      if (ack.rejected) {
-        setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
-        triggerInvalidPulse()
-        return ack
-      }
-
-      emitSelectionUpdate(ack.placed.id)
-      setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
-      return ack
+      triggerInvalidPulse()
+      return { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' as const }
     },
   }), [
     activeCollaborators,
@@ -1859,7 +1592,7 @@ function ProtectedApp() {
               ))}
             </div>
           )}
-          {auth.canonicalEntryEnabled && canonicalDescriptor && (
+          {canonicalDescriptor && (
             <section className="canonical-navigation" aria-label="Canonical patch navigation">
               <div className="canonical-navigation-heading">
                 <div>

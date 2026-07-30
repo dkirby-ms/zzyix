@@ -536,12 +536,118 @@ Document failures that require product-contract changes, topology replacement, o
 architecture work. Create focused follow-on research and planning rather than expanding the
 implementation inline.
 
+## Implementation Phase 6: Remediate Implementation Review Findings
+
+<!-- parallelizable: false -->
+
+Source:
+
+* `.copilot-tracking/reviews/2026-07-29/canonical-infinite-canvas-convergence-plan-quality.md`
+
+### Step 6.1: Enforce trustworthy retirement evidence and final-state deployment
+
+Make retirement evidence mandatory whenever the build exposes retired compatibility
+behavior. Recompute every report decision from accepted evidence at load time and reject
+empty, inconsistent, or caller-authored conclusions. Propagate the immutable report path,
+report digest, and required approvals through CD. Remove canonical discovery and entry
+canary controls from the final deployment and client path after evidence enforcement.
+
+Files:
+
+* `apps/server/src/operations/canonicalRetirementReportCli.ts`
+* `apps/server/src/migration/quiltRollout.ts`
+* `apps/server/src/startup/rolloutGates.ts`
+* `apps/server/src/startup/rolloutGates.test.ts`
+* `.github/workflows/cd.yml`
+* `scripts/release-contract.test.mjs`
+* `apps/client/src/App.tsx`
+
+Success criteria:
+
+* A retired build cannot start without immutable, digest-matched promotion evidence
+* Promotion is derived from nonempty accepted events and cannot be supplied as trusted input
+* Final production deployment and UI have no discovery or entry rollback controls
+
+### Step 6.2: Bind telemetry identity and make every terminal outcome observable
+
+Bind canonical entry, reconnect, and resubscribe telemetry to the authenticated socket's
+server-owned attempt identity. Define server-owned identity for pre-discovery failures
+without fabricating quilt identity or generation. Record server-observable failures on the
+server and use an authenticated deliverable path for client-only terminal failures. Define
+and validate reconnect attempt lineage so one socket cannot manufacture promotion volume.
+
+Files:
+
+* `apps/server/src/contracts.ts`
+* `apps/server/src/index.ts`
+* `apps/server/src/migration/quiltTelemetry.ts`
+* `apps/server/src/operations/canonicalRetirementReportCli.ts`
+* `apps/server/src/index.integration.test.ts`
+* `apps/client/src/network/useSocketConnection.ts`
+* `apps/client/src/network/useSocketConnection.test.ts`
+
+Success criteria:
+
+* Client telemetry cannot choose or replay another authenticated attempt identity
+* Every discovery, entry, reconnect, and resubscribe attempt has one deliverable terminal
+* Pre-world failures are not grouped as a fabricated canonical generation
+
+### Step 6.3: Enforce canonical provenance, lease loss, and runtime retirement
+
+Restrict activation to the provisioned inactive generation-1 pointer and preserve its quilt
+identity during the generation-1-to-2 CAS. Delete retired handlers, process-local state,
+contracts, imports, and legacy-focused tests from compiled runtime code while retaining only
+database residue required by retention policy. Treat a false or rejected presence renewal
+as lease loss under an explicit disconnect policy. Correct the ADR keyword indentation.
+
+Files:
+
+* `apps/server/src/db/repository.ts`
+* `apps/server/src/index.ts`
+* `apps/server/src/contracts.ts`
+* `apps/server/src/db/canonicalWorld.postgres.integration.test.ts`
+* `apps/server/src/index.integration.test.ts`
+* `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md`
+
+Success criteria:
+
+* Activation cannot adopt or repoint to an arbitrary structurally valid quilt
+* No retired session handler, state, or public contract is compiled into the product runtime
+* Presence lease loss terminates the affected socket deterministically
+
+### Step 6.4: Add composed boundary coverage and rerun release validation
+
+Add live HTTP tests for 401, 403, and 426 ordering with side-effect checks and live
+Socket.IO tests for authentication, unsupported clients, and telemetry binding. Add composed
+navigation, claim, and presence lifecycle coverage. Correct planning and release claims,
+then rerun focused checks followed by PostgreSQL-backed tests, both Playwright suites, and
+migration rehearsal when their dependencies are available.
+
+Validation commands:
+
+* `npm exec --workspace=apps/server -- vitest run src/operations/canonicalRetirementReportCli.test.ts src/startup/rolloutGates.test.ts src/index.integration.test.ts src/db/canonicalWorld.postgres.integration.test.ts`
+* `npm exec --workspace=apps/client -- vitest run src/App.test.tsx src/network/useSocketConnection.test.ts`
+* `npm run test:release-contract`
+* `npm run lint`
+* `npm run build`
+* `npm test`
+* `npm run test:e2e`
+* `TEST_DATABASE_ADMIN_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run test:e2e:multi-replica`
+* `./scripts/verify-quilt-migration.sh rehearse`
+
+Success criteria:
+
+* Composed compatibility boundaries are tested through live HTTP and Socket.IO stacks
+* PostgreSQL, standard Playwright, multi-replica Playwright, and migration evidence is retained
+* Release artifacts report readiness only after every critical and major finding is closed
+
 ## Dependencies
 
 * Product acceptance of one finite toroidal canonical world
 * Production topology, target, navigation, claim, and presence decisions
 * Disposable loopback PostgreSQL for migration and repository integration tests
 * Existing quilt protocol-V2, authorization, recovery, and telemetry mechanisms
+* Implementation review findings IV-001 through IV-012
 
 ## Success Criteria
 

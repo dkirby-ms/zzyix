@@ -50,7 +50,6 @@ const {
     } as MeResponse | null,
     error: null as string | null,
     apiOrigin: 'http://localhost:3001',
-    canonicalEntryEnabled: false,
     authenticatedFetch: vi.fn<typeof fetch>(),
     acquireAccessToken: vi.fn(async () => 'access-token'),
     login: vi.fn(async () => undefined),
@@ -251,7 +250,6 @@ describe('App canonical canvas behavior', () => {
       },
     }
     authSessionState.error = null
-    authSessionState.canonicalEntryEnabled = false
     authSessionState.login.mockClear()
     authSessionState.logout.mockClear()
     authSessionState.handleAuthLoss.mockClear()
@@ -286,7 +284,6 @@ describe('App canonical canvas behavior', () => {
   })
 
   it('discovers and enters the canonical canvas without session storage', async () => {
-    authSessionState.canonicalEntryEnabled = true
     discoverCanonicalWorldMock.mockResolvedValue({
       quiltId: 'quilt-1',
       legacyCanvasId: 'canonical-canvas',
@@ -337,7 +334,6 @@ describe('App canonical canvas behavior', () => {
   })
 
   it('resolves a durable patch link and claims an eligible patch before focusing it', async () => {
-    authSessionState.canonicalEntryEnabled = true
     discoverCanonicalWorldMock.mockResolvedValue({
       quiltId: 'quilt-1', legacyCanvasId: 'canonical-canvas', topology: 'toroidal', protocolVersion: 2,
       patchRows: 2, patchColumns: 2, patchWidth: 10, patchHeight: 10, originX: 0, originY: 0,
@@ -401,7 +397,6 @@ describe('App canonical canvas behavior', () => {
   })
 
   it('shows a controlled unavailable state when canonical discovery fails', async () => {
-    authSessionState.canonicalEntryEnabled = true
     discoverCanonicalWorldMock.mockRejectedValue(new Error('Canonical world is unavailable (503)'))
 
     render(<App />)

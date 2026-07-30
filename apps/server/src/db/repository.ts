@@ -6,7 +6,6 @@ import type {
   CanonicalPatchNavigation,
   CanonicalWorldDescriptor,
   ClientPresence,
-  CreateSessionResponse,
   EligibleCanonicalPatchesResponse,
   Session,
   SessionCanvasConfig,
@@ -67,7 +66,11 @@ export type AuthoritativeSessionRecord = {
 }
 
 export type CreatedProtectedSession = AuthoritativeSessionRecord & {
-  claimTarget: CreateSessionResponse['claimTarget']
+  claimTarget: {
+    patchId: string
+    ownershipState: 'unclaimed'
+    claimEligibility: 'eligible'
+  }
 }
 
 export class ResourceNotFoundError extends Error {
@@ -3155,36 +3158,30 @@ export const activateCanonicalWorld = async (
   return db.transaction(async (tx) => {
     await lockCanonicalWorld(tx)
     const pointer = await readCanonicalPointer(tx)
-    if (pointer?.status === 'active' && pointer.quiltId === input.quiltId) {
+    if (pointer?.status === 'active' && pointer.generation === 2 && pointer.quiltId === input.quiltId && input.expectedGeneration === 1) {
       const target = await validateCanonicalTargetWithDatabase(tx, pointer.quiltId)
       if (!target) throw new CanonicalWorldTargetInvalidError()
       return operatorResult('activate', 'active', pointer.generation, target, true)
     }
-    const currentGeneration = pointer?.generation ?? 0
-    if (currentGeneration !== input.expectedGeneration) throw new CanonicalWorldGenerationConflictError()
-    const target = await validateCanonicalTargetWithDatabase(tx, input.quiltId)
+    if (!pointer
+      || pointer.status !== 'inactive'
+      || pointer.generation !== 1
+      || input.expectedGeneration !== 1
+      || pointer.quiltId !== input.quiltId) throw new CanonicalWorldGenerationConflictError()
+    const target = await validateCanonicalTargetWithDatabase(tx, pointer.quiltId)
     if (!target) throw new CanonicalWorldTargetInvalidError()
-    const generation = currentGeneration + 1
-    if (pointer) {
-      const updated = await tx.update(canonicalWorld).set({
-        quiltId: input.quiltId,
-        status: 'active',
-        generation,
-        updatedAt: new Date(),
-      }).where(and(
-        eq(canonicalWorld.productKey, CANONICAL_PRODUCT_KEY),
-        eq(canonicalWorld.generation, input.expectedGeneration),
-      )).returning({ generation: canonicalWorld.generation })
-      if (updated.length !== 1) throw new CanonicalWorldGenerationConflictError()
-    } else {
-      await tx.insert(canonicalWorld).values({
-        productKey: CANONICAL_PRODUCT_KEY,
-        quiltId: input.quiltId,
-        status: 'active',
-        generation,
-      })
-    }
-    return operatorResult('activate', 'active', generation, target)
+    const updated = await tx.update(canonicalWorld).set({
+      status: 'active',
+      generation: 2,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(canonicalWorld.productKey, CANONICAL_PRODUCT_KEY),
+      eq(canonicalWorld.quiltId, pointer.quiltId),
+      eq(canonicalWorld.status, 'inactive'),
+      eq(canonicalWorld.generation, 1),
+    )).returning({ generation: canonicalWorld.generation })
+    if (updated.length !== 1) throw new CanonicalWorldGenerationConflictError()
+    return operatorResult('activate', 'active', 2, target)
   }, { isolationLevel: 'read committed' })
 }
 

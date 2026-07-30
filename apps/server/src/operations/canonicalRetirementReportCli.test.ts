@@ -47,6 +47,41 @@ describe('canonical retirement report', () => {
     expect(() => parseCanonicalRetirementReport({ ...report, thresholds: { ...report.thresholds, maximumFrameTimeP95Ms: 40 } })).toThrow('Invalid canonical retirement report')
     expect(() => parseCanonicalRetirementReport({ ...report, groups: report.groups.map((group) => ({ ...group, unknown: true })) })).toThrow('Invalid canonical retirement report')
     expect(() => parseCanonicalRetirementReport({ ...report, generatedAt: report.observationWindow.from })).toThrow('Invalid canonical retirement report')
+    expect(() => parseCanonicalRetirementReport({
+      ...report,
+      decision: { ...report.decision, recommendation: 'hold' },
+    })).toThrow('Invalid canonical retirement report')
+    expect(() => parseCanonicalRetirementReport({
+      ...report,
+      groups: [],
+    })).toThrow('Invalid canonical retirement report')
+  })
+
+  it('keeps pre-world failures out of canonical generation groups and blocks promotion', () => {
+    const input = Buffer.concat([
+      evidence(),
+      Buffer.from(`${JSON.stringify({
+        schemaVersion: 1,
+        eventId: uuid(900),
+        attemptId: uuid(900),
+        occurredAt: '2026-07-28T00:03:00.000Z',
+        quiltId: null,
+        canonicalGeneration: null,
+        cohort: 'global',
+        name: 'canonical_discovery',
+        outcome: 'unavailable',
+        durationMs: 5,
+        httpStatus: 503,
+        reasonCode: 'missing',
+      })}\n`),
+    ])
+
+    const report = buildCanonicalRetirementReport(input, '2026-07-28T00:00:00.000Z', '2026-07-29T00:00:00.000Z')
+
+    expect(report.groups).toHaveLength(1)
+    expect(report.groups[0].canonicalGeneration).toBe(2)
+    expect(report.decision).toMatchObject({ recommendation: 'hold' })
+    expect(report.decision.failedChecks).toContain('pre_world_discovery_failure')
   })
 
   it('ignores exact event-ID duplicates and rejects conflicts, unknown fields, and duplicate terminals', () => {

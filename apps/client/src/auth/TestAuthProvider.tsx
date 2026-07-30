@@ -7,7 +7,6 @@ const TEST_SESSION_KEY = 'zzyix:e2e-authenticated'
 const TEST_SUBJECT_KEY = 'zzyix:e2e-subject'
 const TEST_TOKEN_LIFETIME_KEY = 'zzyix:e2e-token-lifetime-seconds'
 const TEST_ISSUER = import.meta.env.VITE_TEST_OIDC_ISSUER as string | undefined
-const CANONICAL_ENTRY_ENABLED = import.meta.env.VITE_CANONICAL_ENTRY_ENABLED === 'true'
 
 const subject = (): string => localStorage.getItem(TEST_SUBJECT_KEY) ?? 'e2e-browser-user'
 
@@ -93,7 +92,6 @@ export const TestAuthProvider = ({ children }: { children: ReactNode }) => {
     principal,
     error,
     apiOrigin: location.origin,
-    canonicalEntryEnabled: CANONICAL_ENTRY_ENABLED,
     authenticatedFetch,
     acquireAccessToken,
     login,

@@ -160,9 +160,6 @@ export type ApiError = {
 //    Client action: Retry after a brief delay; if persistent, alert user and suggest
 //                   refreshing the page.
 
-// POST /sessions
-export type CanvasSizePreset = 'classic' | 'expanded' | 'vast'
-
 export type CanvasSize = {
   width: number
   height: number
@@ -171,35 +168,6 @@ export type CanvasSize = {
 export type SessionCanvasConfig = {
   canvasSize: CanvasSize
   boundsPolicy: BoundsPolicy
-}
-
-export type CreateSessionRequest = {
-  canvasPreset?: CanvasSizePreset
-}
-
-export type CreateSessionResponse = {
-  session: {
-    id: string
-    canvasConfig?: SessionCanvasConfig
-  }
-  claimTarget: {
-    patchId: string
-    ownershipState: 'unclaimed'
-    claimEligibility: 'eligible'
-  }
-}
-
-export type SessionSummary = {
-  id: string
-  displayName: string
-  participantCount: number
-  canvasSize: CanvasSize
-  canvasConfig?: SessionCanvasConfig
-}
-
-// GET /sessions
-export type ListSessionsResponse = {
-  sessions: SessionSummary[]
 }
 
 export type SafePrincipalProfile = {
@@ -663,9 +631,9 @@ export type QuiltClientRuntimeMetrics = {
 }
 
 export type CanonicalClientTelemetry =
-  | { name: 'canonical_entry'; attemptId: string; outcome: 'ready' | 'discovery_failed' | 'protocol_rejected' | 'connection_failed' | 'initial_sync_failed'; durationMs: number; selectedProtocolVersion?: 1 | 2 }
-  | { name: 'canonical_reconnect'; attemptId: string; outcome: 'recovered' | 'exhausted'; durationMs: number; attempts: number }
-  | { name: 'canonical_resubscribe'; attemptId: string; outcome: 'completed' | 'failed'; durationMs: number; requestedRooms: number; acceptedRooms: number; rejectedRooms: number; resyncRequired: number }
+  | { name: 'canonical_entry'; outcome: 'ready' | 'discovery_failed' | 'protocol_rejected' | 'connection_failed' | 'initial_sync_failed'; durationMs: number; selectedProtocolVersion?: 1 | 2 }
+  | { name: 'canonical_reconnect'; outcome: 'recovered' | 'exhausted'; durationMs: number; attempts: number }
+  | { name: 'canonical_resubscribe'; outcome: 'completed' | 'failed'; durationMs: number; requestedRooms: number; acceptedRooms: number; rejectedRooms: number; resyncRequired: number }
 
 export type QuiltRoomKind = 'fine' | 'aggregate' | 'presence' | 'events'
 
@@ -735,26 +703,10 @@ export type QuiltPatchResyncRequiredPayload = {
 
 /** Events emitted by the client, received by the server. */
 export interface ClientToServerEvents {
-  /** Place a tile; server validates and responds via acknowledgement. */
-  place_tile: (payload: PlaceTilePayload, ack: (response: PlaceTileAck) => void) => void
-  /** Remove by authoritative tileId; server responds via acknowledgement. */
-  remove_tile: (payload: RemoveTilePayload, ack: (response: RemoveTileAck) => void) => void
   /** Place a canonical quilt tile through the authenticated protocol-v2 transaction. */
   quilt_place_tile: (payload: QuiltPlaceTileRequest, ack: (response: QuiltPlaceTileAck) => void) => void
   /** Remove a canonical quilt tile through the authenticated protocol-v2 transaction. */
   quilt_remove_tile: (payload: QuiltRemoveTileRequest, ack: (response: QuiltRemoveTileAck) => void) => void
-  /** Request an authoritative snapshot without reconnecting the socket. */
-  request_snapshot: () => void
-  /** Fire-and-forget cursor position for collaborative presence. */
-  pointer_move: (payload: PointerMovePayload) => void
-  /** Fire-and-forget selected tile intent for collaborative presence. */
-  selection_update: (payload: SelectionUpdatePayload) => void
-  /** Subscribe to chunk room streams while preserving the main session room. */
-  subscribe_chunks: (payload: SubscribeChunksPayload) => void
-  /** Unsubscribe from chunk room streams. */
-  unsubscribe_chunks: (payload: UnsubscribeChunksPayload) => void
-  /** Request chunk-scoped snapshots without reconnecting. */
-  request_chunk_snapshot: (payload: RequestChunkSnapshotPayload) => void
   /** Subscribe to authorized protocol-v2 quilt rooms and reconcile patch cursors. */
   subscribe_quilt_area: (payload: SubscribeQuiltAreaPayload, ack: (response: SubscribeQuiltAreaAck) => void) => void
   /** Submit sampled client runtime measurements for an authenticated canary subject. */
@@ -767,30 +719,10 @@ export interface ClientToServerEvents {
 export interface ServerToClientEvents {
   /** Announces the selected transport protocol and immutable quilt topology. */
   quilt_protocol: (payload: QuiltProtocolHandshake) => void
-  /** Sent once to the connecting socket after it joins the session room. */
-  session_snapshot: (payload: SessionSnapshotPayload) => void
-  /** Broadcast to all sockets in the session room when a tile is placed. */
-  tile_placed: (payload: TilePlacedPayload) => void
-  /** Broadcast to all sockets in the session room when a tile is removed. */
-  tile_removed: (payload: TileRemovedPayload) => void
-  /** Broadcast to all sockets in the session room except the sender. */
-  pointer_update: (payload: PointerUpdatePayload) => void
-  /** Broadcast to all sockets in the session room except the sender. */
-  selection_update: (payload: SelectionUpdatePayload) => void
   /** Broadcast to all sockets in the session room when a peer connects. */
   client_joined: (payload: ClientJoinedPayload) => void
   /** Broadcast to all sockets in the session room when a peer disconnects. */
   client_left: (payload: ClientLeftPayload) => void
-  /** Emitted to a single socket when its placement/removal is rejected due to a stale revision. */
-  resync_required: (payload: ResyncRequiredPayload) => void
-  /** Sent to a single socket after chunk subscribe/request calls. */
-  chunk_snapshot: (payload: ChunkSnapshotPayload) => void
-  /** Broadcast to sockets subscribed to the affected chunk room. */
-  chunk_tile_placed: (payload: ChunkTilePlacedPayload) => void
-  /** Broadcast to sockets subscribed to the affected chunk room. */
-  chunk_tile_removed: (payload: ChunkTileRemovedPayload) => void
-  /** Emitted when chunk offsets diverge and chunk snapshot replay is required. */
-  chunk_resync_required: (payload: ChunkResyncRequiredPayload) => void
   /** Reconstructable protocol-v2 snapshot scoped to one accepted room. */
   quilt_patch_snapshot: (payload: QuiltScopedSnapshotPayload) => void
   /** Durable protocol-v2 event scoped to one accepted room. */

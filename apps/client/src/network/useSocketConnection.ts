@@ -21,6 +21,7 @@ import type {
   QuiltProtocolHandshake,
   QuiltScopedSnapshotPayload,
   CanonicalWorldDescriptor,
+  CanonicalClientTelemetry,
 } from '../../../server/src/contracts'
 import { SCHEMA_VERSION } from '../../../server/src/contracts'
 import { isInteractionRequiredError, type AccessTokenProvider, type AuthLossReason } from './authenticatedFetch'
@@ -57,7 +58,6 @@ export const useSocketConnection = (
   entryAttemptId: string = crypto.randomUUID(),
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
-  const selectedProtocolRef = useRef<1 | 2>(2)
 
   useEffect(() => {
     if (!canonicalWorld || !acquireAccessToken) return
@@ -71,7 +71,6 @@ export const useSocketConnection = (
     const entryStartedAt = performance.now()
     let entryReported = false
     let disconnectedAt: number | null = null
-    let reconnectAttemptId: string | null = null
     let reconnectAttempts = 0
 
     const socket: AppSocket = io(serverUrl, {
@@ -99,6 +98,28 @@ export const useSocketConnection = (
       reconnectionDelayMax: 5_000,
       randomizationFactor: 0.25,
     })
+
+    const deliverTerminal = async (payload: CanonicalClientTelemetry): Promise<void> => {
+      if (socket.connected) {
+        socket.emit('canonical_telemetry', payload)
+        return
+      }
+      try {
+        const token = await acquireAccessToken()
+        await fetch(new URL('/quilts/canonical/telemetry', serverUrl || location.origin), {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+            'x-canonical-attempt-id': entryAttemptId,
+          },
+          body: JSON.stringify(payload),
+          keepalive: true,
+        })
+      } catch {
+        // The server also records every failure it can observe during authentication and initialization.
+      }
+    }
 
     const renewAndReconnect = (error?: unknown): void => {
       if (renewal) return
@@ -129,13 +150,11 @@ export const useSocketConnection = (
       if (disconnectedAt !== null) {
         socket.emit('canonical_telemetry', {
           name: 'canonical_reconnect',
-          attemptId: reconnectAttemptId ?? crypto.randomUUID(),
           outcome: 'recovered',
           durationMs: performance.now() - disconnectedAt,
           attempts: Math.max(1, reconnectAttempts),
         })
         disconnectedAt = null
-        reconnectAttemptId = null
         reconnectAttempts = 0
       }
       onConnectionEpoch?.(connectionEpoch)
@@ -149,32 +168,35 @@ export const useSocketConnection = (
         renewAndReconnect(error)
       } else if (code === 'principal_inactive' || code === 'insufficient_scope') {
         onAuthLoss?.('authentication_failed', error)
+      } else if (!entryReported) {
+        entryReported = true
+        void deliverTerminal({
+          name: 'canonical_entry',
+          outcome: 'connection_failed',
+          durationMs: performance.now() - entryStartedAt,
+        })
       }
     })
 
     socket.on('disconnect', (reason: string) => {
       disconnectedAt = performance.now()
-      reconnectAttemptId = crypto.randomUUID()
       reconnectAttempts = 0
       console.log('🔌 Socket.IO disconnected:', reason)
       if (reason === 'io server disconnect') renewAndReconnect(new Error('Socket authentication expired'))
     })
 
     const handleReconnectAttempt = (): void => {
-      reconnectAttemptId ??= crypto.randomUUID()
       reconnectAttempts += 1
     }
     const handleReconnectFailed = (): void => {
-      if (disconnectedAt === null || reconnectAttemptId === null) return
-      socket.emit('canonical_telemetry', {
+      if (disconnectedAt === null) return
+      void deliverTerminal({
         name: 'canonical_reconnect',
-        attemptId: reconnectAttemptId,
         outcome: 'exhausted',
         durationMs: performance.now() - disconnectedAt,
         attempts: reconnectAttempts,
       })
       disconnectedAt = null
-      reconnectAttemptId = null
       reconnectAttempts = 0
     }
     socket.io.on('reconnect_attempt', handleReconnectAttempt)
@@ -182,16 +204,23 @@ export const useSocketConnection = (
 
     const handleProtocol = (payload: QuiltProtocolHandshake): void => {
       if (expectedProtocolV2 && (payload.selectedProtocolVersion !== 2 || !payload.topology)) {
+        if (!entryReported) {
+          entryReported = true
+          socket.emit('canonical_telemetry', {
+            name: 'canonical_entry',
+            outcome: 'protocol_rejected',
+            durationMs: performance.now() - entryStartedAt,
+            selectedProtocolVersion: payload.selectedProtocolVersion,
+          })
+        }
         socket.disconnect()
         onProtocolMismatch?.()
         return
       }
-      selectedProtocolRef.current = payload.selectedProtocolVersion
       if (!entryReported && payload.selectedProtocolVersion === 2 && payload.topology) {
         entryReported = true
         socket.emit('canonical_telemetry', {
           name: 'canonical_entry',
-          attemptId: entryAttemptId,
           outcome: 'ready',
           durationMs: performance.now() - entryStartedAt,
           selectedProtocolVersion: 2,
@@ -199,49 +228,15 @@ export const useSocketConnection = (
       }
       onQuiltProtocol?.(payload)
     }
-    const handleSnapshot = (payload: SessionSnapshotPayload): void => {
-      if (selectedProtocolRef.current === 1) onSnapshot(payload)
-    }
-    const handleTilePlaced = (payload: TilePlacedPayload): void => {
-      if (selectedProtocolRef.current === 1) onTilePlaced(payload)
-    }
-    const handleTileRemoved = (payload: TileRemovedPayload): void => {
-      if (selectedProtocolRef.current === 1) onTileRemoved(payload)
-    }
-
     socket.on('quilt_protocol', handleProtocol)
-    socket.on('session_snapshot', handleSnapshot)
-    socket.on('tile_placed', handleTilePlaced)
-    socket.on('tile_removed', handleTileRemoved)
     if (onQuiltPatchSnapshot) socket.on('quilt_patch_snapshot', onQuiltPatchSnapshot)
     if (onQuiltPatchEvent) socket.on('quilt_patch_event', onQuiltPatchEvent)
     if (onQuiltPatchResyncRequired) socket.on('quilt_patch_resync_required', onQuiltPatchResyncRequired)
-    if (onPointerUpdate) {
-      socket.on('pointer_update', onPointerUpdate)
-    }
     if (onClientJoined) {
       socket.on('client_joined', onClientJoined)
     }
     if (onClientLeft) {
       socket.on('client_left', onClientLeft)
-    }
-    if (onSelectionUpdate) {
-      socket.on('selection_update', onSelectionUpdate)
-    }
-    if (onResyncRequired) {
-      socket.on('resync_required', onResyncRequired)
-    }
-    if (enableChunkStreaming && onChunkSnapshot) {
-      socket.on('chunk_snapshot', onChunkSnapshot)
-    }
-    if (enableChunkStreaming && onChunkTilePlaced) {
-      socket.on('chunk_tile_placed', onChunkTilePlaced)
-    }
-    if (enableChunkStreaming && onChunkTileRemoved) {
-      socket.on('chunk_tile_removed', onChunkTileRemoved)
-    }
-    if (enableChunkStreaming && onChunkResyncRequired) {
-      socket.on('chunk_resync_required', onChunkResyncRequired)
     }
 
     socketRef.current = socket
@@ -253,38 +248,14 @@ export const useSocketConnection = (
     return () => {
       cancelled = true
       socket.off('quilt_protocol', handleProtocol)
-      socket.off('session_snapshot', handleSnapshot)
-      socket.off('tile_placed', handleTilePlaced)
-      socket.off('tile_removed', handleTileRemoved)
       if (onQuiltPatchSnapshot) socket.off('quilt_patch_snapshot', onQuiltPatchSnapshot)
       if (onQuiltPatchEvent) socket.off('quilt_patch_event', onQuiltPatchEvent)
       if (onQuiltPatchResyncRequired) socket.off('quilt_patch_resync_required', onQuiltPatchResyncRequired)
-      if (onPointerUpdate) {
-        socket.off('pointer_update', onPointerUpdate)
-      }
       if (onClientJoined) {
         socket.off('client_joined', onClientJoined)
       }
       if (onClientLeft) {
         socket.off('client_left', onClientLeft)
-      }
-      if (onSelectionUpdate) {
-        socket.off('selection_update', onSelectionUpdate)
-      }
-      if (onResyncRequired) {
-        socket.off('resync_required', onResyncRequired)
-      }
-      if (enableChunkStreaming && onChunkSnapshot) {
-        socket.off('chunk_snapshot', onChunkSnapshot)
-      }
-      if (enableChunkStreaming && onChunkTilePlaced) {
-        socket.off('chunk_tile_placed', onChunkTilePlaced)
-      }
-      if (enableChunkStreaming && onChunkTileRemoved) {
-        socket.off('chunk_tile_removed', onChunkTileRemoved)
-      }
-      if (enableChunkStreaming && onChunkResyncRequired) {
-        socket.off('chunk_resync_required', onChunkResyncRequired)
       }
       socket.io.off('reconnect_attempt', handleReconnectAttempt)
       socket.io.off('reconnect_failed', handleReconnectFailed)

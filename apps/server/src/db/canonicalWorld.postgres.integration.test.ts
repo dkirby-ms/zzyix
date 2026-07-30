@@ -156,6 +156,13 @@ describe('canonical world control plane', () => {
       reason: 'stale activation',
     })).rejects.toBeInstanceOf(CanonicalWorldGenerationConflictError)
     expect(await discoverCanonicalWorld()).toBeNull()
+    await expect(activateCanonicalWorld({
+      action: 'activate',
+      quiltId: 'ca000000-0000-4000-8000-000000000099',
+      expectedGeneration: 1,
+      operatorId: 'integration-test',
+      reason: 'attempt to repoint provisioned pointer',
+    })).rejects.toBeInstanceOf(CanonicalWorldGenerationConflictError)
 
     const activated = await activateCanonicalWorld({
       action: 'activate',
@@ -192,6 +199,13 @@ describe('canonical world control plane', () => {
       operatorId: 'integration-test',
       reason: 'repeat rollback',
     })).resolves.toMatchObject({ generation: 3, idempotent: true, result: 'idempotent' })
+    await expect(activateCanonicalWorld({
+      action: 'activate',
+      quiltId: quiltId!,
+      expectedGeneration: 3,
+      operatorId: 'integration-test',
+      reason: 'attempt to reactivate after retirement rollback',
+    })).rejects.toBeInstanceOf(CanonicalWorldGenerationConflictError)
   })
 
   it('discovers eligible patches row-major and navigates by stable patch identity', async () => {
@@ -263,6 +277,25 @@ describe('canonical world control plane', () => {
     expect(outcomes.map((outcome) => outcome.result).sort()).toEqual(['idempotent', 'succeeded'])
     expect(outcomes[0]?.quilt?.id).toBe(outcomes[1]?.quilt?.id)
     expect(outcomes[0]?.initialPatch?.id).toBe(outcomes[1]?.initialPatch?.id)
+  })
+
+  it('serializes concurrent activation into one generation-2 transition and one replay', async () => {
+    const provisioned = await provisionCanonicalWorld(provisionInput)
+    const input = {
+      action: 'activate' as const,
+      quiltId: provisioned.quilt!.id,
+      expectedGeneration: 1,
+      operatorId: 'integration-test',
+      reason: 'concurrent activation',
+    }
+
+    const outcomes = await Promise.all([activateCanonicalWorld(input), activateCanonicalWorld(input)])
+
+    expect(outcomes.map(({ result }) => result).sort()).toEqual(['idempotent', 'succeeded'])
+    expect(outcomes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ generation: 2, pointerStatus: 'active', idempotent: false }),
+      expect.objectContaining({ generation: 2, pointerStatus: 'active', idempotent: true }),
+    ]))
   })
 
   it('returns the same descriptor after rebuilding the database bundle', async () => {

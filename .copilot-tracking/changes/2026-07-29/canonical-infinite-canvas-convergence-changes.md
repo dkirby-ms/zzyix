@@ -7,10 +7,9 @@
 
 ## Summary
 
-Replaced the multi-canvas lobby with one canonical, patch-owned protocol-V2 quilt. Added
-database-backed discovery and presence, automatic entry, patch navigation and claiming,
-replica-correct reconnect, evidence-backed promotion, and deterministic compatibility
-retirement.
+Implementation review found the canonical product path present but release-blocked by
+retirement-evidence, telemetry-integrity, final-state compatibility, activation-provenance,
+presence-lifecycle, and integration-coverage defects. Phase 6 remediation is in progress.
 
 ## Changes
 
@@ -33,6 +32,27 @@ retirement.
 * `apps/server/src/operations/canonicalRetirementReportCli.test.ts` - Covered deduplication, rates, percentiles, rollback windows, strict validation, and repeated runtime samples
 
 ### Modified
+
+* `.github/workflows/cd.yml` - Deployed immutable retirement evidence and removed final canonical canary controls
+* `apps/client/Dockerfile` - Removed retired canonical-entry runtime configuration
+* `apps/client/public/auth-config.template.json` - Removed the retired canonical-entry setting
+* `apps/client/src/App.tsx` - Removed final-state entry gating and bound canonical telemetry delivery
+* `apps/client/src/auth/AuthSessionProvider.tsx` - Removed the retired entry-gate session contract
+* `apps/client/src/auth/TestAuthProvider.tsx` - Updated test authentication for unconditional canonical entry
+* `apps/client/src/auth/useAuthSession.tsx` - Removed the retired entry-gate session field
+* `apps/client/src/config/runtimeConfig.ts` - Removed canonical-entry feature parsing
+* `apps/client/src/network/useSocketConnection.ts` - Delivered terminal telemetry through the authenticated socket attempt
+* `apps/server/Dockerfile` - Materialized immutable retirement evidence before server startup
+* `apps/server/src/contracts.ts` - Removed retired public session runtime contracts and tightened canonical telemetry contracts
+* `apps/server/src/db/repository.ts` - Restricted activation to the provisioned inactive generation-1 pointer
+* `apps/server/src/index.ts` - Removed retired runtime state and handlers, bound telemetry identity, and enforced presence lease loss
+* `apps/server/src/migration/quiltTelemetry.ts` - Added explicit pre-world telemetry identity semantics
+* `apps/server/src/operations/canonicalRetirementReportCli.ts` - Recomputed promotion conclusions from accepted evidence
+* `apps/server/src/startup/rolloutGates.ts` - Required retirement evidence for every production start
+* `playwright.config.ts` - Removed retired canonical canary configuration
+* `scripts/release-contract.test.mjs` - Enforced immutable evidence wiring and absence of final canary flags
+* Focused client and server tests - Covered evidence derivation, telemetry binding, live HTTP and Socket.IO boundaries, activation provenance, lease loss, and unconditional entry
+* `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md` - Corrected keyword frontmatter indentation
 
 * `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md` - Established one newly provisioned 32-by-32 canonical quilt, durable navigation and claim behavior, ownership limits, and database-backed presence leases
 * `.copilot-tracking/plans/2026-07-29/canonical-infinite-canvas-convergence-plan.instructions.md` - Marked Phase 0 complete
@@ -123,9 +143,15 @@ retirement.
 
 ### Removed
 
+* `apps/server/src/index.concurrency.test.ts` - Removed tests for retired process-local session runtime state
 * `apps/client/src/ui/LobbyScreen.tsx` - Removed the obsolete session lobby surface
 
 ## Additional or Deviating Changes
+
+* The 2026-07-29 implementation review invalidated the prior release-ready conclusion
+	* Five critical, six major, and one minor finding are tracked in Phase 6
+* Phase 6 environment-backed validation is incomplete
+	* Loopback PostgreSQL refused connections and Docker is unavailable, so PostgreSQL, Playwright, multi-replica, and migration rehearsal remain open
 
 * Local Markdown lint was skipped because `markdownlint-cli2` is not installed
 	* `git diff --check` and VS Code diagnostics passed for the ADR
@@ -146,18 +172,9 @@ retirement.
 
 ## Release Summary
 
-All five implementation phases are complete. The release affects 62 product files: 10 added,
-51 modified, and 1 removed. New infrastructure consists of additive canonical pointer and
-presence lease migrations, strict operator and evidence-reporting commands, runtime gate
-propagation, and canonical E2E fixtures. Supported clients enter one protocol-V2 quilt by
-durable quilt identity, discover and claim patches, recover visible rooms across replicas,
-and use lease-backed presence. Authenticated old REST and socket clients receive deterministic
-upgrade-required responses. Production retirement requires a digest-verified 24-hour report
-with a promotion recommendation; migration deployment remains forward-only and preserves
-legacy database structures for separate retention-approved cleanup.
-
-Final validation passed lint, client and server builds, 420 tests with 9 skipped, 14
-standard Playwright tests, 1 multi-replica Playwright test, 9 release-contract tests,
-and the disposable PostgreSQL migration and recovery rehearsal. `git diff --check` and editor
-diagnostics passed. Ports 3001 and 5173 were clear, and no test containers remained. Existing
-Vite bundle-size and Three.js clock deprecation warnings remain non-blocking.
+Release readiness is blocked pending Phase 6 Step 6.4. Source remediation for IV-001 through
+IV-012 is complete. Focused server validation passed 40 tests, focused client validation
+passed 33 tests with eight retired-path skips, release-contract validation passed nine tests,
+lint and production builds passed, and `git diff --check` passed. PostgreSQL-backed tests,
+standard and multi-replica Playwright, and migration rehearsal still require an available
+loopback PostgreSQL environment. Ports 3001 and 5173 are clear.

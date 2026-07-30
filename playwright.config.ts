@@ -51,7 +51,6 @@ export default defineConfig({
         'FEATURE_MULTI_REPLICA_READY=true',
         'FEATURE_QUILT_PROTOCOL_V2_ENABLED=true',
         'FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true',
-        'FEATURE_CANONICAL_DISCOVERY_ENABLED=true',
         'LOG_LEVEL=info',
         `PORT=${SERVER_PORT}`,
         'HOST=127.0.0.1',

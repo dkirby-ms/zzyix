@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { reportSha256, serializeCanonicalReport, type CanonicalRetirementReportV1, RETIREMENT_THRESHOLDS } from '../operations/canonicalRetirementReportCli.js'
+import { buildCanonicalRetirementReport, reportSha256, serializeCanonicalReport } from '../operations/canonicalRetirementReportCli.js'
 import {
-  resolveCanonicalDiscoveryEnabled,
   resolveProtocolV2MutationEnabled,
   validateProductionRolloutGates,
 } from './rolloutGates.js'
@@ -17,30 +16,46 @@ const approvedProduction = {
   AUTH_DELETION_COMPLETION_POLICY_APPROVED: 'true',
 }
 
-const approvedProductionMutation = {
-  ...approvedProduction,
-  FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
-  AUTH_OWNER_E2E_GATE_APPROVED: 'true',
-  AUTH_MIGRATION_REHEARSAL_APPROVED: 'true',
-  AUTH_MUTATION_ROLLBACK_APPROVED: 'true',
-  AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: 'true',
-}
-
 const retirementEnvironment = (recommendation: 'promote' | 'hold' = 'promote') => {
   const directory = mkdtempSync(join(tmpdir(), 'zzyix-retirement-'))
   const path = join(directory, 'report.json')
-  const report: CanonicalRetirementReportV1 = {
+  const uuid = (value: number): string => `00000000-0000-4000-8000-${value.toString().padStart(12, '0')}`
+  const attempts = recommendation === 'promote' ? 100 : 1
+  const events = Array.from({ length: attempts }, (_, index) => {
+    const occurredAt = new Date(Date.parse('2026-07-28T00:00:00.000Z') + index * 1_000).toISOString()
+    const envelope = {
+      schemaVersion: 1,
+      attemptId: uuid(index + 1),
+      occurredAt,
+      quiltId: '10000000-0000-4000-8000-000000000001',
+      canonicalGeneration: 2,
+      cohort: 'global',
+    }
+    return [
+      { ...envelope, eventId: uuid(index + 1), name: 'canonical_discovery', outcome: 'success', durationMs: 1, httpStatus: 200 },
+      { ...envelope, eventId: uuid(index + 101), name: 'canonical_entry', outcome: 'ready', durationMs: 1, selectedProtocolVersion: 2 },
+      { ...envelope, eventId: uuid(index + 201), name: 'canonical_reconnect', outcome: 'recovered', durationMs: 1, attempts: 1 },
+      { ...envelope, eventId: uuid(index + 301), name: 'canonical_resubscribe', outcome: 'completed', durationMs: 1, requestedRooms: 1, acceptedRooms: 1, rejectedRooms: 0, resyncRequired: 0 },
+    ]
+  }).flat()
+  events.push({
     schemaVersion: 1,
-    reportType: 'canonical-retirement',
-    generatedAt: '2026-07-29T00:00:00.000Z',
-    observationWindow: { from: '2026-07-28T00:00:00.000Z', to: '2026-07-29T00:00:00.000Z', durationSeconds: 86400 },
-    evidence: { inputSha256: 'a'.repeat(64), acceptedEvents: 401, exactDuplicatesIgnored: 0 },
-    thresholds: RETIREMENT_THRESHOLDS,
-    groups: [],
-    immediateRollbackTriggers: [],
-    rollbackWindows: [],
-    decision: { eligible: true, measuredWindowApproved: true, clientBudgetPassed: true, recommendation, failedChecks: [] },
-  }
+    eventId: uuid(500),
+    attemptId: uuid(500),
+    occurredAt: '2026-07-28T00:02:00.000Z',
+    quiltId: '10000000-0000-4000-8000-000000000001',
+    canonicalGeneration: 2,
+    cohort: 'global',
+    name: 'client_runtime',
+    outcome: 'sampled',
+    frameTimeMs: 16,
+    retainedPatchCount: 1,
+    retainedTileCount: 1,
+    sceneObjectCount: 1,
+    drawCalls: 1,
+  })
+  const input = Buffer.from(`${events.map((event) => JSON.stringify(event)).join('\n')}\n`)
+  const report = buildCanonicalRetirementReport(input, '2026-07-28T00:00:00.000Z', '2026-07-29T00:00:00.000Z')
   const bytes = serializeCanonicalReport(report)
   writeFileSync(path, bytes)
   return {
@@ -55,6 +70,15 @@ const retirementEnvironment = (recommendation: 'promote' | 'hold' = 'promote') =
     LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED: 'true',
   }
 }
+
+const approvedProductionMutation = () => ({
+  ...retirementEnvironment(),
+  FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
+  AUTH_OWNER_E2E_GATE_APPROVED: 'true',
+  AUTH_MIGRATION_REHEARSAL_APPROVED: 'true',
+  AUTH_MUTATION_ROLLBACK_APPROVED: 'true',
+  AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: 'true',
+})
 
 describe('production rollout gates', () => {
   it('rejects missing operational approvals', () => {
@@ -72,12 +96,12 @@ describe('production rollout gates', () => {
 
   it('keeps mutation disabled unless every mutation gate is approved', () => {
     expect(() => validateProductionRolloutGates({
-      ...approvedProduction,
+      ...retirementEnvironment(),
       FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
     })).toThrow('Production mutation approvals are incomplete')
 
     expect(() => validateProductionRolloutGates({
-      ...approvedProduction,
+      ...retirementEnvironment(),
       FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
       AUTH_OWNER_E2E_GATE_APPROVED: 'true',
       AUTH_MIGRATION_REHEARSAL_APPROVED: 'true',
@@ -116,24 +140,15 @@ describe('production rollout gates', () => {
   })
 
   it('enables production mutation only after every production approval passes', () => {
-    expect(resolveProtocolV2MutationEnabled(approvedProductionMutation)).toBe(true)
+    expect(resolveProtocolV2MutationEnabled(approvedProductionMutation())).toBe(true)
     expect(() => resolveProtocolV2MutationEnabled({
-      ...approvedProductionMutation,
+      ...approvedProductionMutation(),
       AUTH_OWNER_E2E_GATE_APPROVED: 'false',
     })).toThrow('AUTH_OWNER_E2E_GATE_APPROVED')
   })
 
-  it('keeps canonical discovery independent from mutation enablement', () => {
-    expect(resolveCanonicalDiscoveryEnabled({})).toBe(false)
-    expect(resolveCanonicalDiscoveryEnabled({ FEATURE_CANONICAL_DISCOVERY_ENABLED: 'true' })).toBe(true)
-    expect(resolveCanonicalDiscoveryEnabled({
-      FEATURE_CANONICAL_DISCOVERY_ENABLED: 'false',
-      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
-    })).toBe(false)
-    expect(resolveCanonicalDiscoveryEnabled({ FEATURE_CANONICAL_DISCOVERY_ENABLED: 'TRUE' })).toBe(false)
-  })
-
   it('requires digest-bound promote evidence for production retirement', () => {
+    expect(() => validateProductionRolloutGates(approvedProduction)).toThrow('report path and SHA-256')
     expect(() => validateProductionRolloutGates({
       ...approvedProduction,
       FEATURE_LEGACY_RETIREMENT_REQUESTED: 'true',
