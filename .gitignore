@@ -9,3 +9,4 @@ apps/client/coverage/
 infra/bicep/host.main.bicepparam
 scripts/gh-vars.env
 infra/bicep/host.bicepparam
+apps/client/public/auth-config.json
