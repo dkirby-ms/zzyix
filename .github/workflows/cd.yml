@@ -473,7 +473,7 @@ jobs:
               az containerapp job secret set \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${MIGRATION_JOB_NAME}" \
-                --secrets "database-url=${SERVER_DATABASE_URL}"
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
 
               az containerapp job secret set \
                 --resource-group "${RESOURCE_GROUP}" \
@@ -639,7 +639,7 @@ jobs:
               az containerapp secret set \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
-                --secrets "database-url=${SERVER_DATABASE_URL}"
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
 
               az containerapp secret set \
                 --resource-group "${RESOURCE_GROUP}" \
