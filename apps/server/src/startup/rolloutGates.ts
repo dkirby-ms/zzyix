@@ -54,5 +54,9 @@ export const resolveProtocolV2MutationEnabled = (
     return true
   }
 
-  return environment.NODE_ENV === 'test' && enabled(environment, 'E2E_TEST_MODE')
+  if (environment.NODE_ENV === 'test') {
+    return enabled(environment, 'E2E_TEST_MODE')
+  }
+
+  return true
 }

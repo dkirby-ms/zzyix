@@ -1058,6 +1058,8 @@ function ProtectedApp() {
         return
       }
       const operationId = crypto.randomUUID()
+      ghostVisibleRef.current = false
+      setGhostVisible(false)
       setQuiltCache((previous) => setQuiltOptimisticTile(previous, patchIds, tempTile, operationId))
       const payload: QuiltPlaceTileRequest = {
         quiltId: quiltProtocol.topology.quiltId,

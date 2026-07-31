@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "nodemon --exec 'node --env-file=../../.env --import tsx/esm' src/index.ts",
+    "dev": "NODE_ENV=development FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true nodemon --exec 'node --env-file=../../.env --import tsx/esm' src/index.ts",
     "build": "tsc",
     "lint": "oxlint",
     "start": "node dist/index.js",

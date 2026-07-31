@@ -155,7 +155,7 @@ vi.mock('./render/MosaicScene', () => ({
     remoteCursors?: Array<{ clientId: string }>
     remoteSelections?: Array<{ clientId: string; tileId: string }>
     tiles?: Array<{ id: string; transform: { position: { x: number; y: number }; rotation: number; mirrored?: boolean } }>
-    ghost?: { transform: { position: { x: number; y: number }; rotation: number; mirrored?: boolean } }
+    ghost?: { transform: { position: { x: number; y: number }; rotation: number; mirrored?: boolean }; visible: boolean }
     gridOverlay?: { pattern: { id: string }; activeSlotId?: string }
     worldBounds?: { minX: number; maxX: number; minY: number; maxY: number }
     onPointerMove?: (x: number, y: number) => void
@@ -181,6 +181,7 @@ vi.mock('./render/MosaicScene', () => ({
       data-ghost-transform={ghost
         ? `${ghost.transform.position.x},${ghost.transform.position.y},${ghost.transform.rotation},${ghost.transform.mirrored ?? false}`
         : 'unset'}
+      data-ghost-visible={ghost?.visible ?? false}
       data-min-zoom={cameraPolicy?.minZoom ?? -1}
       data-max-zoom={cameraPolicy?.maxZoom ?? -1}
       data-pan-sensitivity={cameraPolicy?.panSensitivity ?? -1}
@@ -1692,6 +1693,43 @@ describe('App canonical canvas behavior', () => {
     expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Grid overlay' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('radio', { name: 'Triangle tessellation' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('reveals optimistic tile animation before a delayed quilt acknowledgement', async () => {
+    let placeAckCallback: ((ack: any) => void) | undefined
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'quilt_place_tile') placeAckCallback = callback
+    })
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[3] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock, on: vi.fn(), off: vi.fn(), connected: true } }
+      if (actionRef) actionRef.current = socketRef.current
+      return socketRef as any
+    })
+
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onQuiltPatchState = socketCall[7] as (payload: unknown) => void
+    act(() => onQuiltPatchState({
+      quiltId: canonicalDescriptor.quiltId,
+      canonicalRoomId: `quilt:${canonicalDescriptor.quiltId}:patch:0:0:fine`,
+      patchId: canonicalDescriptor.assignedPatch.id,
+      payloadMode: 'fine',
+      chunkIds: ['0:0'],
+      tiles: [],
+      cursor: { patchId: canonicalDescriptor.assignedPatch.id, opSeq: 1, revision: 1, eventId: 'event-1' },
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Far' }))
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-ghost-visible', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
+
+    expect(placeAckCallback).toBeDefined()
+    expect(screen.getByText('1 placed')).toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-ghost-visible', 'false')
   })
 
   it.skip('persists optimistic placement until delayed placement ack settles', async () => {

@@ -125,7 +125,7 @@ describe('production rollout gates', () => {
     expect(() => validateProductionRolloutGates({ NODE_ENV: 'test', E2E_TEST_MODE: 'true' })).not.toThrow()
   })
 
-  it('keeps mutation disabled by default and isolates local enablement to test mode', () => {
+  it('keeps mutation disabled by default and honors explicit development enablement', () => {
     expect(resolveProtocolV2MutationEnabled(approvedProduction)).toBe(false)
     expect(resolveProtocolV2MutationEnabled({
       NODE_ENV: 'test',
@@ -134,7 +134,13 @@ describe('production rollout gates', () => {
     })).toBe(true)
     expect(resolveProtocolV2MutationEnabled({
       NODE_ENV: 'development',
-      E2E_TEST_MODE: 'true',
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
+    })).toBe(true)
+    expect(resolveProtocolV2MutationEnabled({
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
+    })).toBe(true)
+    expect(resolveProtocolV2MutationEnabled({
+      NODE_ENV: 'test',
       FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
     })).toBe(false)
   })
