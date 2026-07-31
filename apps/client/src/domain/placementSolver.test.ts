@@ -91,4 +91,55 @@ describe('placementSolver', () => {
     expect(result.valid).toBe(true)
     expect(result.reason).toBe('ok')
   })
+
+  it('allows isolated placement away from settled tiles', () => {
+    const settled: TileInstance[] = [{
+      id: 'existing',
+      shape: 'square',
+      color: '#fff',
+      material: 'ceramic',
+      transform: { position: vec2(0, 0), rotation: 0 },
+      createdAt: 0,
+    }]
+
+    const result = validatePlacement(
+      'square',
+      { position: vec2(20, 20), rotation: 0 },
+      settled,
+      { mode: 'unbounded' },
+    )
+
+    expect(result.valid).toBe(true)
+    expect(result.reason).toBe('ok')
+  })
+
+  it('detects collision through a toroidal seam', () => {
+    const topology = { patchRows: 1, patchColumns: 2, patchWidth: 5, patchHeight: 10 }
+    const settled: TileInstance[] = [{
+      id: 'edge',
+      shape: 'square',
+      color: '#fff',
+      material: 'ceramic',
+      transform: { position: { x: 9.8, y: 5 }, rotation: 0 },
+      createdAt: 0,
+    }]
+
+    const overlap = validatePlacement(
+      'square',
+      { position: { x: 0.1, y: 5 }, rotation: 0 },
+      settled,
+      { mode: 'unbounded' },
+      topology,
+    )
+    const adjacent = validatePlacement(
+      'square',
+      { position: { x: 0.78, y: 5 }, rotation: 0 },
+      settled,
+      { mode: 'unbounded' },
+      topology,
+    )
+
+    expect(overlap.reason).toContain('overlap')
+    expect(adjacent.valid).toBe(true)
+  })
 })

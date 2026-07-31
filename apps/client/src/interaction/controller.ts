@@ -6,8 +6,28 @@ import {
 import { resolveGridPlacement } from '../domain/gridPlacement'
 import type { Vec2 } from '../domain/math2d'
 import type { GridPattern } from '../domain/gridPatterns'
-import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
+import type { BoundsPolicy, MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
+import { resolveCanonicalPoint, type QuiltTopology } from '../../../server/src/domain/quiltTopology'
+
+export type CanonicalInteractionPoint = {
+  unwrapped: Vec2
+  canonical: Vec2
+  patch: { row: number; column: number }
+}
+
+export const resolveCanonicalInteractionPoint = (
+  displayPoint: Vec2,
+  topology: QuiltTopology,
+): CanonicalInteractionPoint => {
+  const resolved = resolveCanonicalPoint(displayPoint, topology)
+  return { unwrapped: displayPoint, canonical: resolved.point, patch: resolved.patch }
+}
+
+export const canMutateAcrossPatches = (
+  affectedPatchIds: readonly string[],
+  writablePatchIds: ReadonlySet<string>,
+): boolean => Array.from(new Set(affectedPatchIds)).every((patchId) => writablePatchIds.has(patchId))
 
 export type SequencedSnapshot = {
   tiles: TileInstance[]
@@ -185,11 +205,12 @@ export const updateGhostTarget = (
   pointer: Vec2,
   activeTile: ActiveTile,
   settled: TileInstance[],
-  bounds: MosaicBounds = defaultBounds,
+  bounds: MosaicBounds | BoundsPolicy = defaultBounds,
   guide: PlacementGuide = { enabled: false },
+  topology?: QuiltTopology,
 ): GhostState => {
   if (guide.enabled) {
-    const solved = resolveGridPlacement(pointer, activeTile.shape, guide.pattern, settled, bounds)
+    const solved = resolveGridPlacement(pointer, activeTile.shape, guide.pattern, settled, bounds, topology)
 
     return {
       current: {
@@ -214,6 +235,7 @@ export const updateGhostTarget = (
     activeTile.mirrored,
     settled,
     bounds,
+    topology,
   )
 
   return {

@@ -1,0 +1,321 @@
+---
+applyTo: '.copilot-tracking/changes/2026-07-28/infinite-canvas-authentication-authorization-changes.md'
+---
+<!-- markdownlint-disable-file -->
+# Implementation Plan: Infinite-Canvas Authentication and Authorization
+
+## Overview
+
+Integrate Microsoft Entra External ID with server-validated durable principals, protect every quilt surface, implement audited ownership lifecycle, and enable owner-only protocol-v2 mutations behind fail-closed rollout gates.
+
+## Objectives
+
+### User Requirements
+
+* Treat authentication and authorization as the next critical-path infinite-canvas work — Source: attached research task request
+* Add the minimum production server and client identity integration for public self-service users — Source: confirmed product decisions and attached research
+* Separate runtime identity integration from broader patch policy in GitHub issues 14 and 94 — Source: attached research task request
+* Implement stable principal mapping, protected client context, atomic claims, transfer, abandonment, and recoverable deletion — Source: confirmed product decisions
+* Identify and sequence missing owner-only protocol-v2 placement and removal work — Source: attached research task request
+* Keep delegated mutation and moderator commands out of the initial release — Source: confirmed product decisions
+
+### Derived Objectives
+
+* Validate External ID and repair migration/release prerequisites before schema-dependent implementation — Derived from: subscription-specific provider settings and incomplete Drizzle snapshots
+* Map exact verified `(issuer, subject)` tuples to immutable internal principal UUIDs — Derived from: multi-replica stateless token verification and durable PostgreSQL authorization
+* Persist one visibility policy and use it across catalog, snapshot, aggregate, presence, search, replay, and mutation — Derived from: accepted quilt ADR and current policy drift
+* Clear every protected client artifact at auth expiry or interaction-required failure — Derived from: approved provider-outage behavior
+* Keep protocol-v2 mutation disabled until owner-only E2E, migration, telemetry, retention, and rollback gates pass — Derived from: accepted quilt rollout contract
+
+## Context Summary
+
+### Project Files
+
+* `apps/server/src/index.ts` - Current anonymous HTTP boundary, Socket.IO middleware, policy wiring, and disabled v2 mutation
+* `apps/server/src/contracts.ts` - Current handshake and protocol contracts without production credentials or dedicated v2 mutation events
+* `apps/server/src/db/schema.ts` - Existing principals, external mappings, patch ownership, memberships, and operations
+* `apps/server/src/db/repository.ts` - Existing owner-aware placement transaction and missing identity/lifecycle/removal commands
+* `apps/server/src/realtime/quiltRooms.ts` - Current derived visibility and room authorization
+* `apps/client/src/main.tsx` - Client provider composition point
+* `apps/client/src/network/session.ts` - Anonymous catalog transport
+* `apps/client/src/network/useSocketConnection.ts` - Current token-free Socket.IO handshake
+* `apps/client/src/App.tsx` - Protected state, optimistic mutation, and clearing boundary
+* `.github/workflows/ci.yml` - Build/test pipeline without authenticated Playwright
+* `.github/workflows/cd.yml` - Deployment pipeline without migration ownership or identity configuration
+
+### References
+
+* `.copilot-tracking/research/2026-07-28/infinite-canvas-authentication-authorization-research.md` - Primary architecture, product decisions, sequence, contracts, tests, and rollout guidance
+* `.copilot-tracking/research/subagents/2026-07-28/infinite-canvas-auth-plan-verification-research.md` - Verified code anchors, likely file changes, commands, and dependency order
+* `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md` - Accepted stable-principal, visibility, ownership, mutation, and rollout contract
+
+### Standards References
+
+* `/home/saitcho/.vscode-server/extensions/ise-hve-essentials.hve-core-all-3.3.101/.github/instructions/hve-core/markdown.instructions.md` - Markdown structure and frontmatter conventions
+* `/home/saitcho/.vscode-server/extensions/ise-hve-essentials.hve-core-all-3.3.101/.github/instructions/hve-core/writing-style.instructions.md` - Documentation voice and clarity conventions
+* `/home/saitcho/.vscode-server/extensions/ise-hve-essentials.hve-core-all-3.3.101/.github/instructions/hve-core/prompt-builder.instructions.md` - Instructions-file authoring requirements
+
+## Architecture Overview
+
+```text
+Browser SPA + MSAL -- PKCE --> Entra External ID
+Browser -- bearer / auth.token --> Express + Socket.IO replicas
+API -- jose + pinned issuer/JWKS --> verified external identity
+API -- exact issuer/subject --> active internal principal in PostgreSQL
+Principal + persisted policy --> catalog, rooms, reads, ownership, mutation
+Owner mutation --> sorted patch locks --> commit --> scoped fanout
+```
+
+## Affected Files Tree
+
+```text
+apps/
+  client/
+    Dockerfile
+    nginx.conf
+    public/auth-config.template.json
+    src/
+      auth/{msalConfig,AuthProvider,useAuthSession}.*
+      config/runtimeConfig.*
+      network/{authenticatedFetch,session,useSocketConnection}.*
+      ui/{LobbyScreen,AppHeader}.*
+      {main,App}.*
+  server/
+    migrations/0006_*.sql
+    src/
+      auth/{config,errors,tokenVerifier,principalContext,httpAuth,socketAuth}.*
+      db/{schema,types,repository}.*
+      domain/authorizationPolicy.*
+      jobs/{ownershipLifecycle,principalDeletion}.*
+      realtime/quiltRooms.*
+      {contracts,index}.*
+e2e/
+  authentication.spec.ts
+  support/testOidcIssuer.ts
+.github/workflows/{ci,cd}.yml
+infra/bicep/
+package.json
+package-lock.json
+playwright*.config.ts
+```
+
+## Design Patterns
+
+* External identity adapter: provider claims terminate at a narrow verified-identity boundary
+* Immutable internal principal: domain ownership and attribution never depend on email, token, session, or client ID
+* Policy decision point: one persisted policy model controls all protected surfaces
+* Transactional command model: claim, transfer, abandonment, deletion, placement, and removal recheck authority under locks
+* Fail-closed auth lifecycle: token expiry, unknown keys, blocked principals, and incomplete policy gates remove access
+* Additive migration and gated enablement: schema and authenticated behavior deploy before mutation is enabled
+
+## Implementation Checklist
+
+### [x] Implementation Phase 1: Provider and Release Prerequisites
+
+<!-- parallelizable: false -->
+
+* [x] Step 1.1: Validate External ID and fix the public configuration contract
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 12-40)
+* [x] Step 1.2: Repair migration metadata and establish release-owned migration execution
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 41-65)
+* [x] Step 1.3: Decompose runtime identity and patch policy backlog
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 66-87)
+* [x] Step 1.4: Validate prerequisite phase
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 88-94)
+* [x] Step 1.5: Resolve Phase 1 release-contract review findings
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 1, Step 1.5)
+
+### [x] Implementation Phase 2: Identity Persistence and Verification
+
+<!-- parallelizable: false -->
+
+* [x] Step 2.1: Add principal lifecycle, mapping, audit, ownership, and visibility schema
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 99-123)
+* [x] Step 2.2: Implement verified-token and principal-context boundaries
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 124-147)
+* [x] Step 2.3: Implement transactional principal resolution and lifecycle enforcement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 148-165)
+* [x] Step 2.4: Validate identity phase
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 166-172)
+
+### [x] Implementation Phase 3: Protected HTTP, Socket, and Visibility Boundaries
+
+<!-- parallelizable: false -->
+
+* [x] Step 3.1: Protect HTTP resources and expose safe principal context
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 177-195)
+* [x] Step 3.2: Authenticate Socket.IO and enforce expiry
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 196-214)
+* [x] Step 3.3: Centralize persisted visibility policy
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 215-235)
+* [x] Step 3.4: Validate protected-boundary phase
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 236-242)
+
+### [x] Implementation Phase 4: Client Authentication Lifecycle
+
+<!-- parallelizable: false -->
+
+* [x] Step 4.1: Add MSAL provider and authenticated network client
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 247-269)
+* [x] Step 4.2: Renew sockets once and clear protected state on auth loss
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 270-290)
+* [x] Step 4.3: Validate client authentication phase
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 291-297)
+
+### [x] Implementation Phase 5: Claims and Ownership Lifecycle
+
+<!-- parallelizable: false -->
+
+* [x] Step 5.1: Implement atomic claims and quotas
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 302-320)
+* [x] Step 5.2: Implement accepted transfer and abandonment
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 321-340)
+* [x] Step 5.3: Implement recoverable account deletion and restricted operational recovery
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 341-371)
+* [x] Step 5.4: Validate ownership phase
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 372-378)
+
+### [x] Implementation Phase 6: Authenticated Protocol-V2 Mutations
+
+<!-- parallelizable: false -->
+
+* [x] Step 6.1: Define dedicated placement and removal contracts
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 383-399)
+* [x] Step 6.2: Wire owner-only placement and implement quilt removal
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 400-419)
+* [x] Step 6.3: Reconcile optimistic client state by patch revisions
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 420-437)
+* [x] Step 6.4: Validate mutation phase while retaining the rollout flag
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 438-447)
+
+### [x] Implementation Phase 7: Deployment, Authenticated E2E, and Rollout
+
+<!-- parallelizable: false -->
+
+* [x] Step 7.1: Replace identity bypasses with a local test OIDC issuer
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 452-475)
+* [x] Step 7.2: Configure production identity, telemetry, and fail-closed gates
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 476-496)
+* [x] Step 7.3: Split owner-only and delegated E2E gates before mutation enablement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 497-512)
+
+### [x] Implementation Phase 8: Final Validation
+
+<!-- parallelizable: false -->
+
+* [x] Step 8.1: Run focused and full project validation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 517-527)
+* [x] Step 8.2: Rehearse security and rollout failure cases
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 528-531)
+* [x] Step 8.3: Fix minor issues and report blockers
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Lines 532-536)
+
+### [x] Implementation Phase 9: Review Remediation for Replay and Client Retry
+
+<!-- parallelizable: false -->
+
+* [x] Step 9.1: Bind mutation replay to actor, command, and immutable committed response
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+* [x] Step 9.2: Bind ownership lifecycle replay to actor and canonical payload
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+* [x] Step 9.3: Preserve request bodies across the forced-refresh retry
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+* [x] Step 9.4: Validate replay and retry remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 9)
+
+### [x] Implementation Phase 10: Review Remediation for Authenticated Boundaries
+
+<!-- parallelizable: false -->
+
+* [x] Step 10.1: Remove anonymous aggregate authorization
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+* [x] Step 10.2: Enforce exact Socket.IO handshake origins
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+* [x] Step 10.3: Validate exact HTTPS deployment origins
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+* [x] Step 10.4: Validate authenticated boundary remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 10)
+
+### [x] Implementation Phase 11: Review Remediation for Operations and Rollout
+
+<!-- parallelizable: false -->
+
+* [x] Step 11.1: Make due-account deletion approval-aware and runnable
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+* [x] Step 11.2: Provision restricted recovery infrastructure and role
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+* [x] Step 11.3: Require benchmark approval and multi-replica CI
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+* [x] Step 11.4: Validate operational and rollout remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 11)
+
+### [ ] Implementation Phase 12: Review Remediation Coverage and Final Validation
+
+<!-- parallelizable: false -->
+<!-- blocked: external staging configuration, deployment, repository controls, issue ownership, and approvals -->
+
+* [x] Step 12.1: Add missing cross-principal, lifecycle, and transport scenarios
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 12)
+* [x] Step 12.2: Reconcile externally controlled release evidence
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 12)
+* [x] Step 12.3: Run the complete validation matrix and report remaining blockers
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 12)
+
+### [x] Implementation Phase 13: Product Workflow and Authorization Remediation
+
+<!-- parallelizable: false -->
+
+* [x] Step 13.1: Complete self-service initial ownership and placement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.2: Recheck legacy mutation authority transactionally
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.3: Correct independent deletion approval enforcement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.4: Make approved production protocol-v2 enablement reachable
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.5: Expose truthful ownership capabilities
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.6: Add production-shaped ownership and origin coverage
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+* [x] Step 13.7: Validate product and authorization remediation
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 13)
+
+### [ ] Implementation Phase 14: Production Readiness Evidence and Approval
+
+<!-- parallelizable: false -->
+<!-- blocked: staging administration, GitHub administration, Azure access, issue ownership, and accountable approvals -->
+
+* [x] Step 14.1: Correct and validate staging deployment configuration
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [x] Step 14.2: Deploy and verify migration, recovery, and job-scoped RBAC controls
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.3: Configure GitHub environment and branch protections
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.4: Reconcile issue scope and record accountable approvals
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.5: Run the isolated release matrix and capture dated evidence
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+* [ ] Step 14.6: Approve controlled protocol-v2 production enablement
+  * Details: `.copilot-tracking/details/2026-07-28/infinite-canvas-authentication-authorization-details.md` (Phase 14)
+
+## Planning Log
+
+See `.copilot-tracking/plans/logs/2026-07-28/infinite-canvas-authentication-authorization-log.md` for discrepancy tracking, implementation paths considered, and suggested follow-on work.
+
+## Dependencies
+
+* Validated Microsoft Entra External ID tenant, SPA registration, API registration, delegated scope, and redirect/logout URIs
+* Reconciled Drizzle migration history and release-owned one-shot migration execution
+* `jose`, `@azure/msal-browser`, and `@azure/msal-react`
+* PostgreSQL for migration, lifecycle, ownership, and concurrency tests
+* Product, privacy, legal, support, and issue-owner approvals identified as release gates
+* Local OIDC issuer for representative integration and Playwright identity tests
+
+## Success Criteria
+
+* Every quilt resource and real-time surface requires a server-validated active principal — Traces to: authenticated-only user requirement
+* Exact external identities map transactionally to immutable internal principals without email merging — Traces to: one-identity-per-principal decision
+* Claims, transfers, abandonment, deletion, policy decisions, placement, and removal are atomic and auditable — Traces to: ownership lifecycle requirements
+* Auth expiry or provider failure clears all protected client state and fails closed — Traces to: approved outage behavior
+* Owner-only protocol-v2 placement and removal pass replica-convergent E2E before enablement — Traces to: mutation sequencing requirement
+* Delegated mutation, moderator commands, and multi-provider linking remain explicitly deferred — Traces to: confirmed initial-release scope

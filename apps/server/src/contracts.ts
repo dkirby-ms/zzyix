@@ -25,8 +25,9 @@
 // ─── Schema Version ──────────────────────────────────────────────────────────
 // Both client and server MUST use this same version to ensure compatibility.
 // Increment on any breaking change (new required fields, removed events, etc.).
-export const SCHEMA_VERSION = '1.0.0'
+export const SCHEMA_VERSION = '2.0.0'
 export const RUNTIME_CHUNK_WORLD_SIZE = 8
+export const QUILT_PROTOCOL_VERSION = 2
 
 // ─── Domain primitives ────────────────────────────────────────────────────────
 
@@ -79,37 +80,10 @@ export type TileInstance = {
   placedBy?: string
 }
 
-// ─── Session ──────────────────────────────────────────────────────────────────
-
-export type Session = {
-  id: string
-  tiles: TileInstance[]
-  boundsPolicy?: BoundsPolicy
-  createdAt: number
-  updatedAt: number
-}
-
 export type ClientPresence = {
   clientId: string
   joinedAt: number
   pointer?: Vec2
-}
-
-// ─── REST API ─────────────────────────────────────────────────────────────────
-//
-// POST   /sessions                          → CreateSessionResponse
-// GET    /sessions                          → ListSessionsResponse
-//
-// All error responses use ApiError.
-
-export type ApiError = {
-  error: string
-  code:
-    | 'SESSION_NOT_FOUND'
-    | 'TILE_NOT_FOUND'
-    | 'PLACEMENT_REJECTED'
-    | 'INVALID_REQUEST'
-    | 'INTERNAL_ERROR'
 }
 
 // ─── Validation Rules ─────────────────────────────────────────────────────────
@@ -119,11 +93,10 @@ export type ApiError = {
 // A tile placement is VALID when ALL of the following conditions hold:
 //   1. The tile transform's position is within the canvas bounds (default: minX=-5.2, maxX=5.2, minY=-3.4, maxY=3.4).
 //   2. The transformed tile polygon does NOT overlap with any settled tile polygon.
-//   3. The transformed tile polygon is NOT penetrating the canvas boundary (edge-to-edge
-//      contact is allowed via grout gap tolerance MAX_GROUT_GAP = 0.22).
+// Tiles may be placed at any distance from settled tiles.
 //
 // A tile placement is NEAR-VALID when:
-//   - Conditions 1 and 2 hold, but slight boundary penetration exists (< 0.5 unit).
+//   - Conditions 1 and 2 hold, but slight boundary penetration exists (< 0.22 unit).
 //   - Used for ghost preview to provide soft directional correction without hard rejection.
 //
 // A tile placement is INVALID when:
@@ -136,80 +109,146 @@ export type ApiError = {
 //    Reason: Tile collides with another settled tile or boundary.
 //    Client action: Remove optimistic tile; show "placement invalid" feedback.
 //
-// 2. SESSION_NOT_FOUND (404 on REST, not sent over Socket.IO)
-//    Reason: Session ID does not exist.
-//    Client action: Prompt user to create a new session or check session ID.
-//
-// 3. TILE_NOT_FOUND (404 on REST, not sent over Socket.IO)
+// 2. TILE_NOT_FOUND
 //    Reason: Attempted to remove a tile that doesn't exist.
 //    Client action: Likely a race condition; reconcile against latest broadcast.
 //
-// 4. Socket disconnect / reconnection
+// 3. Socket disconnect / reconnection
 //    Reason: Network failure or ACA idle timeout (240s).
 //    Socket.IO behavior: Automatic reconnection with exponential backoff.
-//    Client action: Queue mutations; replay on reconnect. Server sends session_snapshot
-//                   on reconnect to sync any missed broadcasts.
+//    Client action: Resubscribe with patch cursors to recover missed operations.
 //
-// 5. INVALID_REQUEST
+// 4. INVALID_REQUEST
 //    Reason: Malformed payload (e.g., invalid shape enum, missing required field).
 //    Client action: Log and alert user; check client version matches SCHEMA_VERSION.
 //
-// 6. INTERNAL_ERROR
+// 5. INTERNAL_ERROR
 //    Reason: Unexpected server error during validation or state mutation.
 //    Client action: Retry after a brief delay; if persistent, alert user and suggest
 //                   refreshing the page.
 
-// POST /sessions
-export type CanvasSizePreset = 'classic' | 'expanded' | 'vast'
-
-export type CanvasSize = {
-  width: number
-  height: number
+export type SafePrincipalProfile = {
+  displayName?: string
+  email?: string
 }
 
-export type SessionCanvasConfig = {
-  canvasSize: CanvasSize
-  boundsPolicy: BoundsPolicy
+export type PrincipalCommandAvailability = {
+  claimPatch: boolean
+  createTransfer: boolean
+  acceptTransfer: boolean
+  cancelTransfer: boolean
+  abandonPatch: boolean
+  requestAccountDeletion: boolean
+  recoverAccount: boolean
 }
 
-export type CreateSessionRequest = {
-  canvasPreset?: CanvasSizePreset
+export type MeResponse = {
+  profile: SafePrincipalProfile
+  commands: PrincipalCommandAvailability
 }
 
-export type CreateSessionResponse = {
-  session: {
+export type SafeApiError = {
+  code: string
+  message: string
+  requestId: string
+  retryAfterSeconds?: number
+}
+
+export type ClientUpgradeRequiredError = SafeApiError & {
+  code: 'client_upgrade_required'
+  minimumSchemaVersion: typeof SCHEMA_VERSION
+  minimumProtocolVersion: typeof QUILT_PROTOCOL_VERSION
+}
+
+export type CanonicalWorldDescriptor = {
+  quiltId: string
+  legacyCanvasId: string
+  topology: 'toroidal'
+  protocolVersion: 2
+  patchRows: number
+  patchColumns: number
+  patchWidth: number
+  patchHeight: number
+  originX: number
+  originY: number
+  generation: number
+  initialPatch: {
     id: string
-    canvasConfig?: SessionCanvasConfig
+    row: number
+    column: number
   }
 }
 
-export type SessionSummary = {
-  id: string
-  displayName: string
-  participantCount: number
-  canvasSize: CanvasSize
-  canvasConfig?: SessionCanvasConfig
+export type CanonicalWorldEntryDescriptor = CanonicalWorldDescriptor & {
+  entryAttemptId: string
+  assignedPatch: {
+    id: string
+    row: number
+    column: number
+  }
 }
 
-// GET /sessions
-export type ListSessionsResponse = {
-  sessions: SessionSummary[]
+export type CanonicalWorldUnavailableError = SafeApiError & {
+  code: 'canonical_world_unavailable'
+  retryAfterSeconds: 30
+}
+
+export type CanonicalPatchNavigation = {
+  quiltId: string
+  patchId: string
+  row: number
+  column: number
+  centerX: number
+  centerY: number
+}
+
+export type EligibleCanonicalPatchesResponse = {
+  quiltId: string
+  generation: number
+  claimAllowed: boolean
+  patches: CanonicalPatchNavigation[]
+}
+
+export type OwnershipOperationRequest = {
+  operationId: string
+}
+
+export type ClaimPatchRequest = OwnershipOperationRequest & {
+  patchId: string
+}
+
+export type CreateOwnershipTransferRequest = OwnershipOperationRequest & {
+  patchId: string
+  recipientPrincipalId: string
+}
+
+export type ResolveOwnershipTransferRequest = OwnershipOperationRequest & {
+  transferId: string
+}
+
+export type AbandonPatchRequest = OwnershipOperationRequest & {
+  patchId: string
+}
+
+export type OwnershipCommandResponse = {
+  status: 'succeeded' | 'denied'
+  idempotent: boolean
+  transferId?: string
+  revision?: number
+}
+
+export type AccountDeletionRequest = OwnershipOperationRequest
+
+export type AccountDeletionResponse = {
+  status: 'deletion_pending' | 'active'
+  idempotent: boolean
+  recoveryDeadline?: string
 }
 
 // ─── Socket.IO event contracts ────────────────────────────────────────────────
 //
-// Connection: client passes sessionId + clientId in socket.handshake.auth.
-// On connect the server calls socket.join(sessionId) and emits session_snapshot
-// to the connecting socket.
-//
-// Broadcast patterns:
-//   tile_placed, tile_removed, client_joined, client_left
-//     → io.to(sessionId).emit(...)          (all sockets in session room)
-//   pointer_update
-//     → socket.to(sessionId).emit(...)      (all sockets except sender)
-//
-// Request/response: place_tile and remove_tile use Socket.IO acknowledgements
-// so the calling client gets an inline result without a separate rejection event.
+// Clients identify the canonical quilt during the authenticated handshake. Room
+// membership is derived from authorized patch subscriptions.
 //
 // CONCURRENT EDITS — How simultaneous placements are handled:
 //
@@ -237,14 +276,28 @@ export type ListSessionsResponse = {
 
 /** Passed in socket.handshake.auth when the client connects. */
 export type ConnectionAuth = {
-  sessionId: string
+  token: string
+  quiltId: string
   clientId: string
+  schemaVersion: typeof SCHEMA_VERSION
+  protocolVersion: typeof QUILT_PROTOCOL_VERSION
+  canonicalGeneration: number
+  entryAttemptId: string
+  lineageAttemptId?: string
 }
 
 /** Per-socket metadata stored by Socket.IO (accessible as socket.data). */
 export type SocketData = {
   clientId: string
-  sessionId: string
+  quiltId: string
+  schemaVersion: typeof SCHEMA_VERSION
+  protocolVersion: typeof QUILT_PROTOCOL_VERSION
+  canonicalGeneration: number
+  entryAttemptId: string
+  lineageAttemptId: string
+  reconnectCycleLineageId?: string
+  principalId: string
+  tokenExpiresAt: number
 }
 
 // ── Event payload types ───────────────────────────────────────────────────────
@@ -303,25 +356,54 @@ export type RemoveTileAck =
   | { removed: true; opSeq: number; newRevision: number; idempotent?: boolean }
   | { removed: false; reason?: RemoveTileRejectReason }
 
-export type PointerMovePayload = {
-  position: Vec2
+export type QuiltPatchRevisionMap = Record<string, number>
+
+export type QuiltMutationRejectCode =
+  | 'AUTHENTICATION_REQUIRED'
+  | 'MUTATION_DISABLED'
+  | 'UNAUTHORIZED'
+  | 'STALE_REVISION'
+  | 'COLLISION'
+  | 'INVALID_FOOTPRINT'
+  | 'THROTTLED'
+  | 'RESOURCE_UNAVAILABLE'
+
+export type QuiltPlaceTileRequest = {
+  quiltId: string
+  operationId: string
+  expectedPatchRevisions: QuiltPatchRevisionMap
+  tile: Omit<PlaceTilePayload, 'expectedRevision'>
 }
 
-export type SessionSnapshotPayload = {
-  session: Session
-  canvasConfig?: SessionCanvasConfig
-  realtimeCapabilities?: RealtimeCapabilities
-  clients: ClientPresence[]
-  lastOpSeq: number
-  revision: number
+export type QuiltRemoveTileRequest = {
+  quiltId: string
+  operationId: string
+  expectedPatchRevisions: QuiltPatchRevisionMap
+  tileId: string
 }
 
-export type RealtimeCapabilities = {
-  chunkStreamingEnabled: boolean
-  aggregateSnapshotEnabled: boolean
-  chunkCanaryEnabled: boolean
-  multiReplicaReady: boolean
+export type QuiltMutationAcceptedAck = {
+  status: 'accepted'
+  operationId: string
+  eventIds: Record<string, string>
+  patchRevisions: QuiltPatchRevisionMap
+  idempotent: boolean
 }
+
+export type QuiltMutationRejectedAck = {
+  status: 'rejected'
+  operationId: string
+  code: QuiltMutationRejectCode
+  message: string
+  requestId: string
+  retryAfterSeconds?: number
+}
+
+export type QuiltPlaceTileAck =
+  | (QuiltMutationAcceptedAck & { tile: TileInstance })
+  | QuiltMutationRejectedAck
+
+export type QuiltRemoveTileAck = QuiltMutationAcceptedAck | QuiltMutationRejectedAck
 
 export type TilePlacedPayload = {
   tile: TileInstance
@@ -337,18 +419,6 @@ export type TileRemovedPayload = {
   revision: number
 }
 
-export type PointerUpdatePayload = {
-  clientId: string
-  position: Vec2
-}
-
-export type SelectionUpdatePayload = {
-  canvasId: string
-  clientId: string
-  tileId?: string
-  updatedAt: number
-}
-
 export type ClientJoinedPayload = {
   client: ClientPresence
 }
@@ -357,44 +427,13 @@ export type ClientLeftPayload = {
   clientId: string
 }
 
-export type ResyncRequiredPayload = {
-  /** The server's current authoritative opSeq at the time of the resync signal. */
-  currentOpSeq: number
-  reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
-}
-
 export type ChunkId = `${number}:${number}`
 
 export type ChunkPayloadMode = 'fine' | 'aggregate'
 
-export type ChunkCoordinationMetadata = {
-  replicaId: string
-  membershipScope: 'process-local' | 'adapter-shared'
-  membershipAssumption: 'best-effort' | 'authoritative'
-  emittedAt: number
-}
-
 export type ChunkCursor = {
   opSeq: number
   revision: number
-}
-
-export type SubscribeChunksPayload = {
-  canvasId: string
-  chunks: ChunkId[]
-  payloadMode?: ChunkPayloadMode
-  clientOffsetByChunk?: Partial<Record<ChunkId, ChunkCursor>>
-}
-
-export type UnsubscribeChunksPayload = {
-  canvasId: string
-  chunks: ChunkId[]
-}
-
-export type RequestChunkSnapshotPayload = {
-  canvasId: string
-  chunks: ChunkId[]
-  payloadMode?: ChunkPayloadMode
 }
 
 export type ChunkSnapshotEntry = {
@@ -409,41 +448,112 @@ export type ChunkSnapshotEntry = {
   revision: number
 }
 
-export type ChunkSnapshotPayload = {
-  canvasId: string
-  payloadMode: ChunkPayloadMode
-  coordination: ChunkCoordinationMetadata
-  chunks: ChunkSnapshotEntry[]
-  serverOpSeq: number
-  serverRevision: number
+export type QuiltTopologyHandshake = {
+  quiltId: string
+  topology: 'bounded' | 'toroidal'
+  patchRows: number
+  patchColumns: number
+  patchWidth: number
+  patchHeight: number
 }
 
-export type ChunkTilePlacedPayload = {
-  canvasId: string
-  chunkId: ChunkId
-  tile: TileInstance
-  placedBy: string
+export type QuiltProtocolLimits = {
+  maxRoomsPerConnection: number
+  maxRoomsPerRequest: number
+  maxChunksPerRequest: number
+  maxRoomChurnPerMinute: number
+  maxSnapshotTiles: number
+  maxPayloadBytes: number
+  source: 'canary-default' | 'measured'
+}
+
+export type QuiltProtocolHandshake = {
+  selectedProtocolVersion: 1 | 2
+  v1CompatibilityEnabled: boolean
+  mutationEnabled: boolean
+  canaryTelemetryEnabled?: boolean
+  topology?: QuiltTopologyHandshake
+  limits?: QuiltProtocolLimits
+}
+
+export type QuiltClientRuntimeMetrics = {
+  sampleId: string
+  entryAttemptId: string
+  canonicalGeneration: number
+  quiltId: string
+  retainedPatchCount: number
+  retainedTileCount: number
+  sceneObjectCount: number
+  drawCalls: number
+  frameTimeMs: number
+}
+
+export type CanonicalClientTelemetry =
+  | { name: 'canonical_entry'; outcome: 'ready' | 'discovery_failed' | 'protocol_rejected' | 'connection_failed' | 'initial_sync_failed'; durationMs: number; selectedProtocolVersion?: 1 | 2 }
+  | { name: 'canonical_reconnect'; outcome: 'recovered' | 'exhausted'; durationMs: number; attempts: number }
+  | { name: 'canonical_resubscribe'; outcome: 'completed' | 'failed'; durationMs: number; requestedRooms: number; acceptedRooms: number; rejectedRooms: number; resyncRequired: number }
+
+export type QuiltRoomKind = 'fine' | 'aggregate' | 'presence' | 'events'
+
+export type QuiltRoomRequest = {
+  requestId: string
+  kind: QuiltRoomKind
+  row: number
+  column: number
+  chunkIds?: ChunkId[]
+}
+
+export type QuiltPatchCursor = {
+  patchId: string
   opSeq: number
   revision: number
+  eventId?: string
+  chunkIds?: ChunkId[]
 }
 
-export type ChunkTileRemovedPayload = {
-  canvasId: string
-  chunkId: ChunkId
-  tileId: string
-  removedBy: string
+export type QuiltRoomOutcome =
+  | { requestId: string; status: 'accepted'; canonicalRoomId: string; cursor?: QuiltPatchCursor }
+  | { requestId: string; status: 'forbidden' | 'invalid' | 'budget-exceeded'; reason: string }
+
+export type SubscribeQuiltAreaPayload = {
+  quiltId: string
+  rooms: QuiltRoomRequest[]
+  cursors?: Record<string, QuiltPatchCursor>
+}
+
+export type SubscribeQuiltAreaAck = {
+  outcomes: QuiltRoomOutcome[]
+  acceptedCursors: Record<string, QuiltPatchCursor>
+}
+
+export type QuiltScopedStatePayload = {
+  quiltId: string
+  canonicalRoomId: string
+  patchId: string
+  payloadMode: ChunkPayloadMode
+  chunkIds: ChunkId[]
+  tiles: TileInstance[]
+  aggregates?: Array<Pick<ChunkSnapshotEntry, 'chunkId' | 'aggregate'>>
+  cursor: QuiltPatchCursor
+}
+
+export type QuiltPatchEventPayload = {
+  quiltId: string
+  canonicalRoomId: string
+  patchId: string
+  eventId: string
   opSeq: number
   revision: number
+  operation: TilePlacedPayload | TileRemovedPayload
+  testAttachment?: string
 }
 
-export type ChunkResyncRequiredPayload = {
-  canvasId: string
-  chunkId: ChunkId
-  payloadMode: ChunkPayloadMode
-  coordination: ChunkCoordinationMetadata
-  currentOpSeq: number
-  currentRevision: number
-  reason: 'GAP_DETECTED' | 'REVISION_MISMATCH'
+export type QuiltPatchResyncRequiredPayload = {
+  quiltId: string
+  canonicalRoomId: string
+  patchId: string
+  cursor: QuiltPatchCursor
+  reason: 'EVENT_GAP' | 'CURSOR_AHEAD' | 'SNAPSHOT_REQUIRED'
 }
 
 // ── Typed event maps ──────────────────────────────────────────────────────────
@@ -451,89 +561,35 @@ export type ChunkResyncRequiredPayload = {
 
 /** Events emitted by the client, received by the server. */
 export interface ClientToServerEvents {
-  /** Place a tile; server validates and responds via acknowledgement. */
-  place_tile: (payload: PlaceTilePayload, ack: (response: PlaceTileAck) => void) => void
-  /** Remove by authoritative tileId; server responds via acknowledgement. */
-  remove_tile: (payload: RemoveTilePayload, ack: (response: RemoveTileAck) => void) => void
-  /** Request an authoritative snapshot without reconnecting the socket. */
-  request_snapshot: () => void
-  /** Fire-and-forget cursor position for collaborative presence. */
-  pointer_move: (payload: PointerMovePayload) => void
-  /** Fire-and-forget selected tile intent for collaborative presence. */
-  selection_update: (payload: SelectionUpdatePayload) => void
-  /** Subscribe to chunk room streams while preserving the main session room. */
-  subscribe_chunks: (payload: SubscribeChunksPayload) => void
-  /** Unsubscribe from chunk room streams. */
-  unsubscribe_chunks: (payload: UnsubscribeChunksPayload) => void
-  /** Request chunk-scoped snapshots without reconnecting. */
-  request_chunk_snapshot: (payload: RequestChunkSnapshotPayload) => void
+  /** Place a canonical quilt tile through the authenticated protocol-v2 transaction. */
+  quilt_place_tile: (payload: QuiltPlaceTileRequest, ack: (response: QuiltPlaceTileAck) => void) => void
+  /** Remove a canonical quilt tile through the authenticated protocol-v2 transaction. */
+  quilt_remove_tile: (payload: QuiltRemoveTileRequest, ack: (response: QuiltRemoveTileAck) => void) => void
+  /** Subscribe to authorized protocol-v2 quilt rooms and reconcile patch cursors. */
+  subscribe_quilt_area: (payload: SubscribeQuiltAreaPayload, ack: (response: SubscribeQuiltAreaAck) => void) => void
+  /** Submit sampled client runtime measurements for an authenticated canary subject. */
+  quilt_client_runtime_metrics: (payload: QuiltClientRuntimeMetrics) => void
+  /** Submit one canonical entry/reconnect/resubscribe terminal for server-owned telemetry. */
+  canonical_telemetry: (payload: CanonicalClientTelemetry) => void
 }
 
 /** Events emitted by the server, received by clients. */
 export interface ServerToClientEvents {
-  /** Sent once to the connecting socket after it joins the session room. */
-  session_snapshot: (payload: SessionSnapshotPayload) => void
-  /** Broadcast to all sockets in the session room when a tile is placed. */
-  tile_placed: (payload: TilePlacedPayload) => void
-  /** Broadcast to all sockets in the session room when a tile is removed. */
-  tile_removed: (payload: TileRemovedPayload) => void
-  /** Broadcast to all sockets in the session room except the sender. */
-  pointer_update: (payload: PointerUpdatePayload) => void
-  /** Broadcast to all sockets in the session room except the sender. */
-  selection_update: (payload: SelectionUpdatePayload) => void
-  /** Broadcast to all sockets in the session room when a peer connects. */
+  /** Rotates the principal-bound lineage used to authorize later reconnect cycles. */
+  canonical_lineage: (payload: { lineageAttemptId: string }) => void
+  /** Announces the selected transport protocol and immutable quilt topology. */
+  quilt_protocol: (payload: QuiltProtocolHandshake) => void
+  /** Announces a principal's first active presence lease in the canonical quilt. */
   client_joined: (payload: ClientJoinedPayload) => void
-  /** Broadcast to all sockets in the session room when a peer disconnects. */
+  /** Announces release of a principal's final active presence lease. */
   client_left: (payload: ClientLeftPayload) => void
-  /** Emitted to a single socket when its placement/removal is rejected due to a stale revision. */
-  resync_required: (payload: ResyncRequiredPayload) => void
-  /** Sent to a single socket after chunk subscribe/request calls. */
-  chunk_snapshot: (payload: ChunkSnapshotPayload) => void
-  /** Broadcast to sockets subscribed to the affected chunk room. */
-  chunk_tile_placed: (payload: ChunkTilePlacedPayload) => void
-  /** Broadcast to sockets subscribed to the affected chunk room. */
-  chunk_tile_removed: (payload: ChunkTileRemovedPayload) => void
-  /** Emitted when chunk offsets diverge and chunk snapshot replay is required. */
-  chunk_resync_required: (payload: ChunkResyncRequiredPayload) => void
+  /** Reconstructable protocol-v2 snapshot scoped to one accepted room. */
+  quilt_patch_state: (payload: QuiltScopedStatePayload) => void
+  /** Durable protocol-v2 event scoped to one accepted room. */
+  quilt_patch_event: (payload: QuiltPatchEventPayload) => void
+  /** Requests cursor-based recovery for one accepted room. */
+  quilt_patch_resync_required: (payload: QuiltPatchResyncRequiredPayload) => void
 }
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */
 export interface InterServerEvents {}
-
-// ─── FORMAL AGREEMENT ────────────────────────────────────────────────────────
-//
-// This section documents what BOTH client and server teams commit to.
-// Any future changes to this contract MUST be reviewed and approved by both teams.
-//
-// CLIENT TEAM COMMITS TO:
-//   ✓ Using SCHEMA_VERSION to detect compatibility issues.
-//   ✓ Implementing optimistic placement (show tiles before server ack).
-//   ✓ Handling place_tile ack responses correctly (accept/reject, use server ID).
-//   ✓ Reconciling state when tile_placed / tile_removed broadcasts arrive.
-//   ✓ Merging session_snapshot after reconnection (ground truth sync).
-//   ✓ Handling all error codes in ApiError and all rejection reasons in PlaceTileAck.
-//
-// SERVER TEAM COMMITS TO:
-//   ✓ Assigning tile IDs server-side; never trusting client-provided IDs.
-//   ✓ Validating every placement against the current authoritative state using the
-//     domain engine (placementSolver with SAT collision detection).
-//   ✓ Responding to place_tile with either accepted (placed: TileInstance) or
-//     rejected (reason: string) within the ack callback.
-//   ✓ Broadcasting tile_placed / tile_removed / pointer_update to all affected clients.
-//   ✓ Sending session_snapshot on connection and after reconnection.
-//   ✓ Using consistent error codes and messages as defined in ApiError.
-//   ✓ Maintaining a single authoritative Session.tiles array; clients are never the source of truth.
-//
-// CONCURRENT EDIT HANDLING (BOTH TEAMS):
-//   ✓ Server validates each placement against the CURRENT state at that moment.
-//   ✓ If two placements conflict, the server responds with accepted/rejected based on
-//     the order received and current state.
-//   ✓ Clients receive authoritative broadcasts and reconcile locally stored state.
-//   ✓ Conflict resolution is deterministic (first-write-wins on the server).
-//
-// VERSIONING:
-//   ✓ If the contract changes, SCHEMA_VERSION MUST increment.
-//   ✓ Breaking changes: new required fields, removed events, renamed event names, changed error codes.
-//   ✓ Non-breaking changes: new optional fields, new events, new error codes (old clients still work).
-//   ✓ Client SHOULD warn if server schema version does not match; server SHOULD enforce minimum version.
-

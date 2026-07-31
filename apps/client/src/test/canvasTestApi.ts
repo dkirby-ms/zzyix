@@ -5,7 +5,7 @@ import type { PlaceTileAck } from '../../../server/src/contracts'
 
 export const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
 
-export type CanvasTestMode = 'lobby' | 'canvas'
+export type CanvasTestMode = 'lobby' | 'canonical-loading' | 'canonical-unavailable' | 'canvas'
 
 export type CanvasTestTileSnapshot = {
   id: string
@@ -30,7 +30,23 @@ export type CanvasTestStateSnapshot = {
   resyncEvents: number
   collaboratorIds: string[]
   activeTile: ActiveTile
+  cameraPan: { x: number; y: number }
+  grid: {
+    enabled: boolean
+    patternId?: string
+  }
   tiles: CanvasTestTileSnapshot[]
+  metrics: {
+    retainedPatchCount: number
+    retainedTileCount: number
+    cursorCount: number
+    optimisticCount: number
+    undoCount: number
+    snapshotBytes: number
+    sceneObjectCount: number
+    drawCalls: number
+    frameTimeMs: number
+  }
 }
 
 export type CanvasTestApi = {
@@ -38,6 +54,8 @@ export type CanvasTestApi = {
   joinSession: (sessionId: string) => void
   setActiveTile: (patch: Partial<ActiveTile>) => void
   movePointer: (position: { x: number; y: number }) => void
+  setCameraPan: (position: { x: number; y: number }) => void
+  setGridEnabled: (enabled: boolean) => void
   placeTileAt: (position: { x: number; y: number }) => void
   placeTileAtWithAck: (input: {
     position: { x: number; y: number }

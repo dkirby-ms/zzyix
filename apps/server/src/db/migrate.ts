@@ -20,7 +20,7 @@ const countAppliedMigrations = async (): Promise<number> => {
       SELECT EXISTS (
         SELECT 1
         FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = '__drizzle_migrations'
+        WHERE table_schema = 'drizzle' AND table_name = '__drizzle_migrations'
       ) AS exists
     `,
   )
@@ -29,18 +29,52 @@ const countAppliedMigrations = async (): Promise<number> => {
     return 0
   }
 
-  const applied = await pool.query('SELECT COUNT(*)::int AS count FROM "__drizzle_migrations"')
+  const applied = await pool.query('SELECT COUNT(*)::int AS count FROM "drizzle"."__drizzle_migrations"')
   return applied.rows[0]?.count ?? 0
 }
 
+export type MigrationStatus = {
+  localMigrationCount: number
+  appliedMigrationCount: number
+}
+
+export const assertMigrationStatusCompatible = (status: MigrationStatus): void => {
+  if (status.appliedMigrationCount !== status.localMigrationCount) {
+    throw new Error(
+      `Database schema is incompatible: expected ${status.localMigrationCount} applied migrations, ` +
+      `found ${status.appliedMigrationCount}. Run the one-shot db:apply command before starting production replicas.`,
+    )
+  }
+}
+
+export const getMigrationStatus = async (migrationsFolder: string): Promise<MigrationStatus> => ({
+  localMigrationCount: countLocalMigrationFiles(migrationsFolder),
+  appliedMigrationCount: await countAppliedMigrations(),
+})
+
 export const hasPendingMigrations = async (migrationsFolder: string): Promise<boolean> => {
-  const localMigrationCount = countLocalMigrationFiles(migrationsFolder)
-  if (localMigrationCount === 0) {
+  const status = await getMigrationStatus(migrationsFolder)
+  if (status.localMigrationCount === 0) {
     return false
   }
 
-  const appliedMigrationCount = await countAppliedMigrations()
-  return appliedMigrationCount < localMigrationCount
+  return status.appliedMigrationCount < status.localMigrationCount
+}
+
+export const verifyDatabaseSchemaCompatibility = async (): Promise<MigrationStatus> => {
+  const status = await getMigrationStatus(resolveMigrationsFolder(import.meta.url))
+  assertMigrationStatusCompatible(status)
+  console.log(`[db:migrate] Schema compatibility verified (${status.appliedMigrationCount} migrations)`)
+  return status
+}
+
+export const prepareDatabaseSchemaForStartup = async (): Promise<boolean> => {
+  if (process.env.NODE_ENV === 'production') {
+    await verifyDatabaseSchemaCompatibility()
+    return false
+  }
+
+  return applyDatabaseMigrationsIfNeeded()
 }
 
 export const applyDatabaseMigrations = async (migrationsFolder: string): Promise<void> => {

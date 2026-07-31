@@ -86,4 +86,19 @@ describe('GridOverlay geometry', () => {
     expect(classifyGridPatternSlot(slot, 'square', settled, bounds, slot.id)).toBe('active')
     expect(settled).toEqual(snapshot)
   })
+
+  it('omits slots whose tile outline extends outside owned bounds', () => {
+    const groups = buildGridOverlaySegments({
+      pattern: squarePattern,
+      viewport: { minX: -2, maxX: 2, minY: -2, maxY: 2 },
+      activeShape: 'square',
+      tiles: [],
+      bounds: { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5 },
+    })
+    const edgeCount = getTileDefinition('square').outline.length
+
+    expect(groups.placeable).toHaveLength(edgeCount * 6)
+    expect(groups.blocked).toHaveLength(0)
+    expect(groups.structural).toHaveLength(0)
+  })
 })

@@ -2,8 +2,9 @@ import { generateGridPatternSlots, getViewportCellRange } from '../domain/gridPa
 import { validatePlacement } from '../domain/placementSolver'
 import { getTileDefinition, transformPolygon } from '../domain/tileGeometry'
 import type { GridPattern, GridPatternSlot, WorldViewport } from '../domain/gridPatterns'
-import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
+import type { BoundsPolicy, MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { TileShape } from '../domain/tileGeometry'
+import type { QuiltTopology } from '../../../server/src/domain/quiltTopology'
 
 export type GridOverlayVisualState = 'structural' | 'placeable' | 'blocked' | 'active'
 
@@ -14,7 +15,8 @@ export type BuildGridOverlaySegmentsInput = {
   viewport: WorldViewport
   activeShape: TileShape
   tiles: TileInstance[]
-  bounds: MosaicBounds
+  bounds: MosaicBounds | BoundsPolicy
+  topology?: QuiltTopology
   activeSlotId?: string
 }
 
@@ -29,8 +31,9 @@ export const classifyGridPatternSlot = (
   slot: GridPatternSlot,
   activeShape: TileShape,
   tiles: TileInstance[],
-  bounds: MosaicBounds,
+  bounds: MosaicBounds | BoundsPolicy,
   activeSlotId?: string,
+  topology?: QuiltTopology,
 ): GridOverlayVisualState => {
   if (slot.id === activeSlotId) {
     return 'active'
@@ -40,7 +43,7 @@ export const classifyGridPatternSlot = (
     return 'structural'
   }
 
-  return validatePlacement(slot.shape, slot.transform, tiles, bounds).valid
+  return validatePlacement(slot.shape, slot.transform, tiles, bounds, topology).valid
     ? 'placeable'
     : 'blocked'
 }
@@ -71,13 +74,17 @@ export const buildGridOverlaySegments = ({
   tiles,
   bounds,
   activeSlotId,
+  topology,
 }: BuildGridOverlaySegmentsInput): GridOverlaySegmentGroups => {
   const groups = createEmptyGroups()
   const range = getViewportCellRange(pattern, viewport)
   const slots = generateGridPatternSlots(pattern, range)
 
   for (const slot of slots) {
-    const state = classifyGridPatternSlot(slot, activeShape, tiles, bounds, activeSlotId)
+    const ownershipValidation = validatePlacement(slot.shape, slot.transform, [], bounds)
+    if (ownershipValidation.reason.startsWith('out-of-bounds')) continue
+
+    const state = classifyGridPatternSlot(slot, activeShape, tiles, bounds, activeSlotId, topology)
     const outline = transformPolygon(getTileDefinition(slot.shape).outline, slot.transform)
     appendOutlineSegments(groups[state], outline)
 

@@ -3,6 +3,7 @@ import { vec2 } from '../domain/math2d'
 import { GRID_PATTERNS } from '../domain/gridPatterns'
 import {
   applySequencedSnapshot,
+  canMutateAcrossPatches,
   createServerTileId,
   createInitialGhost,
   createInitialSequencedTilesState,
@@ -10,12 +11,26 @@ import {
   reconcileOptimisticPlacementAck,
   reconcileSequencedTilePlaced,
   reconcileSequencedTileRemoved,
+  resolveCanonicalInteractionPoint,
   stepGhost,
   tryPlaceTile,
   updateGhostTarget,
 } from './controller'
 
 describe('interaction controller', () => {
+  it('routes aliases to one canonical point and requires every affected patch permission', () => {
+    const hit = resolveCanonicalInteractionPoint(
+      { x: 20.4, y: -0.2 },
+      { patchRows: 2, patchColumns: 2, patchWidth: 10, patchHeight: 10 },
+    )
+
+    expect(hit.unwrapped).toEqual({ x: 20.4, y: -0.2 })
+    expect(hit.canonical.x).toBeCloseTo(0.4)
+    expect(hit.canonical.y).toBeCloseTo(19.8)
+    expect(hit.patch).toEqual({ row: 1, column: 0 })
+    expect(canMutateAcrossPatches(['a', 'b', 'a'], new Set(['a', 'b']))).toBe(true)
+    expect(canMutateAcrossPatches(['a', 'b'], new Set(['a']))).toBe(false)
+  })
   const serverTile = {
     id: '11111111-1111-4111-8111-111111111111',
     shape: 'square' as const,

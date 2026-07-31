@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { defaultBounds, validatePlacement, type TileInstance } from './placementSolver.js'
+import {
+  defaultBounds,
+  derivePlacementBounds,
+  MAX_GROUT_GAP,
+  projectPeriodicNeighbors,
+  validatePlacement,
+  type TileInstance,
+} from './placementSolver.js'
 import { vec2 } from './math2d.js'
 
 describe('placementSolver server parity', () => {
@@ -63,5 +70,61 @@ describe('placementSolver server parity', () => {
 
     expect(result.valid).toBe(true)
     expect(result.reason).toBe('ok')
+  })
+
+  it('accepts isolated placement away from settled tiles', () => {
+    const settled: TileInstance[] = [{
+      id: 'existing',
+      shape: 'square',
+      color: '#fff',
+      material: 'ceramic',
+      transform: { position: vec2(0, 0), rotation: 0 },
+      createdAt: 0,
+    }]
+
+    const result = validatePlacement(
+      'square',
+      { position: vec2(20, 20), rotation: 0 },
+      settled,
+      { mode: 'unbounded' },
+    )
+
+    expect(result.valid).toBe(true)
+    expect(result.reason).toBe('ok')
+  })
+
+  it('derives the rotated geometry footprint and collision halo', () => {
+    const bounds = derivePlacementBounds(
+      'rectangle',
+      { position: vec2(10, 20), rotation: Math.PI / 2 },
+      MAX_GROUT_GAP,
+    )
+
+    expect(bounds.minX).toBeCloseTo(10 - 0.88 * 0.36 - MAX_GROUT_GAP)
+    expect(bounds.maxX).toBeCloseTo(10 + 0.88 * 0.36 + MAX_GROUT_GAP)
+    expect(bounds.minY).toBeCloseTo(20 - 0.88 * 0.68 - MAX_GROUT_GAP)
+    expect(bounds.maxY).toBeCloseTo(20 + 0.88 * 0.68 + MAX_GROUT_GAP)
+  })
+
+  it('projects seam neighbors to the nearest periodic image before validation', () => {
+    const topology = { patchRows: 1, patchColumns: 2, patchWidth: 10, patchHeight: 10 }
+    const settled: TileInstance[] = [
+      {
+        id: 'seam-neighbor',
+        shape: 'square',
+        color: '#fff',
+        material: 'ceramic',
+        transform: { position: vec2(19.8, 5), rotation: 0 },
+        createdAt: 0,
+      },
+    ]
+    const candidate = { position: vec2(0.2, 5), rotation: 0 }
+
+    const projected = projectPeriodicNeighbors(settled, candidate.position, topology)
+    const result = validatePlacement('square', candidate, projected, { mode: 'unbounded' })
+
+    expect(projected[0]?.transform.position.x).toBeCloseTo(-0.2)
+    expect(result.valid).toBe(false)
+    expect(result.reason).toContain('overlap')
   })
 })

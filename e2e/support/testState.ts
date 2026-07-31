@@ -3,17 +3,17 @@ import { expect, type APIRequestContext } from '@playwright/test'
 const SERVER_URL = process.env.E2E_SERVER_URL ?? 'http://127.0.0.1:3101'
 const TEST_RESET_TOKEN = process.env.E2E_RESET_TOKEN ?? 'zzyix-e2e-token'
 
-type CanvasSizePreset = 'classic' | 'expanded' | 'vast'
-
 export type ResetSharedCanvasOptions = {
-  createSession?: boolean
-  canvasPreset?: CanvasSizePreset
+  createCanonicalWorld?: boolean
+  ownerExternalSubject?: string
 }
 
 export type ResetSharedCanvasResult = {
   reset: true
-  session?: {
-    id: string
+  canonical?: {
+    quiltId: string
+    patchId: string
+    generation: number
   }
 }
 
@@ -27,8 +27,8 @@ export const resetSharedCanvasState = async (
       'content-type': 'application/json',
     },
     data: {
-      createSession: options.createSession ?? false,
-      canvasPreset: options.canvasPreset,
+      createCanonicalWorld: options.createCanonicalWorld ?? false,
+      ownerExternalSubject: options.ownerExternalSubject,
     },
   })
 
@@ -37,17 +37,19 @@ export const resetSharedCanvasState = async (
   return (await response.json()) as ResetSharedCanvasResult
 }
 
-export const createIsolatedSharedCanvas = async (
+export const createIsolatedCanonicalQuilt = async (
   request: APIRequestContext,
-  options: Omit<ResetSharedCanvasOptions, 'createSession'> = {},
-): Promise<{ sessionId: string }> => {
+  options: ResetSharedCanvasOptions = {},
+): Promise<{ quiltId: string; patchId: string }> => {
   const result = await resetSharedCanvasState(request, {
-    createSession: true,
-    canvasPreset: options.canvasPreset,
+    createCanonicalWorld: true,
+    ownerExternalSubject: options.ownerExternalSubject,
   })
 
-  const sessionId = result.session?.id
-  expect(sessionId, 'test reset should seed a shared canvas session').toBeTruthy()
+  expect(result.canonical, 'test reset should seed a canonical quilt').toBeTruthy()
 
-  return { sessionId: sessionId as string }
+  return {
+    quiltId: result.canonical!.quiltId,
+    patchId: result.canonical!.patchId,
+  }
 }

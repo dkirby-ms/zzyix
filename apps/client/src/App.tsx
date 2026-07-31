@@ -12,73 +12,80 @@ import type { TileShape } from './domain/tileGeometry'
 import { GRID_PATTERNS, getConstructibleGridPatterns } from './domain/gridPatterns'
 import type { GridPatternId } from './domain/gridPatterns'
 import {
-  applySequencedSnapshot,
   createInitialGhost,
   createInitialSequencedTilesState,
   createServerTileId,
   isServerTileId,
-  reconcileOptimisticPlacementAck,
-  reconcileSequencedTilePlaced,
-  reconcileSequencedTileRemoved,
   stepGhost,
   tryPlaceTile,
   updateGhostTarget,
 } from './interaction/controller'
 import type { ActiveTile, PlacementGuide, SequencedTilesState } from './interaction/controller'
 import { ensureClientId } from './network/session'
+import { derivePlacementBounds } from './domain/placementSolver'
 import {
-  createSession,
-  getStoredSessionId,
-  listSessions,
-  setStoredSessionId,
-  type CreateSessionOptions,
-  type SessionSummary,
+  clearCanonicalPatchLink,
+  discoverCanonicalWorld,
+  getCanonicalPatchLink,
+  resolveCanonicalPatchNavigation,
+  setCanonicalPatchLink,
 } from './network/session'
-import { resolveServerUrl } from './network/serverUrl'
 import { resolveCanvasDebug } from './config/debugFlags'
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
+import type { AuthLossReason } from './network/authenticatedFetch'
 import { StatusIndicator } from './ui/StatusIndicator'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
-  BoundsPolicy,
-  CanvasSizePreset,
+  CanonicalPatchNavigation,
   ClientJoinedPayload,
   ClientLeftPayload,
-  PlaceTileAck,
   PlaceTilePayload,
-  PointerUpdatePayload,
-  SelectionUpdatePayload,
-  ResyncRequiredPayload,
-  SessionSnapshotPayload,
-  TilePlacedPayload,
-  TileRemovedPayload,
-  ChunkResyncRequiredPayload,
-  ChunkSnapshotPayload,
-  ChunkTilePlacedPayload,
-  ChunkTileRemovedPayload,
-  ChunkPayloadMode,
-  RealtimeCapabilities,
+  QuiltPatchCursor,
+  QuiltPatchEventPayload,
+  QuiltPatchResyncRequiredPayload,
+  QuiltProtocolHandshake,
+  QuiltPlaceTileAck,
+  QuiltPlaceTileRequest,
+  QuiltRemoveTileAck,
+  QuiltRemoveTileRequest,
+  QuiltScopedStatePayload,
+  QuiltTopologyHandshake,
+  CanonicalWorldEntryDescriptor,
 } from '../../server/src/contracts'
+import { decomposeWrappedViewport } from '../../server/src/domain/quiltTopology'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
 import { GridOverlayControls } from './ui/GridOverlayControls'
-import { LobbyScreen } from './ui/LobbyScreen'
 import { AppHeader } from './ui/AppHeader'
 import { palettes } from './ui/palettes'
 import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import { TooltipProvider } from './ui/primitives/Tooltip'
+import { useAuthSession } from './auth/useAuthSession'
 import {
-  COLLABORATION_EMIT_INTERVAL_MS,
   COLLABORATOR_CLEANUP_INTERVAL_MS,
   evictStaleCollaboratorSignals,
   formatCollaboratorLabel,
-  mergeCollaboratorsFromSnapshot,
   updateCollaborator,
   type RemoteCollaboratorMap,
 } from './domain/collaboratorUtils'
 import { registerCanvasTestApi, toCanvasTestTileSnapshot } from './test/canvasTestApi'
+import {
+  applyQuiltPatchPlacement,
+  applyQuiltPatchRemoval,
+  clearQuiltOptimisticTile,
+  clearQuiltUndoMetadata,
+  createQuiltCache,
+  evictQuiltCache,
+  mergeQuiltPatchSnapshot,
+  reconcileQuiltMutationRevisions,
+  selectQuiltCursors,
+  selectQuiltTiles,
+  setQuiltOptimisticTile,
+  setQuiltUndoMetadata,
+  type QuiltCacheState,
+} from './domain/quiltCache'
 import './App.css'
 
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
@@ -87,6 +94,7 @@ const CHUNK_SOFT_SUBSCRIPTION_LIMIT = 64
 const CHUNK_HARD_SUBSCRIPTION_LIMIT = 128
 const CHUNK_MOVEMENT_HYSTERESIS_RATIO = 0.25
 const CHUNK_ZOOM_HYSTERESIS = 0.5
+const QUILT_CACHE_PATCH_BUDGET = 64
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
 
@@ -135,7 +143,7 @@ class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErro
       )
     }
 
-    return <div key={this.state.retryKey}>{this.props.children}</div>
+    return <div key={this.state.retryKey} className="canvas-scene">{this.props.children}</div>
   }
 }
 
@@ -304,21 +312,57 @@ const findHoveredTileId = (x: number, y: number, tiles: SequencedTilesState['til
 const worldToChunkId = (x: number, y: number, chunkSize: number): ChunkId =>
   `${Math.floor(x / chunkSize)}:${Math.floor(y / chunkSize)}`
 
-const shouldReplaceChunkTilesForSnapshot = (payloadMode: ChunkPayloadMode): boolean => payloadMode === 'fine'
+const findCachedPatchId = (
+  cache: QuiltCacheState,
+  position: { x: number; y: number },
+): string | undefined => {
+  const chunkId = worldToChunkId(position.x, position.y, CHUNK_WORLD_SIZE)
+  return Object.values(cache.patches).find((patch) => patch.chunkIds.includes(chunkId))?.patchId
+}
+
+const findTilePatchIds = (cache: QuiltCacheState, tileId: string): string[] =>
+  Object.values(cache.patches)
+    .filter((patch) => patch.tileIds.includes(tileId))
+    .map((patch) => patch.patchId)
+
+const findAffectedCachedPatchIds = (
+  cache: QuiltCacheState,
+  tile: Pick<PlaceTilePayload, 'shape' | 'transform'>,
+  topology: QuiltTopologyHandshake,
+): string[] | undefined => {
+  const addressToPatchId = new Map<string, string>()
+  Object.values(cache.patches).forEach((patch) => {
+    const match = patch.roomId.match(/:patch:(\d+):(\d+):/)
+    if (match) addressToPatchId.set(`${match[1]}:${match[2]}`, patch.patchId)
+  })
+  const addresses = new Set<string>()
+  for (const rect of decomposeWrappedViewport(derivePlacementBounds(tile.shape, tile.transform), topology)) {
+    const maxX = rect.maxX === rect.minX ? rect.maxX : Math.max(rect.minX, rect.maxX - Number.EPSILON)
+    const maxY = rect.maxY === rect.minY ? rect.maxY : Math.max(rect.minY, rect.maxY - Number.EPSILON)
+    const minColumn = Math.floor(rect.minX / topology.patchWidth)
+    const maxColumn = Math.floor(maxX / topology.patchWidth)
+    const minRow = Math.floor(rect.minY / topology.patchHeight)
+    const maxRow = Math.floor(maxY / topology.patchHeight)
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let column = minColumn; column <= maxColumn; column += 1) addresses.add(`${row}:${column}`)
+    }
+  }
+  const patchIds = [...addresses].map((address) => addressToPatchId.get(address))
+  return patchIds.every((patchId): patchId is string => patchId !== undefined) ? [...new Set(patchIds)] : undefined
+}
+
+const expectedPatchRevisions = (
+  cache: QuiltCacheState,
+  patchIds: readonly string[],
+): Record<string, number> => Object.fromEntries(patchIds.map((patchId) => [
+  patchId,
+  cache.patches[patchId]?.cursor.revision,
+]).filter((entry): entry is [string, number] => entry[1] !== undefined))
 
 const DEFAULT_WORLD_BOUNDS = DEFAULT_BOUNDED_WORLD_BOUNDS
 
-const resolveWorldBounds = (canvasPolicy: BoundsPolicy | undefined, sessionPolicy: BoundsPolicy | undefined) => {
-  const policy = canvasPolicy ?? sessionPolicy
-
-  if (policy?.mode === 'bounded') {
-    return policy.bounds
-  }
-
-  return DEFAULT_WORLD_BOUNDS
-}
-
-function App() {
+function ProtectedApp() {
+  const auth = useAuthSession()
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
   )
@@ -342,22 +386,22 @@ function App() {
     panSensitivity: 0.02,
   })
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [mode, setMode] = useState<'lobby' | 'canvas'>('lobby')
-  const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [lobbyLoading, setLobbyLoading] = useState(false)
-  const [lobbyError, setLobbyError] = useState<string | null>(null)
-  const [creatingSession, setCreatingSession] = useState(false)
-  const [selectedCanvasPreset, setSelectedCanvasPreset] = useState<CanvasSizePreset>('expanded')
-  const [joiningSessionId, setJoiningSessionId] = useState<string | null>(null)
-  const [previousSessionId, setPreviousSessionId] = useState<string | null>(null)
+  const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
+  const [canonicalError, setCanonicalError] = useState<string | null>(null)
+  const [canonicalDescriptor, setCanonicalDescriptor] = useState<CanonicalWorldEntryDescriptor | null>(null)
+  const [focusedCanonicalPatch, setFocusedCanonicalPatch] = useState<CanonicalPatchNavigation | null>(null)
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
-  const [realtimeCapabilities, setRealtimeCapabilities] = useState<RealtimeCapabilities | null>(null)
+  const [quiltProtocol, setQuiltProtocol] = useState<QuiltProtocolHandshake | null>(null)
+  const [quiltCache, setQuiltCache] = useState<QuiltCacheState>(createQuiltCache)
+  const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
+  const [connectionEpoch, setConnectionEpoch] = useState(0)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
   const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
   const activeTileRef = useRef(activeTileUiState.activeTile)
   const sequencedStateRef = useRef(sequencedState)
+  const quiltCursorsRef = useRef<Record<string, QuiltPatchCursor>>({})
   const ghostRef = useRef(ghost)
   const ghostVisibleRef = useRef(ghostVisible)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
@@ -385,11 +429,23 @@ function App() {
     unsubscribeEvents: 0,
     resyncEvents: 0,
   })
+  const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const clientId = useMemo(() => ensureClientId(), [])
-  const serverUrl = useMemo(() => resolveServerUrl(), [])
   const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
+  const isQuiltV2 = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology !== undefined
+  const mutationControlsEnabled = !isQuiltV2 || quiltProtocol.mutationEnabled
+  const ownedPatchBounds = useMemo(() => canonicalDescriptor ? {
+    minX: canonicalDescriptor.originX + canonicalDescriptor.assignedPatch.column * canonicalDescriptor.patchWidth,
+    maxX: canonicalDescriptor.originX + (canonicalDescriptor.assignedPatch.column + 1) * canonicalDescriptor.patchWidth,
+    minY: canonicalDescriptor.originY + canonicalDescriptor.assignedPatch.row * canonicalDescriptor.patchHeight,
+    maxY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 1) * canonicalDescriptor.patchHeight,
+  } : undefined, [canonicalDescriptor])
+  const visibleTiles = useMemo(
+    () => isQuiltV2 ? selectQuiltTiles(quiltCache) : sequencedState.tiles,
+    [isQuiltV2, quiltCache, sequencedState.tiles],
+  )
 
   useEffect(() => {
     activeTileRef.current = activeTile
@@ -446,215 +502,188 @@ function App() {
     selectedGridPatternId,
   ])
 
-  const loadSessions = useCallback(async (): Promise<void> => {
-    setLobbyLoading(true)
-    setLobbyError(null)
-
-    try {
-      const listedSessions = await listSessions()
-      setSessions(listedSessions)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to load canvases'
-      setLobbyError(message)
-    } finally {
-      setLobbyLoading(false)
-    }
+  const clearProtectedWorldState = useCallback((): void => {
+    setSessionId(null)
+    setCanonicalDescriptor(null)
+    setFocusedCanonicalPatch(null)
+    setQuiltProtocol(null)
+    setQuiltCache(createQuiltCache())
+    setSequencedState(createInitialSequencedTilesState())
+    quiltCursorsRef.current = {}
+    subscribedChunkIdsRef.current = new Set()
+    lastChunkViewportRef.current = null
+    setActiveChunkIds([])
+    setCollaborators({})
+    setWorldBounds(DEFAULT_WORLD_BOUNDS)
+    setConnectionEpoch(0)
   }, [])
 
   useEffect(() => {
-    setSessionId(null)
-    setMode('lobby')
-    setPreviousSessionId(getStoredSessionId())
-    void loadSessions()
-  }, [loadSessions])
+    let cancelled = false
+    clearProtectedWorldState()
+    setCanonicalError(null)
 
-  const enterCanvas = useCallback((nextSessionId: string): void => {
-    setStoredSessionId(nextSessionId)
-    setPreviousSessionId(nextSessionId)
-    setSessionId(nextSessionId)
-    setMode('canvas')
-  }, [])
-
-  const returnToLobby = useCallback((): void => {
-    setMode('lobby')
-    setSessionId(null)
-    setRealtimeCapabilities(null)
-    setActiveChunkIds([])
-    setCollaborators({})
-  }, [])
-
-  const handleJoinSession = useCallback((nextSessionId: string): void => {
-    setJoiningSessionId(nextSessionId)
-    try {
-      enterCanvas(nextSessionId)
-    } finally {
-      setJoiningSessionId(null)
-    }
-  }, [enterCanvas])
-
-  const handleCreateSession = useCallback(async (): Promise<void> => {
-    setCreatingSession(true)
-    setLobbyError(null)
-
-    try {
-      const createOptions: CreateSessionOptions = {
-        canvasPreset: selectedCanvasPreset,
+    setMode('canonical-loading')
+    const enterCanonicalWorld = async (): Promise<void> => {
+      try {
+        const descriptor = await discoverCanonicalWorld(auth.authenticatedFetch, auth.apiOrigin)
+        if (!cancelled) {
+          setCanonicalDescriptor(descriptor)
+          setSessionId(descriptor.quiltId)
+        }
+      } catch (error) {
+        if (!cancelled) {
+          clearProtectedWorldState()
+          setCanonicalError(error instanceof Error ? error.message : 'Canonical world is unavailable')
+          setMode('canonical-unavailable')
+        }
       }
-      const nextSessionId = await createSession(createOptions)
-      enterCanvas(nextSessionId)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to create canvas'
-      setLobbyError(message)
-    } finally {
-      setCreatingSession(false)
     }
-  }, [enterCanvas, selectedCanvasPreset])
+    void enterCanonicalWorld()
+    return () => { cancelled = true }
+  }, [auth.apiOrigin, auth.authenticatedFetch, clearProtectedWorldState])
+
+  const focusCanonicalPatch = useCallback((navigation: CanonicalPatchNavigation): void => {
+    setFocusedCanonicalPatch(navigation)
+    setCameraPan({ x: navigation.centerX, y: navigation.centerY })
+    setCanonicalPatchLink(navigation)
+  }, [])
+
+  useEffect(() => {
+    if (!canonicalDescriptor?.quiltId) return
+
+    let cancelled = false
+    const assignedPatch: CanonicalPatchNavigation = {
+      quiltId: canonicalDescriptor.quiltId,
+      patchId: canonicalDescriptor.assignedPatch.id,
+      row: canonicalDescriptor.assignedPatch.row,
+      column: canonicalDescriptor.assignedPatch.column,
+      centerX: canonicalDescriptor.originX + (canonicalDescriptor.assignedPatch.column + 0.5) * canonicalDescriptor.patchWidth,
+      centerY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 0.5) * canonicalDescriptor.patchHeight,
+    }
+    const durableLink = getCanonicalPatchLink()
+
+    if (!durableLink || durableLink.quiltId !== canonicalDescriptor.quiltId) {
+      focusCanonicalPatch(assignedPatch)
+    } else {
+      void resolveCanonicalPatchNavigation(
+        auth.authenticatedFetch,
+        auth.apiOrigin,
+        durableLink.quiltId,
+        durableLink.patchId,
+      ).then((navigation) => {
+        if (!cancelled) focusCanonicalPatch(navigation)
+      }).catch(() => {
+        if (!cancelled) focusCanonicalPatch(assignedPatch)
+      })
+    }
+
+    return () => { cancelled = true }
+  }, [
+    auth.apiOrigin,
+    auth.authenticatedFetch,
+    canonicalDescriptor,
+    focusCanonicalPatch,
+  ])
+
+  useEffect(() => {
+    if (connectionEpoch <= 1 || !canonicalDescriptor) return
+
+    let cancelled = false
+    void discoverCanonicalWorld(auth.authenticatedFetch, auth.apiOrigin)
+      .then((descriptor) => {
+        if (cancelled || descriptor.generation === canonicalDescriptor.generation) return
+        clearProtectedWorldState()
+        setCanonicalDescriptor(descriptor)
+        setSessionId(descriptor.quiltId)
+        setMode('canonical-loading')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        clearProtectedWorldState()
+        setCanonicalError(error instanceof Error ? error.message : 'Canonical world is unavailable')
+        setMode('canonical-unavailable')
+      })
+
+    return () => { cancelled = true }
+  }, [
+    auth.apiOrigin,
+    auth.authenticatedFetch,
+    canonicalDescriptor,
+    clearProtectedWorldState,
+    connectionEpoch,
+  ])
 
   const triggerInvalidPulse = useCallback((): void => {
     setInvalidPulse(true)
     window.setTimeout(() => setInvalidPulse(false), 180)
   }, [])
 
-  const requestSnapshot = useCallback((): void => {
-    const socket = socketActionRef.current
-    if (!socket) return
+  const onQuiltProtocol = useCallback((payload: QuiltProtocolHandshake): void => {
+    setQuiltProtocol(payload)
+    if (payload.selectedProtocolVersion !== 2 || !payload.topology) return
 
-    socket.emit('request_snapshot')
+    setWorldBounds({
+      minX: 0,
+      maxX: payload.topology.patchColumns * payload.topology.patchWidth,
+      minY: 0,
+      maxY: payload.topology.patchRows * payload.topology.patchHeight,
+    })
+    setMode('canvas')
   }, [])
 
-  const onSnapshot = useCallback((payload: SessionSnapshotPayload): void => {
-    setRealtimeCapabilities(payload.realtimeCapabilities ?? null)
-    setWorldBounds(resolveWorldBounds(payload.canvasConfig?.boundsPolicy, payload.session.boundsPolicy))
-    setSequencedState(
-      applySequencedSnapshot({
-        tiles: payload.session.tiles,
-        lastOpSeq: payload.lastOpSeq,
-        revision: payload.revision,
-      }),
-    )
-    setCollaborators((prev) => mergeCollaboratorsFromSnapshot(prev, payload.clients))
+  const onCanonicalProtocolMismatch = useCallback((): void => {
+    clearProtectedWorldState()
+    setCanonicalError('This canvas does not support the required protocol version.')
+    setMode('canonical-unavailable')
+  }, [clearProtectedWorldState])
+
+  const onSocketAuthLoss = useCallback((reason: AuthLossReason, error?: unknown): void => {
+    clearProtectedWorldState()
+    auth.handleAuthLoss(reason, error)
+  }, [auth, clearProtectedWorldState])
+
+  const onQuiltPatchState = useCallback((payload: QuiltScopedStatePayload): void => {
+    quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
+    if (payload.payloadMode === 'fine') {
+      setQuiltCache((previous) => mergeQuiltPatchSnapshot(previous, {
+        patchId: payload.patchId,
+        roomId: payload.canonicalRoomId,
+        chunkIds: payload.chunkIds,
+        tiles: payload.tiles,
+        cursor: payload.cursor,
+      }))
+    }
+    setSequencedState((previous) => ({ ...previous, lastOpSeq: Math.max(previous.lastOpSeq, payload.cursor.opSeq), revision: Math.max(previous.revision, payload.cursor.revision) }))
   }, [])
 
-  const onTilePlaced = useCallback((payload: TilePlacedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTilePlaced(prev, {
-        tile: { ...payload.tile, placedBy: payload.placedBy },
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
+  const onQuiltPatchEvent = useCallback((payload: QuiltPatchEventPayload): void => {
+    const currentCursor = quiltCursorsRef.current[payload.canonicalRoomId]
+    if (currentCursor && payload.revision <= currentCursor.revision) return
+    quiltCursorsRef.current[payload.canonicalRoomId] = {
+      patchId: payload.patchId,
+      opSeq: payload.opSeq,
+      revision: payload.revision,
+      eventId: payload.eventId,
+    }
 
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onTileRemoved = useCallback((payload: TileRemovedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTileRemoved(prev, {
-        tileId: payload.tileId,
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
-
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onResyncRequired = useCallback((payload: ResyncRequiredPayload): void => {
-    clientTelemetryRef.current.resyncEvents += 1
-    console.warn('resync_required received:', { reason: payload.reason, currentOpSeq: payload.currentOpSeq })
-    requestSnapshot()
-  }, [requestSnapshot])
-
-  const onChunkSnapshot = useCallback((payload: ChunkSnapshotPayload): void => {
-    setSequencedState((prev) => {
-      const incomingChunkIds = new Set(payload.chunks.map((chunk) => chunk.chunkId))
-      const replaceChunkTiles = shouldReplaceChunkTilesForSnapshot(payload.payloadMode)
-      const keptTiles = replaceChunkTiles
-        ? prev.tiles.filter((tile) =>
-          !incomingChunkIds.has(worldToChunkId(tile.transform.position.x, tile.transform.position.y, CHUNK_WORLD_SIZE)))
-        : prev.tiles
-      const incomingTiles = payload.chunks.flatMap((chunk) => chunk.tiles)
-      const mergedTiles = [...keptTiles, ...incomingTiles]
-
-      return {
-        tiles: mergedTiles,
-        lastOpSeq: Math.max(prev.lastOpSeq, payload.serverOpSeq),
-        revision: Math.max(prev.revision, payload.serverRevision),
-        requiresSnapshot: false,
-      }
-    })
-  }, [])
-
-  const onChunkTilePlaced = useCallback((payload: ChunkTilePlacedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTilePlaced(prev, {
-        tile: { ...payload.tile, placedBy: payload.placedBy },
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
-
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onChunkTileRemoved = useCallback((payload: ChunkTileRemovedPayload): void => {
-    setSequencedState((prev) => {
-      const next = reconcileSequencedTileRemoved(prev, {
-        tileId: payload.tileId,
-        opSeq: payload.opSeq,
-        revision: payload.revision,
-      })
-
-      if (next.requiresSnapshot) {
-        requestSnapshot()
-      }
-
-      return next
-    })
-  }, [requestSnapshot])
-
-  const onChunkResyncRequired = useCallback((payload: ChunkResyncRequiredPayload): void => {
-    clientTelemetryRef.current.resyncEvents += 1
-    console.info('chunk_resync_required_telemetry', {
-      chunkId: payload.chunkId,
-      reason: payload.reason,
-      payloadMode: payload.payloadMode,
-      currentOpSeq: payload.currentOpSeq,
-      currentRevision: payload.currentRevision,
-      totalResyncEvents: clientTelemetryRef.current.resyncEvents,
-    })
-
-    const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      requestSnapshot()
+    const operation = payload.operation
+    if ('tile' in operation) {
+      setQuiltCache((previous) => applyQuiltPatchPlacement(previous, payload.patchId, {
+        ...operation.tile,
+        placedBy: operation.placedBy,
+      }, quiltCursorsRef.current[payload.canonicalRoomId]))
+      setSequencedState((previous) => ({ ...previous, lastOpSeq: Math.max(previous.lastOpSeq, payload.opSeq), revision: Math.max(previous.revision, payload.revision) }))
       return
     }
 
-    socket.emit('request_chunk_snapshot', {
-      canvasId: sessionId,
-      chunks: [payload.chunkId],
-      payloadMode: payload.payloadMode,
-    })
-  }, [requestSnapshot, sessionId])
+    setQuiltCache((previous) => applyQuiltPatchRemoval(previous, payload.patchId, operation.tileId, quiltCursorsRef.current[payload.canonicalRoomId]))
+    setSequencedState((previous) => ({ ...previous, lastOpSeq: Math.max(previous.lastOpSeq, payload.opSeq), revision: Math.max(previous.revision, payload.revision) }))
+  }, [])
 
-  const onPointerUpdate = useCallback((payload: PointerUpdatePayload): void => {
-    setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
-      present: true,
-      pointer: payload.position,
-      lastSeenAt: Date.now(),
-    }))
+  const onQuiltPatchResyncRequired = useCallback((payload: QuiltPatchResyncRequiredPayload): void => {
+    quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
+    setQuiltSubscriptionEpoch((previous) => previous + 1)
   }, [])
 
   const onClientJoined = useCallback((payload: ClientJoinedPayload): void => {
@@ -670,14 +699,6 @@ function App() {
       present: false,
       pointer: undefined,
       selectionTileId: undefined,
-      lastSeenAt: Date.now(),
-    }))
-  }, [])
-
-  const onSelectionUpdate = useCallback((payload: SelectionUpdatePayload): void => {
-    setCollaborators((prev) => updateCollaborator(prev, payload.clientId, {
-      present: true,
-      selectionTileId: payload.tileId,
       lastSeenAt: Date.now(),
     }))
   }, [])
@@ -707,116 +728,64 @@ function App() {
     [activeCollaborators, clientId],
   )
 
+  useEffect(() => {
+    if (!isQuiltV2) return
+    setQuiltCache((previous) => {
+      const activePatchIds = new Set<string>()
+      for (const patch of Object.values(previous.patches)) {
+        if (activeChunkIds.some((chunkId) => patch.chunkIds.includes(chunkId))) activePatchIds.add(patch.patchId)
+      }
+      return evictQuiltCache(previous, activePatchIds, QUILT_CACHE_PATCH_BUDGET)
+    })
+  }, [activeChunkIds, isQuiltV2])
+
   const emitPointerMove = useCallback((position: { x: number; y: number }): void => {
-    const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      return
-    }
-
-    const throttleState = pointerEmitThrottleRef.current
-    const now = Math.max(Date.now(), throttleState.lastSentAt)
-    const elapsed = now - throttleState.lastSentAt
-
-    const flushPointerMove = (nextPosition: { x: number; y: number }): void => {
-      socket.emit('pointer_move', { position: nextPosition })
-      throttleState.lastSentAt = Math.max(Date.now(), throttleState.lastSentAt)
-      throttleState.pendingPosition = undefined
-    }
-
-    if (elapsed >= COLLABORATION_EMIT_INTERVAL_MS) {
-      if (throttleState.timeoutId !== null) {
-        window.clearTimeout(throttleState.timeoutId)
-        throttleState.timeoutId = null
-      }
-      flushPointerMove(position)
-      return
-    }
-
-    throttleState.pendingPosition = position
-
-    if (throttleState.timeoutId !== null) {
-      return
-    }
-
-    throttleState.timeoutId = window.setTimeout(() => {
-      throttleState.timeoutId = null
-      const pendingPosition = throttleState.pendingPosition
-      if (!pendingPosition) {
-        return
-      }
-      flushPointerMove(pendingPosition)
-    }, Math.max(0, COLLABORATION_EMIT_INTERVAL_MS - elapsed))
-  }, [sessionId])
+    void position
+  }, [])
 
   const emitSelectionUpdate = useCallback((tileId?: string): void => {
-    const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      return
-    }
-
-    const throttleState = selectionEmitThrottleRef.current
-    const now = Math.max(Date.now(), throttleState.lastSentAt)
-    const elapsed = now - throttleState.lastSentAt
-
-    const flushSelectionUpdate = (nextTileId?: string): void => {
-      if (throttleState.lastTileId === nextTileId) {
-        throttleState.pendingTileId = undefined
-        return
-      }
-
-      socket.emit('selection_update', {
-        canvasId: sessionId,
-        clientId,
-        tileId: nextTileId,
-        updatedAt: Date.now(),
-      })
-
-      throttleState.lastSentAt = Math.max(Date.now(), throttleState.lastSentAt)
-      throttleState.lastTileId = nextTileId
-      throttleState.pendingTileId = undefined
-    }
-
-    if (elapsed >= COLLABORATION_EMIT_INTERVAL_MS) {
-      if (throttleState.timeoutId !== null) {
-        window.clearTimeout(throttleState.timeoutId)
-        throttleState.timeoutId = null
-      }
-      flushSelectionUpdate(tileId)
-      return
-    }
-
-    throttleState.pendingTileId = tileId
-    if (throttleState.timeoutId !== null) {
-      return
-    }
-
-    throttleState.timeoutId = window.setTimeout(() => {
-      throttleState.timeoutId = null
-      flushSelectionUpdate(throttleState.pendingTileId)
-    }, Math.max(0, COLLABORATION_EMIT_INTERVAL_MS - elapsed))
-  }, [clientId, sessionId])
+    void tileId
+  }, [])
 
   const socketRef = useSocketConnection(
-    serverUrl,
-    sessionId,
+    auth.apiOrigin,
+    canonicalDescriptor,
     clientId,
-    onSnapshot,
-    onTilePlaced,
-    onTileRemoved,
-    onResyncRequired,
     socketActionRef,
-    onPointerUpdate,
     onClientJoined,
     onClientLeft,
-    onSelectionUpdate,
-    onChunkSnapshot,
-    onChunkTilePlaced,
-    onChunkTileRemoved,
-    onChunkResyncRequired,
-    realtimeCapabilities?.chunkStreamingEnabled ?? false,
+    onQuiltProtocol,
+    onQuiltPatchState,
+    onQuiltPatchEvent,
+    onQuiltPatchResyncRequired,
+    auth.acquireAccessToken,
+    onSocketAuthLoss,
+    true,
+    onCanonicalProtocolMismatch,
+    setConnectionEpoch,
   )
 
   const connectionState = useConnectionStatus(socketRef)
+
+  useEffect(() => {
+    if (!quiltProtocol?.canaryTelemetryEnabled || !quiltProtocol.topology) return
+
+    const intervalId = window.setInterval(() => {
+      const socket = socketActionRef.current
+      if (!socket?.connected) return
+      socket.emit('quilt_client_runtime_metrics', {
+        sampleId: crypto.randomUUID(),
+        entryAttemptId: canonicalDescriptor?.entryAttemptId ?? '',
+        canonicalGeneration: canonicalDescriptor?.generation ?? 0,
+        quiltId: quiltProtocol.topology!.quiltId,
+        retainedPatchCount: Object.keys(quiltCache.patches).length,
+        retainedTileCount: visibleTiles.length,
+        ...sceneMetricsRef.current,
+      })
+    }, 10_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [canonicalDescriptor?.entryAttemptId, canonicalDescriptor?.generation, quiltCache.patches, quiltProtocol, visibleTiles.length])
 
   const onViewportChanged = useCallback((payload: {
     center: { x: number; y: number }
@@ -843,108 +812,65 @@ function App() {
 
     lastChunkViewportRef.current = payload
 
+    const topologyMode = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology?.topology === 'toroidal'
+      ? {
+          mode: 'toroidal' as const,
+          chunkColumns: Math.max(1, Math.ceil(
+            quiltProtocol.topology.patchColumns * quiltProtocol.topology.patchWidth / CHUNK_WORLD_SIZE,
+          )),
+          chunkRows: Math.max(1, Math.ceil(
+            quiltProtocol.topology.patchRows * quiltProtocol.topology.patchHeight / CHUNK_WORLD_SIZE,
+          )),
+          quiltWidth: quiltProtocol.topology.patchColumns * quiltProtocol.topology.patchWidth,
+          quiltHeight: quiltProtocol.topology.patchRows * quiltProtocol.topology.patchHeight,
+        }
+      : { mode: 'unbounded' as const }
     const nextChunkIds = applyChunkSubscriptionBudgets(
-      viewportToChunkIds(payload.viewport, CHUNK_WORLD_SIZE, CHUNK_PREFETCH_RING),
+      viewportToChunkIds(payload.viewport, CHUNK_WORLD_SIZE, CHUNK_PREFETCH_RING, topologyMode),
       CHUNK_SOFT_SUBSCRIPTION_LIMIT,
       CHUNK_HARD_SUBSCRIPTION_LIMIT,
     )
 
     setActiveChunkIds(nextChunkIds)
-  }, [])
+  }, [quiltProtocol])
 
   useEffect(() => {
     const socket = socketActionRef.current
-    if (!socket || !sessionId) {
-      return
+    const topology = quiltProtocol?.topology
+    if (!socket || !topology || quiltProtocol.selectedProtocolVersion !== 2) return
+
+    const grouped = new Map<string, { row: number; column: number; chunks: ChunkId[] }>()
+    for (const chunkId of activeChunkIds) {
+      const [rawColumn, rawRow] = chunkId.split(':')
+      const chunkColumn = Number(rawColumn)
+      const chunkRow = Number(rawRow)
+      const column = Math.floor((chunkColumn * CHUNK_WORLD_SIZE) / topology.patchWidth)
+      const row = Math.floor((chunkRow * CHUNK_WORLD_SIZE) / topology.patchHeight)
+      const canonicalColumn = ((column % topology.patchColumns) + topology.patchColumns) % topology.patchColumns
+      const canonicalRow = ((row % topology.patchRows) + topology.patchRows) % topology.patchRows
+      const key = `${canonicalRow}:${canonicalColumn}`
+      const entry = grouped.get(key) ?? { row: canonicalRow, column: canonicalColumn, chunks: [] }
+      entry.chunks.push(chunkId)
+      grouped.set(key, entry)
     }
 
-    if (!realtimeCapabilities || !realtimeCapabilities.chunkStreamingEnabled) {
-      if (subscribedChunkIdsRef.current.size > 0) {
-        socket.emit('unsubscribe_chunks', {
-          canvasId: sessionId,
-          chunks: Array.from(subscribedChunkIdsRef.current),
-        })
-        subscribedChunkIdsRef.current = new Set()
-        setActiveChunkIds([])
-      }
-      return
-    }
+    const kind = zoomTier === 'aggregate' ? 'aggregate' as const : 'fine' as const
+    const rooms = Array.from(grouped.values()).map((entry) => ({
+      requestId: `${kind}:${entry.row}:${entry.column}`,
+      kind,
+      row: entry.row,
+      column: entry.column,
+      chunkIds: entry.chunks,
+    }))
 
-    const payloadMode: ChunkPayloadMode = zoomTier === 'aggregate' ? 'aggregate' : 'fine'
-
-    const previous = subscribedChunkIdsRef.current
-    const next = new Set(activeChunkIds)
-    const subscribe: ChunkId[] = []
-    const unsubscribe: ChunkId[] = []
-
-    for (const chunkId of next) {
-      if (!previous.has(chunkId)) {
-        subscribe.push(chunkId)
-      }
-    }
-
-    for (const chunkId of previous) {
-      if (!next.has(chunkId)) {
-        unsubscribe.push(chunkId)
-      }
-    }
-
-    if (unsubscribe.length > 0) {
-      socket.emit('unsubscribe_chunks', {
-        canvasId: sessionId,
-        chunks: unsubscribe,
-      })
-      clientTelemetryRef.current.unsubscribeEvents += unsubscribe.length
-    }
-
-    if (subscribe.length > 0) {
-      socket.emit('subscribe_chunks', {
-        canvasId: sessionId,
-        chunks: subscribe,
-        payloadMode,
-      })
-      clientTelemetryRef.current.subscribeEvents += subscribe.length
-    }
-
-    if (subscribe.length > 0 || unsubscribe.length > 0) {
-      console.info('chunk_subscription_churn', {
-        zoomTier,
-        payloadMode,
-        subscribeCount: subscribe.length,
-        unsubscribeCount: unsubscribe.length,
-        activeCount: next.size,
-        totalSubscribeEvents: clientTelemetryRef.current.subscribeEvents,
-        totalUnsubscribeEvents: clientTelemetryRef.current.unsubscribeEvents,
-      })
-    }
-
-    subscribedChunkIdsRef.current = next
-  }, [activeChunkIds, sessionId, zoomTier, realtimeCapabilities])
-
-  useEffect(() => {
-    const subscribedChunkIds = subscribedChunkIdsRef
-    const viewportRef = lastChunkViewportRef
-    const socketRef = socketActionRef
-
-    return () => {
-      if (!sessionId || subscribedChunkIds.current.size === 0) {
-        return
-      }
-
-      const socket = socketRef.current
-      if (!socket) {
-        return
-      }
-
-      socket.emit('unsubscribe_chunks', {
-        canvasId: sessionId,
-        chunks: Array.from(subscribedChunkIds.current),
-      })
-      subscribedChunkIds.current = new Set()
-      setActiveChunkIds([])
-      viewportRef.current = null
-    }
-  }, [sessionId])
+    socket.emit('subscribe_quilt_area', {
+      quiltId: topology.quiltId,
+      rooms,
+      cursors: selectQuiltCursors(quiltCache),
+    }, (ack) => {
+      quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
+    })
+  }, [activeChunkIds, connectionEpoch, quiltCache, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
 
   useEffect(() => {
     if (pointerEmitThrottleRef.current.timeoutId !== null) {
@@ -965,6 +891,46 @@ function App() {
 
     return () => window.clearInterval(cleanupId)
   }, [])
+
+  const handleUndo = useCallback((): void => {
+    const lastSettled = [...visibleTiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
+    if (!lastSettled) return
+
+    const socket = socketRef.current
+    if (!socket) return
+
+    const quiltUndo = quiltCache.undo[lastSettled.id]
+    if (isQuiltV2) {
+      if (!quiltProtocol?.mutationEnabled || !quiltUndo) return
+      setQuiltCache((previous) => setQuiltUndoMetadata(previous, quiltUndo))
+      const patchIds = findTilePatchIds(quiltCache, lastSettled.id)
+      const revisions = expectedPatchRevisions(quiltCache, patchIds)
+      if (!quiltProtocol.topology || patchIds.length === 0 || Object.keys(revisions).length !== patchIds.length) return
+      const payload: QuiltRemoveTileRequest = {
+        quiltId: quiltProtocol.topology.quiltId,
+        operationId: crypto.randomUUID(),
+        expectedPatchRevisions: revisions,
+        tileId: lastSettled.id,
+      }
+      socket.emit('quilt_remove_tile', payload, (ack: QuiltRemoveTileAck) => {
+        if (ack.status === 'rejected') return
+        setQuiltCache((previous) => clearQuiltUndoMetadata(
+          reconcileQuiltMutationRevisions(
+            patchIds.reduce((next, patchId) => applyQuiltPatchRemoval(next, patchId, lastSettled.id, {
+              patchId,
+              opSeq: ack.patchRevisions[patchId],
+              revision: ack.patchRevisions[patchId],
+              eventId: ack.eventIds[patchId],
+            }), previous),
+            ack.patchRevisions,
+            ack.eventIds,
+          ),
+          lastSettled.id,
+        ))
+      })
+      return
+    }
+  }, [clientId, isQuiltV2, quiltCache, quiltProtocol, socketRef, visibleTiles])
 
   useEffect(() => {
     if (mode !== 'canvas') {
@@ -1004,46 +970,25 @@ function App() {
       }
 
       if (event.key.toLowerCase() === 'z') {
-        const socket = socketRef.current
-        if (!socket) return
-
-        setSequencedState((prev) => {
-          const lastSettled = [...prev.tiles]
-            .reverse()
-            .find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
-          if (!lastSettled) {
-            return prev
-          }
-
-          socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: prev.revision }, (ack) => {
-            if (!ack.removed) {
-              requestSnapshot()
-              return
-            }
-
-            setSequencedState((current) => ({
-              ...reconcileSequencedTileRemoved(current, {
-                tileId: lastSettled.id,
-                opSeq: ack.opSeq,
-                revision: ack.newRevision,
-              }),
-              revision: ack.newRevision,
-            }))
-          })
-
-          return prev
-        })
+        handleUndo()
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [clientId, requestSnapshot, socketRef])
+  }, [handleUndo])
 
   const resolveGhostFromPointer = useCallback(
     (pointer: { x: number; y: number }) =>
-      updateGhostTarget(pointer, activeTile, sequencedState.tiles, worldBounds, placementGuide),
-    [activeTile, placementGuide, sequencedState.tiles, worldBounds],
+      updateGhostTarget(
+        pointer,
+        activeTile,
+        visibleTiles,
+        isQuiltV2 && ownedPatchBounds ? { mode: 'bounded', bounds: ownedPatchBounds } : worldBounds,
+        placementGuide,
+        quiltProtocol?.topology,
+      ),
+    [activeTile, isQuiltV2, ownedPatchBounds, placementGuide, quiltProtocol?.topology, visibleTiles, worldBounds],
   )
 
   useEffect(() => {
@@ -1081,50 +1026,85 @@ function App() {
     }))
   }, [activeTile.mirrored, activeTile.rotation, placementGuide.enabled])
 
-  const placeFromState = useCallback((tileState: ActiveTile, ghostState: typeof ghost, tileSequenceState: SequencedTilesState): void => {
-    const result = tryPlaceTile(tileState, ghostState, tileSequenceState.tiles)
+  const placeFromState = useCallback((tileState: ActiveTile, ghostState: typeof ghost): void => {
+    const result = tryPlaceTile(tileState, ghostState, visibleTiles)
     if (!result.placed) {
       triggerInvalidPulse()
       return
     }
 
-    const tempTile = { ...result.placed, placedBy: clientId }
-
-    setSequencedState((prev) => ({
-      ...prev,
-      tiles: [...prev.tiles, tempTile],
-    }))
-
     const socket = socketRef.current
     if (!socket) return
 
-    const payload: PlaceTilePayload = {
-      tileId: createServerTileId(),
-      shape: tempTile.shape,
-      color: tempTile.color,
-      material: tempTile.material,
-      transform: tempTile.transform,
-      expectedRevision: tileSequenceState.revision,
-    }
+    const tileId = createServerTileId()
+    const tempTile = { ...result.placed, id: tileId, placedBy: clientId }
+    const quiltPatchId = isQuiltV2
+      ? findCachedPatchId(quiltCache, tempTile.transform.position)
+      : undefined
 
-    socket.emit('place_tile', payload, (ack: PlaceTileAck) => {
-      if (ack.rejected) {
-        setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
+    if (isQuiltV2) {
+      if (!quiltProtocol?.mutationEnabled || !quiltProtocol.topology || !quiltPatchId || !isServerTileId(tileId)) {
         triggerInvalidPulse()
         return
       }
-
-      emitSelectionUpdate(ack.placed.id)
-      setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
-    })
-  }, [clientId, emitSelectionUpdate, socketRef, triggerInvalidPulse])
+      const patchIds = findAffectedCachedPatchIds(quiltCache, tempTile, quiltProtocol.topology)
+      if (!patchIds) {
+        triggerInvalidPulse()
+        return
+      }
+      const revisions = expectedPatchRevisions(quiltCache, patchIds)
+      if (Object.keys(revisions).length !== patchIds.length) {
+        triggerInvalidPulse()
+        return
+      }
+      const operationId = crypto.randomUUID()
+      ghostVisibleRef.current = false
+      setGhostVisible(false)
+      setQuiltCache((previous) => setQuiltOptimisticTile(previous, patchIds, tempTile, operationId))
+      const payload: QuiltPlaceTileRequest = {
+        quiltId: quiltProtocol.topology.quiltId,
+        operationId,
+        expectedPatchRevisions: revisions,
+        tile: {
+          tileId,
+          shape: tempTile.shape,
+          color: tempTile.color,
+          material: tempTile.material,
+          transform: tempTile.transform,
+        },
+      }
+      socket.emit('quilt_place_tile', payload, (ack: QuiltPlaceTileAck) => {
+        setQuiltCache((previous) => {
+          const cleared = clearQuiltOptimisticTile(previous, tileId)
+          if (ack.status === 'rejected') return cleared
+          const applied = patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, {
+            ...ack.tile,
+            placedBy: clientId,
+          }, {
+            patchId,
+            opSeq: ack.patchRevisions[patchId],
+            revision: ack.patchRevisions[patchId],
+            eventId: ack.eventIds[patchId],
+          }), cleared)
+          return setQuiltUndoMetadata(
+            reconcileQuiltMutationRevisions(applied, ack.patchRevisions, ack.eventIds),
+            { tileId: ack.tile.id, patchId: patchIds[0], operation: 'place', revision: Math.max(...Object.values(ack.patchRevisions)) },
+          )
+        })
+        if (ack.status === 'rejected') triggerInvalidPulse()
+        else emitSelectionUpdate(ack.tile.id)
+      })
+      return
+    }
+    triggerInvalidPulse()
+  }, [clientId, emitSelectionUpdate, isQuiltV2, quiltCache, quiltProtocol, socketRef, triggerInvalidPulse, visibleTiles])
 
   const updatePointer = useCallback((x: number, y: number): void => {
     const pointer = vec2(x, y)
     lastPointerWorldRef.current = pointer
     emitPointerMove(pointer)
     const updated = resolveGhostFromPointer(pointer)
-    emitSelectionUpdate(findHoveredTileId(x, y, sequencedState.tiles))
+    emitSelectionUpdate(findHoveredTileId(x, y, visibleTiles))
     setGhostVisible(true)
     setGhost((prev) => {
       const nextGhost = {
@@ -1141,11 +1121,11 @@ function App() {
       ghostRef.current = nextGhost
       return nextGhost
     })
-  }, [emitPointerMove, emitSelectionUpdate, ghostVisible, resolveGhostFromPointer, sequencedState.tiles])
+  }, [emitPointerMove, emitSelectionUpdate, ghostVisible, resolveGhostFromPointer, visibleTiles])
 
   const attemptPlace = useCallback((): void => {
-    placeFromState(activeTile, ghost, sequencedState)
-  }, [activeTile, ghost, placeFromState, sequencedState])
+    placeFromState(activeTile, ghost)
+  }, [activeTile, ghost, placeFromState])
 
   useEffect(() => registerCanvasTestApi({
     getState: () => ({
@@ -1157,16 +1137,34 @@ function App() {
       resyncEvents: clientTelemetryRef.current.resyncEvents,
       collaboratorIds: activeCollaborators.map((collaborator) => collaborator.clientId),
       activeTile,
-      tiles: sequencedState.tiles.map(toCanvasTestTileSnapshot),
+      cameraPan,
+      grid: {
+        enabled: gridOverlayEnabled,
+        patternId: selectedGridPatternId,
+      },
+      tiles: visibleTiles.map(toCanvasTestTileSnapshot),
+      metrics: {
+        retainedPatchCount: Object.keys(quiltCache.patches).length,
+        retainedTileCount: visibleTiles.length,
+        cursorCount: Object.keys(selectQuiltCursors(quiltCache)).length,
+        optimisticCount: Object.keys(quiltCache.optimistic).length,
+        undoCount: Object.keys(quiltCache.undo).length,
+        snapshotBytes: new TextEncoder().encode(JSON.stringify(quiltCache.patches)).byteLength,
+        ...sceneMetricsRef.current,
+      },
     }),
-    joinSession: (nextSessionId) => {
-      handleJoinSession(nextSessionId)
-    },
+    joinSession: () => {},
     setActiveTile: (patch) => {
       dispatchActiveTileUi({ type: 'patch-active-tile', patch })
     },
     movePointer: (position) => {
       updatePointer(position.x, position.y)
+    },
+    setCameraPan: (position) => {
+      setCameraPan(position)
+    },
+    setGridEnabled: (enabled) => {
+      setGridOverlayEnabled(enabled)
     },
     placeTileAt: (position) => {
       const pointer = vec2(position.x, position.y)
@@ -1192,7 +1190,7 @@ function App() {
       ghostRef.current = nextGhost
       setGhostVisible(true)
       setGhost(nextGhost)
-      placeFromState(activeTileRef.current, nextGhost, tileSequenceState)
+      placeFromState(activeTileRef.current, nextGhost)
     },
     placeTileAtWithAck: async (input) => {
       const pointer = vec2(input.position.x, input.position.y)
@@ -1244,105 +1242,128 @@ function App() {
         }
       }
 
-      const payload: PlaceTilePayload = {
-        tileId: createServerTileId(),
-        shape: tempTile.shape,
-        color: tempTile.color,
-        material: tempTile.material,
-        transform: tempTile.transform,
-        ...(input.includeExpectedRevision ?? true
-          ? { expectedRevision: input.expectedRevisionOverride ?? tileSequenceState.revision }
-          : {}),
+      if (isQuiltV2) {
+        const topology = quiltProtocol?.topology
+        const tileId = createServerTileId()
+        const quiltTile = { ...result.placed, id: tileId, placedBy: clientId }
+        const patchIds = topology ? findAffectedCachedPatchIds(quiltCache, quiltTile, topology) : null
+        if (!quiltProtocol?.mutationEnabled || !topology || !patchIds || patchIds.length === 0) {
+          triggerInvalidPulse()
+          return { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' as const }
+        }
+        const revisions = expectedPatchRevisions(quiltCache, patchIds)
+        if (Object.keys(revisions).length !== patchIds.length) {
+          triggerInvalidPulse()
+          return { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' as const }
+        }
+        if (input.expectedRevisionOverride !== undefined) {
+          for (const patchId of patchIds) revisions[patchId] = input.expectedRevisionOverride
+        }
+
+        setQuiltCache((previous) => setQuiltOptimisticTile(previous, patchIds, quiltTile, crypto.randomUUID()))
+        const ack = await new Promise<QuiltPlaceTileAck>((resolve) => {
+          socket.emit('quilt_place_tile', {
+            quiltId: topology.quiltId,
+            operationId: crypto.randomUUID(),
+            expectedPatchRevisions: revisions,
+            tile: {
+              tileId,
+              shape: quiltTile.shape,
+              color: quiltTile.color,
+              material: quiltTile.material,
+              transform: quiltTile.transform,
+            },
+          }, resolve)
+        })
+
+        setQuiltCache((previous) => {
+          const cleared = clearQuiltOptimisticTile(previous, tileId)
+          if (ack.status === 'rejected') return cleared
+          return patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, {
+            ...ack.tile,
+            placedBy: clientId,
+          }, {
+            patchId,
+            opSeq: ack.patchRevisions[patchId],
+            revision: ack.patchRevisions[patchId],
+            eventId: ack.eventIds[patchId],
+          }), cleared)
+        })
+
+        if (ack.status === 'rejected') {
+          if (ack.code === 'STALE_REVISION') {
+            clientTelemetryRef.current.resyncEvents += 1
+            setQuiltSubscriptionEpoch((previous) => previous + 1)
+          }
+          triggerInvalidPulse()
+          return {
+            placed: null,
+            rejected: true,
+            reason: ack.code === 'STALE_REVISION' ? 'STALE_REVISION' as const : 'PLACEMENT_REJECTED' as const,
+          }
+        }
+        return {
+          placed: ack.tile,
+          rejected: false,
+          opSeq: Math.max(...Object.values(ack.patchRevisions)),
+          newRevision: Math.max(...Object.values(ack.patchRevisions)),
+        }
       }
 
-      const ack = await new Promise<PlaceTileAck>((resolve) => {
-        socket.emit('place_tile', payload, (nextAck: PlaceTileAck) => resolve(nextAck))
-      })
-
-      if (ack.rejected) {
-        setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
-        triggerInvalidPulse()
-        return ack
-      }
-
-      emitSelectionUpdate(ack.placed.id)
-      setSequencedState((prev) => reconcileOptimisticPlacementAck(prev, tempTile, ack))
-      return ack
+      triggerInvalidPulse()
+      return { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' as const }
     },
   }), [
     activeCollaborators,
     activeTile,
     attemptPlace,
     clientId,
+    cameraPan,
     connectionState.status,
     emitPointerMove,
     emitSelectionUpdate,
-    handleJoinSession,
+    gridOverlayEnabled,
+    isQuiltV2,
     mode,
     placeFromState,
     resolveGhostFromPointer,
-    sequencedState.tiles,
+    sequencedState.revision,
+    quiltCache,
+    quiltProtocol,
+    selectedGridPatternId,
+    visibleTiles,
     sessionId,
+    socketRef,
+    triggerInvalidPulse,
     updatePointer,
   ])
 
-  const handleUndo = (): void => {
-    const lastSettled = [...sequencedState.tiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
-    if (!lastSettled) return
-
-    const socket = socketRef.current
-    if (!socket) return
-
-    socket.emit('remove_tile', { tileId: lastSettled.id, expectedRevision: sequencedState.revision }, (ack) => {
-      if (!ack.removed) {
-        requestSnapshot()
-        return
-      }
-
-      setSequencedState((prev) => ({
-        ...reconcileSequencedTileRemoved(prev, {
-          tileId: lastSettled.id,
-          opSeq: ack.opSeq,
-          revision: ack.newRevision,
-        }),
-        revision: ack.newRevision,
-      }))
-    })
-  }
-
-  const content = mode === 'lobby' ? (
-    <main className="lobby-shell">
-      <div className="backdrop-gradient" />
-      <LobbyScreen
-        sessions={sessions}
-        loading={lobbyLoading}
-        error={lobbyError}
-        previousSessionId={previousSessionId}
-        creating={creatingSession}
-        joiningSessionId={joiningSessionId}
-        onRefresh={() => void loadSessions()}
-        selectedCanvasPreset={selectedCanvasPreset}
-        onCanvasPresetChange={setSelectedCanvasPreset}
-        onCreate={() => void handleCreateSession()}
-        onJoin={handleJoinSession}
-      />
+  const content = mode === 'canonical-loading' ? (
+    <main className="auth-shell" aria-live="polite">Loading the canonical canvas...</main>
+  ) : mode === 'canonical-unavailable' ? (
+    <main className="auth-shell" role="alert">
+      <section className="auth-panel">
+        <h1>Canvas unavailable</h1>
+        <p>{canonicalError ?? 'The canonical canvas is temporarily unavailable.'}</p>
+      </section>
     </main>
   ) : (
     <main className={invalidPulse ? 'app-shell invalid-pulse' : 'app-shell'}>
       <div className="backdrop-gradient" />
       <AppHeader
-        onReturnToLobby={returnToLobby}
         connectionState={connectionState.status}
         collaboratorCount={activeCollaborators.length}
-        canUndo={sequencedState.tiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
+        canUndo={mutationControlsEnabled && visibleTiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
         onUndo={handleUndo}
+        profileName={auth.principal?.profile.displayName ?? auth.principal?.profile.email}
+        onLogout={() => void auth.logout()}
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
           <div className="status-strip" data-state={ghost.confidence}>
             <StatusIndicator connectionState={connectionState} />
             <span>{ghost.confidence.replace('-', ' ')}</span>
-            <span>{sequencedState.tiles.length} placed</span>
+            <span>{visibleTiles.length} placed</span>
           </div>
           {activeCollaborators.length > 0 && (
             <div className="collaborator-roster" aria-label="Active collaborators">
@@ -1352,6 +1373,33 @@ function App() {
                 </span>
               ))}
             </div>
+          )}
+          {canonicalDescriptor && (
+            <section className="canonical-navigation" aria-label="Canonical patch navigation">
+              <div className="canonical-navigation-heading">
+                <div>
+                  <h2>Canonical Quilt</h2>
+                  <p>
+                    {focusedCanonicalPatch
+                      ? `Patch ${focusedCanonicalPatch.row}, ${focusedCanonicalPatch.column}`
+                      : 'Choose a patch to focus'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => focusCanonicalPatch({
+                    quiltId: canonicalDescriptor.quiltId,
+                    patchId: canonicalDescriptor.initialPatch.id,
+                    row: canonicalDescriptor.initialPatch.row,
+                    column: canonicalDescriptor.initialPatch.column,
+                    centerX: canonicalDescriptor.originX + (canonicalDescriptor.initialPatch.column + 0.5) * canonicalDescriptor.patchWidth,
+                    centerY: canonicalDescriptor.originY + (canonicalDescriptor.initialPatch.row + 0.5) * canonicalDescriptor.patchHeight,
+                  })}
+                >
+                  Root
+                </button>
+              </div>
+            </section>
           )}
           <GridOverlayControls
             enabled={gridOverlayEnabled}
@@ -1376,7 +1424,8 @@ function App() {
           <CanvasErrorBoundary>
             <Suspense fallback={<CanvasLoadingFallback />}>
               <MosaicScene
-                tiles={sequencedState.tiles}
+                tiles={visibleTiles}
+                clientId={clientId}
                 activeShape={activeTile.shape}
                 ghost={{
                   transform: ghost.current,
@@ -1387,7 +1436,7 @@ function App() {
                 }}
                 onPointerMove={updatePointer}
                 onPointerDown={updatePointer}
-                onPointerUp={attemptPlace}
+                onPointerUp={mutationControlsEnabled ? attemptPlace : () => undefined}
                 onRotateDrag={(deltaX) => dispatchActiveTileUi({ type: 'rotate-fine', delta: deltaX * (Math.PI / 200) })}
                 remoteCursors={remoteCursors}
                 remoteSelections={remoteSelections}
@@ -1395,9 +1444,14 @@ function App() {
                   ? {
                       pattern: selectedGridPattern,
                       activeSlotId: ghost.guideSlotId,
+                      bounds: ownedPatchBounds,
                     }
                   : undefined}
                 worldBounds={worldBounds}
+                topology={isQuiltV2 && quiltProtocol.topology?.topology === 'toroidal' ? quiltProtocol.topology : undefined}
+                onSceneMetrics={(metrics) => {
+                  sceneMetricsRef.current = metrics
+                }}
                 cameraPan={cameraPan}
                 cameraPolicy={cameraPolicy}
                 onCameraPan={(deltaX, deltaY) => {
@@ -1445,22 +1499,24 @@ function App() {
               </div>
               <div className="debug-row">
                 <span className="debug-label">tiles</span>
-                <span className="debug-value">{sequencedState.tiles.length}</span>
+                <span className="debug-value">{visibleTiles.length}</span>
               </div>
             </div>
           )}
         </section>
-        <TilePalette
-          activeTile={activeTile}
-          paletteName={paletteName}
-          onPaletteName={handlePaletteChange}
-          paletteOpen={paletteOpen}
-          onTogglePaletteOpen={() => dispatchActiveTileUi({ type: 'toggle-palette-open' })}
-          onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
-          onMaterial={(material) => dispatchActiveTileUi({ type: 'set-material', material })}
-          onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
-          paletteFallbackAnnouncement={paletteFallbackAnnouncement}
-        />
+        {mutationControlsEnabled && (
+          <TilePalette
+            activeTile={activeTile}
+            paletteName={paletteName}
+            onPaletteName={handlePaletteChange}
+            paletteOpen={paletteOpen}
+            onTogglePaletteOpen={() => dispatchActiveTileUi({ type: 'toggle-palette-open' })}
+            onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
+            onMaterial={(material) => dispatchActiveTileUi({ type: 'set-material', material })}
+            onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
+            paletteFallbackAnnouncement={paletteFallbackAnnouncement}
+          />
+        )}
       </div>
     </main>
   )
@@ -1468,6 +1524,60 @@ function App() {
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={300}>{content}</TooltipProvider>
   )
+}
+
+function App() {
+  const auth = useAuthSession()
+
+  if (auth.status === 'loading') {
+    return <main className="auth-shell">Loading your secure workspace...</main>
+  }
+
+  if (auth.status !== 'authenticated' || !auth.principal) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <h1>Mosaic Atelier</h1>
+          <p>{auth.error ?? 'Sign in to view your canvases.'}</p>
+          {auth.testIdentity && (
+            <div className="test-identity-control">
+              <label htmlFor="test-identity">Local test user</label>
+              <div className="test-identity-presets" aria-label="Local test user presets">
+                {['dev-alice', 'dev-bob'].map((subject) => (
+                  <button
+                    key={subject}
+                    type="button"
+                    className={auth.testIdentity?.subject === subject ? 'active' : undefined}
+                    onClick={() => auth.testIdentity?.setSubject(subject)}
+                  >
+                    {subject === 'dev-alice' ? 'Alice' : 'Bob'}
+                  </button>
+                ))}
+              </div>
+              <input
+                id="test-identity"
+                value={auth.testIdentity.subject}
+                onChange={(event) => auth.testIdentity?.setSubject(event.target.value)}
+                autoComplete="off"
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            className="active"
+            onClick={() => {
+              clearCanonicalPatchLink()
+              void auth.login()
+            }}
+          >
+            Sign in
+          </button>
+        </section>
+      </main>
+    )
+  }
+
+  return <ProtectedApp />
 }
 
 export default App

@@ -1,5 +1,5 @@
 import { expect, test as base, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
-import { createIsolatedSharedCanvas, resetSharedCanvasState, type ResetSharedCanvasOptions } from './testState'
+import { createIsolatedCanonicalQuilt, resetSharedCanvasState } from './testState'
 import type { PlaceTileAck } from '../../apps/server/src/contracts'
 
 const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
@@ -8,8 +8,6 @@ const SERVER_TILE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab]
 
 type CanvasConnectionStatus = 'connecting' | 'connected' | 'disconnecting' | 'disconnected' | 'error'
 type CanvasMode = 'lobby' | 'canvas'
-type CanvasSizePreset = NonNullable<ResetSharedCanvasOptions['canvasPreset']>
-
 export type CanvasTileSnapshot = {
   id: string
   shape: 'square' | 'triangle' | 'rectangle' | 'l-shape'
@@ -40,6 +38,9 @@ export type CanvasStateSnapshot = {
     mirrored: boolean
   }
   tiles: CanvasTileSnapshot[]
+  metrics: {
+    optimisticCount: number
+  }
 }
 
 type CanvasTestApi = {
@@ -95,7 +96,7 @@ export type MultiUserSession = {
 
 export type CreateMultiUserSessionOptions = {
   userCount?: number
-  canvasPreset?: CanvasSizePreset
+  automaticAssignments?: boolean
 }
 
 type CreateMultiUserSession = (options?: CreateMultiUserSessionOptions) => Promise<MultiUserSession>
@@ -133,6 +134,11 @@ const callCanvasApi = async <TArg, TResult = void>(
   })
 }
 
+const positionsMatch = (
+  actual: { x: number; y: number },
+  expected: { x: number; y: number },
+): boolean => Math.abs(actual.x - expected.x) < 1e-6 && Math.abs(actual.y - expected.y) < 1e-6
+
 const tileMatches = (tile: CanvasTileSnapshot, expectation: TileExpectation): boolean => {
   if (expectation.id !== undefined && tile.id !== expectation.id) {
     return false
@@ -156,7 +162,7 @@ const tileMatches = (tile: CanvasTileSnapshot, expectation: TileExpectation): bo
     return false
   }
   if (expectation.position !== undefined) {
-    if (tile.position.x !== expectation.position.x || tile.position.y !== expectation.position.y) {
+    if (!positionsMatch(tile.position, expectation.position)) {
       return false
     }
   }
@@ -170,16 +176,22 @@ const waitForState = async (
   message: string,
 ): Promise<CanvasStateSnapshot> => {
   let match: CanvasStateSnapshot | undefined
+  let lastState: CanvasStateSnapshot | undefined
 
-  await expect.poll(async () => {
-    const state = await readCanvasState(page)
-    if (predicate(state)) {
-      match = state
-      return true
-    }
+  try {
+    await expect.poll(async () => {
+      const state = await readCanvasState(page)
+      lastState = state
+      if (predicate(state)) {
+        match = state
+        return true
+      }
 
-    return false
-  }, { message }).toBe(true)
+      return false
+    }, { message }).toBe(true)
+  } catch (error) {
+    throw new Error(`${message}\nLast canvas state: ${JSON.stringify(lastState)}`, { cause: error })
+  }
 
   return match as CanvasStateSnapshot
 }
@@ -232,8 +244,9 @@ const createCanvasUser = (
   page,
   open: async () => {
     await page.goto(clientUrl)
-    await expect(page.getByRole('heading', { name: 'Choose a Canvas' })).toBeVisible()
     await waitForCanvasApi(page)
+    await waitForState(page, (state) => state.mode === 'canvas', `${name} should enter the canonical canvas`)
+    await waitForState(page, (state) => state.connectionStatus === 'connected', `${name} should connect to the canonical canvas`)
   },
   joinSession: async (sessionId: string) => {
     await callCanvasApi(page, 'joinSession', sessionId)
@@ -268,8 +281,7 @@ const createCanvasUser = (
         && tile.shape === placingTileState.shape
         && tile.color === placingTileState.color
         && tile.material === placingTileState.material
-        && tile.position.x === position.x
-        && tile.position.y === position.y),
+        && positionsMatch(tile.position, position)),
       `${name} should place a settled server tile`,
     )
 
@@ -280,8 +292,7 @@ const createCanvasUser = (
       && tile.shape === placingTileState.shape
       && tile.color === placingTileState.color
       && tile.material === placingTileState.material
-      && tile.position.x === position.x
-      && tile.position.y === position.y)
+      && positionsMatch(tile.position, position))
     expect(placedTile, `${name} should expose the newly placed authoritative tile`).toBeTruthy()
 
     return placedTile as CanvasTileSnapshot
@@ -330,7 +341,7 @@ const closeContext = async (openContexts: Set<BrowserContext>, context: BrowserC
   await context.close()
 }
 
-const createSessionFactory = (
+const createQuiltFactory = (
   browser: Browser,
   request: APIRequestContext,
   clientUrl: string,
@@ -338,22 +349,47 @@ const createSessionFactory = (
 ): CreateMultiUserSession => async (options = {}) => {
   const userCount = options.userCount ?? 2
   expect(userCount).toBeGreaterThanOrEqual(2)
+  const ownerExternalSubject = options.automaticAssignments
+    ? undefined
+    : `e2e-browser-owner-${crypto.randomUUID()}`
 
-  const { sessionId } = await createIsolatedSharedCanvas(request, {
-    canvasPreset: options.canvasPreset ?? 'expanded',
+  const { quiltId, patchId } = await createIsolatedCanonicalQuilt(request, {
+    ownerExternalSubject,
   })
+  const entryUrl = options.automaticAssignments
+    ? clientUrl
+    : `${clientUrl}?quilt=${encodeURIComponent(quiltId)}&patch=${encodeURIComponent(patchId)}`
 
   const users: CanvasUser[] = []
 
   try {
     for (let index = 0; index < userCount; index += 1) {
-      const context = await browser.newContext()
+      const context = await browser.newContext({
+        storageState: {
+          cookies: [],
+          origins: [{
+            origin: clientUrl,
+            localStorage: [
+              { name: 'zzyix:e2e-authenticated', value: 'true' },
+              {
+                name: 'zzyix:e2e-subject',
+                value: index === 0 && ownerExternalSubject
+                  ? ownerExternalSubject
+                  : `e2e-browser-user-${index + 1}-${crypto.randomUUID()}`,
+              },
+            ],
+          }],
+        },
+      })
       openContexts.add(context)
       const page = await context.newPage()
-      const user = createCanvasUser(context, page, `user-${index + 1}`, clientUrl)
-      await user.open()
-      await user.joinSession(sessionId)
+      const user = createCanvasUser(context, page, `user-${index + 1}`, entryUrl)
       users.push(user)
+    }
+    if (options.automaticAssignments) {
+      await Promise.all(users.map(async (user) => user.open()))
+    } else {
+      for (const user of users) await user.open()
     }
   } catch (error) {
     await Promise.all(Array.from(openContexts).map(async (context) => closeContext(openContexts, context)))
@@ -361,7 +397,7 @@ const createSessionFactory = (
   }
 
   return {
-    sessionId,
+    sessionId: quiltId,
     users,
     close: async () => {
       await Promise.all(users.map(async (user) => closeContext(openContexts, user.context)))
@@ -374,7 +410,7 @@ export const test = base.extend<{ createMultiUserSession: CreateMultiUserSession
   createMultiUserSession: async ({ browser, request, baseURL }, use) => {
     const openContexts = new Set<BrowserContext>()
     const clientUrl = baseURL ?? DEFAULT_CLIENT_URL
-    const createMultiUserSession = createSessionFactory(browser, request, clientUrl, openContexts)
+    const createMultiUserSession = createQuiltFactory(browser, request, clientUrl, openContexts)
 
     await use(createMultiUserSession)
 

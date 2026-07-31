@@ -3,6 +3,7 @@ import { DEFAULT_BOUNDED_WORLD_BOUNDS } from '../contracts.js'
 import {
   transformTile,
 } from './tileGeometry.js'
+import { nearestImageDelta, type QuiltTopology, type TopologyRect } from './quiltTopology.js'
 import type { Vec2 } from './math2d.js'
 import type { ConfidenceState, TileShape, Transform2D } from './tileGeometry.js'
 
@@ -61,35 +62,40 @@ export type GuidedPlacement = {
 }
 
 /** Maximum allowed edge-to-edge gap between a candidate tile and the nearest settled tile. */
-const MAX_GROUT_GAP = 0.22
+export const MAX_GROUT_GAP = 0.22
 
-const pointToSegmentDist = (p: Vec2, a: Vec2, b: Vec2): number => {
-  const ab = sub(b, a)
-  const abLen2 = dot(ab, ab)
-  if (abLen2 === 0) return len(sub(p, a))
-  const t = Math.min(1, Math.max(0, dot(sub(p, a), ab) / abLen2))
-  return len(sub(p, vec2(a.x + ab.x * t, a.y + ab.y * t)))
+export const derivePlacementBounds = (
+  shape: TileShape,
+  transform: Transform2D,
+  halo = 0,
+): TopologyRect => {
+  const outline = transformTile(shape, transform).outline
+  return {
+    minX: Math.min(...outline.map((point) => point.x)) - halo,
+    maxX: Math.max(...outline.map((point) => point.x)) + halo,
+    minY: Math.min(...outline.map((point) => point.y)) - halo,
+    maxY: Math.max(...outline.map((point) => point.y)) + halo,
+  }
 }
 
-/**
- * Minimum edge-to-edge distance between two polygons.
- * Returns 0 when they are touching or overlapping.
- */
-const minOutlineGap = (a: Vec2[], b: Vec2[]): number => {
-  let minDist = Number.POSITIVE_INFINITY
-  for (const p of b) {
-    for (let i = 0; i < a.length; i += 1) {
-      const d = pointToSegmentDist(p, a[i], a[(i + 1) % a.length])
-      if (d < minDist) minDist = d
-    }
-  }
-  for (const p of a) {
-    for (let i = 0; i < b.length; i += 1) {
-      const d = pointToSegmentDist(p, b[i], b[(i + 1) % b.length])
-      if (d < minDist) minDist = d
-    }
-  }
-  return minDist
+export const projectPeriodicNeighbors = (
+  settled: TileInstance[],
+  candidatePosition: Vec2,
+  topology: QuiltTopology,
+): TileInstance[] => {
+  const quiltWidth = topology.patchColumns * topology.patchWidth
+  const quiltHeight = topology.patchRows * topology.patchHeight
+
+  return settled.map((tile) => ({
+    ...tile,
+    transform: {
+      ...tile.transform,
+      position: {
+        x: candidatePosition.x + nearestImageDelta(tile.transform.position.x - candidatePosition.x, quiltWidth),
+        y: candidatePosition.y + nearestImageDelta(tile.transform.position.y - candidatePosition.y, quiltHeight),
+      },
+    },
+  }))
 }
 
 const project = (polygon: Vec2[], axis: Vec2): Projection => {
@@ -221,28 +227,6 @@ export const validatePlacement = (
       correction,
       penetration: maxPenetration,
       reason: `overlap (depth ${maxPenetration.toFixed(3)})`,
-    }
-  }
-
-  // Adjacency check: once tiles have been placed, the candidate must sit within
-  // grout distance of at least one settled tile — no floating islands.
-  if (settled.length > 0) {
-    let minGap = Number.POSITIVE_INFINITY
-
-    for (const tile of settled) {
-      const transformed = transformTile(tile.shape, tile.transform)
-      const gap = minOutlineGap(candidate.outline, transformed.outline)
-      if (gap < minGap) minGap = gap
-    }
-
-    if (minGap > MAX_GROUT_GAP) {
-      return {
-        state: minGap < MAX_GROUT_GAP * 2.5 ? 'near-valid' : 'invalid',
-        valid: false,
-        correction: vec2(0, 0),
-        penetration: minGap,
-        reason: `gap too large (${minGap.toFixed(3)} > max ${MAX_GROUT_GAP})`,
-      }
     }
   }
 

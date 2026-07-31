@@ -6,16 +6,141 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      recovery_action:
+        description: Restricted operational recovery action
+        required: false
+        type: choice
+        options:
+          - none
+          - recover-principal
+          - cancel-transfer
+        default: none
+      recovery_target_id:
+        description: Internal principal or pending transfer ID
+        required: false
+        type: string
+      support_ticket:
+        description: Approved support ticket ID
+        required: false
+        type: string
+      recovery_reason:
+        description: Approved operational reason
+        required: false
+        type: string
 
 concurrency:
   group: cd-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  operational-recovery:
+    name: Restricted Operational Recovery
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_action != 'none' }}
+    runs-on: ubuntu-latest
+    environment: operational-recovery
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Validate Recovery Request
+        env:
+          RECOVERY_ACTION: ${{ inputs.recovery_action }}
+          RECOVERY_TARGET_ID: ${{ inputs.recovery_target_id }}
+          SUPPORT_TICKET: ${{ inputs.support_ticket }}
+          RECOVERY_REASON: ${{ inputs.recovery_reason }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RECOVERY_TARGET_ID}" || -z "${SUPPORT_TICKET}" || -z "${RECOVERY_REASON}" ]]; then
+            echo 'Recovery target, approved support ticket, and reason are required.' >&2
+            exit 1
+          fi
+
+          if [[ "${RECOVERY_ACTION}" != 'recover-principal' && "${RECOVERY_ACTION}" != 'cancel-transfer' ]]; then
+            echo 'Unsupported operational recovery action.' >&2
+            exit 1
+          fi
+
+      - name: Azure Login
+        uses: azure/login@93381592711f247e165c389ebb30b596c84cdc48
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve Restricted Recovery Infrastructure
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          INFRA_DEPLOYMENT_NAME: ${{ vars.AZURE_INFRA_DEPLOYMENT_NAME }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${RESOURCE_GROUP}" || -z "${INFRA_DEPLOYMENT_NAME}" ]]; then
+              echo 'Restricted recovery infrastructure deployment is not configured.' >&2
+              exit 1
+            fi
+
+            recovery_job_name="$(az deployment group show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${INFRA_DEPLOYMENT_NAME}" \
+              --query properties.outputs.recoveryJobName.value \
+              --output tsv)"
+
+            if [[ -z "${recovery_job_name}" || "${recovery_job_name}" == 'null' ]]; then
+              echo 'Infrastructure deployment did not expose recoveryJobName.' >&2
+              exit 1
+            fi
+
+            echo "RECOVERY_JOB_NAME=${recovery_job_name}" >> "${GITHUB_ENV}"
+
+      - name: Start Restricted Recovery Job
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          RECOVERY_ACTION: ${{ inputs.recovery_action }}
+          RECOVERY_TARGET_ID: ${{ inputs.recovery_target_id }}
+          SUPPORT_TICKET: ${{ inputs.support_ticket }}
+          RECOVERY_REASON: ${{ inputs.recovery_reason }}
+          OPERATOR_ID: ${{ github.actor_id }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${RESOURCE_GROUP}" || -z "${RECOVERY_JOB_NAME}" || -z "${OPERATOR_ID}" ]]; then
+              echo 'Restricted recovery infrastructure is not configured.' >&2
+              exit 1
+            fi
+
+            execution_name="$(az containerapp job start \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${RECOVERY_JOB_NAME}" \
+              --command node \
+              --args \
+                dist/operations/principalRecoveryCli.js \
+                --action "${RECOVERY_ACTION}" \
+                --target-id "${RECOVERY_TARGET_ID}" \
+                --operator-id "${OPERATOR_ID}" \
+                --support-ticket "${SUPPORT_TICKET}" \
+                --reason "${RECOVERY_REASON}" \
+              --query name \
+              --output tsv)"
+
+            if [[ -z "${execution_name}" ]]; then
+              echo 'Recovery job did not return an execution name.' >&2
+              exit 1
+            fi
+
+            echo "Restricted recovery execution ${execution_name} started."
+
   build-and-push:
     name: Build And Push (${{ matrix.app }})
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' || (
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.recovery_action == 'none') || (
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
         github.event.workflow_run.head_branch == 'main'
@@ -100,7 +225,7 @@ jobs:
     name: Deploy To Azure Container Apps (staging)
     needs: build-and-push
     if: >-
-      ${{ github.event_name == 'workflow_dispatch' || (
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.recovery_action == 'none') || (
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.head_repository.full_name == github.repository &&
         github.event.workflow_run.head_branch == 'main'
@@ -124,6 +249,35 @@ jobs:
       SERVER_TARGET_PORT: '3001'
       CLIENT_TARGET_PORT: '80'
       CONFIGURED_CORS_ORIGIN: ${{ vars.SERVER_CORS_ORIGIN }}
+      MIGRATION_JOB_NAME: ${{ vars.MIGRATION_JOB_NAME }}
+      AUTH_AUTHORITY: ${{ vars.AUTH_AUTHORITY }}
+      AUTH_CLIENT_ID: ${{ vars.AUTH_CLIENT_ID }}
+      AUTH_API_SCOPE: ${{ vars.AUTH_API_SCOPE }}
+      AUTH_API_ORIGIN: ${{ vars.AUTH_API_ORIGIN }}
+      AUTH_REDIRECT_URI: ${{ vars.AUTH_REDIRECT_URI }}
+      AUTH_POST_LOGOUT_REDIRECT_URI: ${{ vars.AUTH_POST_LOGOUT_REDIRECT_URI }}
+      AUTH_TRUSTED_ISSUER: ${{ vars.AUTH_TRUSTED_ISSUER }}
+      AUTH_API_AUDIENCE: ${{ vars.AUTH_API_AUDIENCE }}
+      AUTH_REQUIRED_SCOPE: ${{ vars.AUTH_REQUIRED_SCOPE }}
+      AUTH_JWKS_URI: ${{ vars.AUTH_JWKS_URI }}
+      AUTH_ACCEPTED_ALGORITHM: ${{ vars.AUTH_ACCEPTED_ALGORITHM }}
+      AUTH_TELEMETRY_GATE_APPROVED: ${{ vars.AUTH_TELEMETRY_GATE_APPROVED }}
+      AUTH_ROLLBACK_GATE_APPROVED: ${{ vars.AUTH_ROLLBACK_GATE_APPROVED }}
+      AUTH_RETENTION_POLICY_APPROVED: ${{ vars.AUTH_RETENTION_POLICY_APPROVED }}
+      AUTH_DELETION_COMPLETION_POLICY_APPROVED: ${{ vars.AUTH_DELETION_COMPLETION_POLICY_APPROVED }}
+      AUTH_OWNER_E2E_GATE_APPROVED: ${{ vars.AUTH_OWNER_E2E_GATE_APPROVED }}
+      AUTH_MIGRATION_REHEARSAL_APPROVED: ${{ vars.AUTH_MIGRATION_REHEARSAL_APPROVED }}
+      AUTH_MUTATION_ROLLBACK_APPROVED: ${{ vars.AUTH_MUTATION_ROLLBACK_APPROVED }}
+      AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: ${{ vars.AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED }}
+      FEATURE_PROTOCOL_V2_MUTATION_ENABLED: ${{ vars.FEATURE_PROTOCOL_V2_MUTATION_ENABLED || 'false' }}
+      FEATURE_QUILT_PROTOCOL_V2_ENABLED: ${{ vars.FEATURE_QUILT_PROTOCOL_V2_ENABLED || 'false' }}
+      LEGACY_RETIREMENT_REPORT_PATH: /tmp/canonical-retirement-report.json
+      LEGACY_RETIREMENT_REPORT_SHA256: ${{ vars.LEGACY_RETIREMENT_REPORT_SHA256 }}
+      LEGACY_RETIREMENT_PARITY_PASSED: ${{ vars.LEGACY_RETIREMENT_PARITY_PASSED }}
+      LEGACY_RETIREMENT_RECOVERY_PASSED: ${{ vars.LEGACY_RETIREMENT_RECOVERY_PASSED }}
+      LEGACY_RETIREMENT_MULTI_REPLICA_PASSED: ${{ vars.LEGACY_RETIREMENT_MULTI_REPLICA_PASSED }}
+      LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED: ${{ vars.LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED }}
+      LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED: ${{ vars.LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED }}
 
     steps:
       - name: Check Out
@@ -143,6 +297,247 @@ jobs:
         with:
           inlineScript: |
             az extension add --name containerapp --upgrade --allow-preview true
+
+      - name: Validate Release Configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_variables=(
+            RESOURCE_GROUP
+            CONTAINERAPPS_ENVIRONMENT
+            SERVER_CONTAINER_APP_NAME
+            CLIENT_CONTAINER_APP_NAME
+            MIGRATION_JOB_NAME
+            AUTH_AUTHORITY
+            AUTH_CLIENT_ID
+            AUTH_API_SCOPE
+            AUTH_API_ORIGIN
+            AUTH_REDIRECT_URI
+            AUTH_POST_LOGOUT_REDIRECT_URI
+            AUTH_TRUSTED_ISSUER
+            AUTH_API_AUDIENCE
+            AUTH_REQUIRED_SCOPE
+            AUTH_JWKS_URI
+            AUTH_ACCEPTED_ALGORITHM
+            AUTH_TELEMETRY_GATE_APPROVED
+            AUTH_ROLLBACK_GATE_APPROVED
+            AUTH_RETENTION_POLICY_APPROVED
+            AUTH_DELETION_COMPLETION_POLICY_APPROVED
+            AUTH_OWNER_E2E_GATE_APPROVED
+            AUTH_MIGRATION_REHEARSAL_APPROVED
+            AUTH_MUTATION_ROLLBACK_APPROVED
+            AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED
+            LEGACY_RETIREMENT_REPORT_SHA256
+            LEGACY_RETIREMENT_PARITY_PASSED
+            LEGACY_RETIREMENT_RECOVERY_PASSED
+            LEGACY_RETIREMENT_MULTI_REPLICA_PASSED
+            LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED
+            LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED
+          )
+
+          for variable_name in "${required_variables[@]}"; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              echo "Missing required GitHub environment variable: ${variable_name}" >&2
+              exit 1
+            fi
+          done
+
+          required_approvals=(
+            AUTH_TELEMETRY_GATE_APPROVED
+            AUTH_ROLLBACK_GATE_APPROVED
+            AUTH_RETENTION_POLICY_APPROVED
+            AUTH_DELETION_COMPLETION_POLICY_APPROVED
+            LEGACY_RETIREMENT_PARITY_PASSED
+            LEGACY_RETIREMENT_RECOVERY_PASSED
+            LEGACY_RETIREMENT_MULTI_REPLICA_PASSED
+            LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED
+            LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED
+          )
+          for approval_name in "${required_approvals[@]}"; do
+            if [[ "${!approval_name}" != "true" ]]; then
+              echo "Release approval is not granted: ${approval_name}" >&2
+              exit 1
+            fi
+          done
+
+          if [[ "${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}" == 'true' ]]; then
+            mutation_approvals=(
+              AUTH_OWNER_E2E_GATE_APPROVED
+              AUTH_MIGRATION_REHEARSAL_APPROVED
+              AUTH_MUTATION_ROLLBACK_APPROVED
+              AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED
+            )
+            for approval_name in "${mutation_approvals[@]}"; do
+              if [[ "${!approval_name}" != 'true' ]]; then
+                echo "Mutation approval is not granted: ${approval_name}" >&2
+                exit 1
+              fi
+            done
+          fi
+
+          feature_flags=(
+            FEATURE_PROTOCOL_V2_MUTATION_ENABLED
+            FEATURE_QUILT_PROTOCOL_V2_ENABLED
+          )
+          for feature_flag in "${feature_flags[@]}"; do
+            if [[ "${!feature_flag}" != 'true' && "${!feature_flag}" != 'false' ]]; then
+              echo "Feature flag must be true or false: ${feature_flag}" >&2
+              exit 1
+            fi
+          done
+
+          if [[ -z "${{ secrets.SERVER_DATABASE_URL }}" ]]; then
+            echo 'Missing required GitHub environment secret: SERVER_DATABASE_URL' >&2
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}" ]]; then
+            echo 'Missing immutable retirement report secret.' >&2
+            exit 1
+          fi
+
+          node scripts/validate-deployment-origins.mjs
+
+      - name: Apply Database Migrations
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            HAS_GHCR_CREDS=false
+            if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
+              HAS_GHCR_CREDS=true
+            fi
+
+            if az containerapp job show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${MIGRATION_JOB_NAME}" >/dev/null 2>&1; then
+              terminal_statuses='Succeeded|Failed|Stopped|Degraded'
+              active_execution="$(az containerapp job execution list \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --query "[?!contains('${terminal_statuses}', properties.status)].name | [0]" \
+                --output tsv)"
+
+              if [[ -n "${active_execution}" ]]; then
+                echo "Migration job ${MIGRATION_JOB_NAME} already has active execution ${active_execution}; refusing to mutate or start it." >&2
+                exit 1
+              fi
+
+              migration_job_id="$(az containerapp job show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --query id \
+                --output tsv)"
+              az resource update \
+                --ids "${migration_job_id}" \
+                --set \
+                  properties.configuration.triggerType=Manual \
+                  properties.configuration.replicaTimeout=1800 \
+                  properties.configuration.replicaRetryLimit=2 \
+                  properties.configuration.manualTriggerConfig.parallelism=1 \
+                  properties.configuration.manualTriggerConfig.replicaCompletionCount=1
+
+              az containerapp job secret set \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}"
+
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                az containerapp job registry set \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --name "${MIGRATION_JOB_NAME}" \
+                  --server "ghcr.io" \
+                  --username "${{ secrets.AZURE_GHCR_USERNAME }}" \
+                  --password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+              fi
+
+              az containerapp job update \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --replica-timeout 1800 \
+                --replica-retry-limit 2 \
+                --parallelism 1 \
+                --replica-completion-count 1 \
+                --image "${SERVER_IMAGE}" \
+                --set-env-vars "NODE_ENV=production" "DATABASE_URL=secretref:database-url" \
+                --command node \
+                --args dist/db/migrate.js
+            else
+              CREATE_REGISTRY_ARGS=()
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                CREATE_REGISTRY_ARGS=(
+                  --registry-server "ghcr.io"
+                  --registry-username "${{ secrets.AZURE_GHCR_USERNAME }}"
+                  --registry-password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+                )
+              fi
+
+              az containerapp job create \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --environment "${CONTAINERAPPS_ENVIRONMENT}" \
+                --trigger-type Manual \
+                --replica-timeout 1800 \
+                --replica-retry-limit 2 \
+                --parallelism 1 \
+                --replica-completion-count 1 \
+                --image "${SERVER_IMAGE}" \
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
+                --env-vars "NODE_ENV=production" "DATABASE_URL=secretref:database-url" \
+                --command node \
+                --args dist/db/migrate.js \
+                ${CREATE_REGISTRY_ARGS[@]}
+            fi
+
+            job_settings="$(az containerapp job show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${MIGRATION_JOB_NAME}" \
+              --query "[properties.configuration.triggerType, properties.configuration.manualTriggerConfig.parallelism, properties.configuration.manualTriggerConfig.replicaCompletionCount, properties.configuration.replicaTimeout, properties.configuration.replicaRetryLimit]" \
+              --output tsv)"
+            expected_settings=$'Manual\t1\t1\t1800\t2'
+
+            if [[ "${job_settings}" != "${expected_settings}" ]]; then
+              echo "Migration job settings are unsafe: ${job_settings}" >&2
+              exit 1
+            fi
+
+            execution_name="$(az containerapp job start \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${MIGRATION_JOB_NAME}" \
+              --query name \
+              --output tsv)"
+
+            if [[ -z "${execution_name}" ]]; then
+              echo 'Migration job did not return an execution name.' >&2
+              exit 1
+            fi
+
+            for attempt in {1..120}; do
+              execution_status="$(az containerapp job execution show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${MIGRATION_JOB_NAME}" \
+                --job-execution-name "${execution_name}" \
+                --query properties.status \
+                --output tsv)"
+
+              case "${execution_status}" in
+                Succeeded)
+                  echo "Migration execution ${execution_name} succeeded."
+                  exit 0
+                  ;;
+                Failed|Stopped|Degraded)
+                  echo "Migration execution ${execution_name} ended with ${execution_status}." >&2
+                  exit 1
+                  ;;
+              esac
+
+              sleep 10
+            done
+
+            echo "Migration execution ${execution_name} did not finish within 20 minutes." >&2
+            exit 1
 
       - name: Deploy Server Container App
         uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
@@ -196,7 +591,7 @@ jobs:
               az containerapp secret set \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}"
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}"
 
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
                 az containerapp registry set \
@@ -211,7 +606,7 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
                 --image "${SERVER_IMAGE}" \
-                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url"
+                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "LEGACY_RETIREMENT_REPORT_BASE64=secretref:legacy-retirement-report" "LEGACY_RETIREMENT_REPORT_PATH=${LEGACY_RETIREMENT_REPORT_PATH}" "LEGACY_RETIREMENT_REPORT_SHA256=${LEGACY_RETIREMENT_REPORT_SHA256}" "LEGACY_RETIREMENT_PARITY_PASSED=${LEGACY_RETIREMENT_PARITY_PASSED}" "LEGACY_RETIREMENT_RECOVERY_PASSED=${LEGACY_RETIREMENT_RECOVERY_PASSED}" "LEGACY_RETIREMENT_MULTI_REPLICA_PASSED=${LEGACY_RETIREMENT_MULTI_REPLICA_PASSED}" "LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED=${LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED}" "LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED=${LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "AUTH_OWNER_E2E_GATE_APPROVED=${AUTH_OWNER_E2E_GATE_APPROVED}" "AUTH_MIGRATION_REHEARSAL_APPROVED=${AUTH_MIGRATION_REHEARSAL_APPROVED}" "AUTH_MUTATION_ROLLBACK_APPROVED=${AUTH_MUTATION_ROLLBACK_APPROVED}" "AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED=${AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}" "FEATURE_QUILT_PROTOCOL_V2_ENABLED=${FEATURE_QUILT_PROTOCOL_V2_ENABLED}"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -229,8 +624,8 @@ jobs:
                 --image "${SERVER_IMAGE}" \
                 --target-port "${SERVER_TARGET_PORT}" \
                 --ingress internal \
-                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" \
+                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "LEGACY_RETIREMENT_REPORT_BASE64=secretref:legacy-retirement-report" "LEGACY_RETIREMENT_REPORT_PATH=${LEGACY_RETIREMENT_REPORT_PATH}" "LEGACY_RETIREMENT_REPORT_SHA256=${LEGACY_RETIREMENT_REPORT_SHA256}" "LEGACY_RETIREMENT_PARITY_PASSED=${LEGACY_RETIREMENT_PARITY_PASSED}" "LEGACY_RETIREMENT_RECOVERY_PASSED=${LEGACY_RETIREMENT_RECOVERY_PASSED}" "LEGACY_RETIREMENT_MULTI_REPLICA_PASSED=${LEGACY_RETIREMENT_MULTI_REPLICA_PASSED}" "LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED=${LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED}" "LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED=${LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "AUTH_OWNER_E2E_GATE_APPROVED=${AUTH_OWNER_E2E_GATE_APPROVED}" "AUTH_MIGRATION_REHEARSAL_APPROVED=${AUTH_MIGRATION_REHEARSAL_APPROVED}" "AUTH_MUTATION_ROLLBACK_APPROVED=${AUTH_MUTATION_ROLLBACK_APPROVED}" "AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED=${AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}" "FEATURE_QUILT_PROTOCOL_V2_ENABLED=${FEATURE_QUILT_PROTOCOL_V2_ENABLED}" \
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}" \
                 --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
@@ -305,7 +700,7 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${CLIENT_CONTAINER_APP_NAME}" \
                 --image "${CLIENT_IMAGE}" \
-                --set-env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}"
+                --set-env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" "AUTH_AUTHORITY=${AUTH_AUTHORITY}" "AUTH_CLIENT_ID=${AUTH_CLIENT_ID}" "AUTH_API_SCOPE=${AUTH_API_SCOPE}" "AUTH_API_ORIGIN=${AUTH_API_ORIGIN}" "AUTH_REDIRECT_URI=${AUTH_REDIRECT_URI}" "AUTH_POST_LOGOUT_REDIRECT_URI=${AUTH_POST_LOGOUT_REDIRECT_URI}"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -324,7 +719,7 @@ jobs:
                 --image "${CLIENT_IMAGE}" \
                 --target-port "${CLIENT_TARGET_PORT}" \
                 --ingress external \
-                --env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" \
+                --env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" "AUTH_AUTHORITY=${AUTH_AUTHORITY}" "AUTH_CLIENT_ID=${AUTH_CLIENT_ID}" "AUTH_API_SCOPE=${AUTH_API_SCOPE}" "AUTH_API_ORIGIN=${AUTH_API_ORIGIN}" "AUTH_REDIRECT_URI=${AUTH_REDIRECT_URI}" "AUTH_POST_LOGOUT_REDIRECT_URI=${AUTH_POST_LOGOUT_REDIRECT_URI}" \
                 --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
@@ -382,4 +777,4 @@ jobs:
             az containerapp update \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${SERVER_CONTAINER_APP_NAME}" \
-              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url"
+              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=secretref:database-url" "LEGACY_RETIREMENT_REPORT_BASE64=secretref:legacy-retirement-report" "LEGACY_RETIREMENT_REPORT_PATH=${LEGACY_RETIREMENT_REPORT_PATH}" "LEGACY_RETIREMENT_REPORT_SHA256=${LEGACY_RETIREMENT_REPORT_SHA256}" "LEGACY_RETIREMENT_PARITY_PASSED=${LEGACY_RETIREMENT_PARITY_PASSED}" "LEGACY_RETIREMENT_RECOVERY_PASSED=${LEGACY_RETIREMENT_RECOVERY_PASSED}" "LEGACY_RETIREMENT_MULTI_REPLICA_PASSED=${LEGACY_RETIREMENT_MULTI_REPLICA_PASSED}" "LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED=${LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED}" "LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED=${LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "AUTH_OWNER_E2E_GATE_APPROVED=${AUTH_OWNER_E2E_GATE_APPROVED}" "AUTH_MIGRATION_REHEARSAL_APPROVED=${AUTH_MIGRATION_REHEARSAL_APPROVED}" "AUTH_MUTATION_ROLLBACK_APPROVED=${AUTH_MUTATION_ROLLBACK_APPROVED}" "AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED=${AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}" "FEATURE_QUILT_PROTOCOL_V2_ENABLED=${FEATURE_QUILT_PROTOCOL_V2_ENABLED}"

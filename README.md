@@ -1,159 +1,77 @@
 ---
 title: zzyix
-description: Learning-first monorepo for a collaborative mosaic web app, including setup, workflow, and release practices.
+description: A shared, realtime mosaic world where people place tiles together on one continuous quilt.
 ---
 
-## What This Is
+## Build a world, one tile at a time
 
-zzyix is a casual project for learning agentic software development lifecycle (SDLC) practices while building a collaborative mosaic web app.
+zzyix is a collaborative mosaic canvas. Pick a shape, color, and material, then
+place tiles alongside other people in a shared world that wraps continuously at
+its edges.
 
-* Learn by shipping small increments instead of writing perfect plans up front
-* Explore different agentic coding techniques and tools
-* Keep scope grounded in a fun product idea: collaborative mosaic building
+The project is also a practical space for learning agent-assisted software
+development by building and shipping a real product in small increments.
 
-## Scope
+## What you can do
 
-The product goal is a web experience where multiple users can place and arrange tile shapes on a shared canvas in real time.
+* Place squares, triangles, rectangles, and L-shaped tiles
+* Choose from several palettes and material styles
+* Build freely or use optional repeating grid patterns
+* Pan and zoom through a continuous wrapped quilt
+* See other collaborators and distinguish their tile ownership
+* Return to a patch you own when you sign in
 
-Current and near-term themes include:
+## Try it locally
 
-* Smooth tile placement and interaction design
-* Authoritative validation of placement rules
-* Realtime multi-user synchronization
-* Persistent canvas and operation history
-
-## Project Structure
-
-* [apps/client](apps/client): React + TypeScript + Three.js client for the mosaic editor
-* [apps/server](apps/server): Express + Socket.IO server with authoritative placement logic
-* [docs/decisions](docs/decisions): Architecture and design decision records
-
-## Quick Start
-
-### Prerequisites
-
-* Node.js 24+
-* npm 11+
-
-### Install
+You need Node.js 24+, npm 11+, Docker, and Docker Compose.
 
 ```bash
 npm install
+docker compose up -d postgres
+npm run dev:test-auth
 ```
 
-### Run Client And Server
+Open <http://127.0.0.1:4173>, choose Alice or Bob, and sign in. Use a second
+browser profile to try realtime collaboration as the other user.
 
-In separate terminals:
+The local identity provider and mutation controls are restricted to test mode
+and loopback services. They cannot be enabled in production.
 
-```bash
-npm run dev:server
-```
+## How it works
 
-```bash
-npm run dev:client
-```
+The experience is built from three main pieces:
 
-Default local URLs:
+* React and Three.js render the quilt and editing tools in the browser
+* Express and Socket.IO authorize edits and synchronize collaborators
+* PostgreSQL stores quilts, owned patches, tiles, and durable operation history
 
-* Client: <http://localhost:5173>
-* Server: <http://localhost:3001>
+The quilt is finite in storage but wraps at its edges, so navigation feels
+continuous without duplicating persisted tiles.
 
-## Collaboration Notes
+For a visual explanation of the data model, see
+[Canonical quilt data storage](docs/canonical-quilt-data-storage.md).
 
-This is a learning-first repository, not a production system.
+## Explore the project
 
-Expect rough edges, experiments, and occasional pivots in architecture or workflow as we test ideas and improve both product and process.
+* [Client guide](apps/client/README.md): UI, controls, runtime configuration, and client tests
+* [Server guide](apps/server/README.md): API, authentication, deployment, and migration operations
+* [Architecture decisions](docs/decisions): Product and engineering decisions with their tradeoffs
+* [Contributing guide](CONTRIBUTING.md): Development workflow and contribution expectations
+* [Security policy](SECURITY.md): Reporting security issues
 
-## Commit Conventions
+## Common commands
 
-This repository enforces Conventional Commits in CI.
+| Command | Purpose |
+|---------|---------|
+| `npm run dev:test-auth` | Run the local app with test identities |
+| `npm run dev` | Run the standard client and server development processes |
+| `npm test` | Run all workspace tests |
+| `npm run build` | Build all workspaces |
+| `npm run lint` | Lint all workspaces |
+| `npm run test:e2e` | Run the Playwright end-to-end suite |
 
-Use commit messages in this shape:
+## Project status
 
-```text
-type(scope): subject
-```
-
-Supported types include `feat`, `fix`, `chore`, `docs`, `refactor`, `test`, `ci`, and `perf`.
-
-Supported scopes include:
-
-* `client`
-* `server`
-* `ui`
-* `render`
-* `interaction`
-* `domain-client`
-* `domain-server`
-* `db`
-* `jobs`
-* `api`
-* `deps`
-* `deps-dev`
-* `deps-client`
-* `deps-server`
-* `repo`
-* `ci`
-* `infra`
-* `docs`
-* `scripts`
-* `release`
-
-Examples:
-
-```text
-feat(client): add palette keyboard shortcuts
-fix(server): reject stale operation sequence
-chore(release): configure app-specific semantic-release channels
-docs(repo): clarify commit and release workflow
-```
-
-> [!IMPORTANT]
-> Commit messages that do not match these rules will fail CI.
-
-## Staging CD Environment Bootstrap
-
-Use the GH CLI helper to create/update GitHub Environment variables and
-secrets required by `.github/workflows/cd.yml`.
-
-1. Fill in values in `scripts/gh-vars.env`.
-2. Run:
-
-```bash
-./scripts/bootstrap-cd-environment.sh --repo dkirby-ms/zzyix --environment staging
-```
-
-By default the script reads `scripts/gh-vars.env`. You can override with
-`--env-file <path>`.
-
-Required keys in the env file:
-
-```bash
-AZURE_CLIENT_ID
-AZURE_TENANT_ID
-AZURE_SUBSCRIPTION_ID
-AZURE_RESOURCE_GROUP
-AZURE_CONTAINERAPPS_ENVIRONMENT
-AZURE_LOCATION
-SERVER_CONTAINER_APP_NAME
-CLIENT_CONTAINER_APP_NAME
-SERVER_DATABASE_URL
-```
-
-For `SERVER_DATABASE_URL`, use explicit TLS mode in production and staging:
-
-```bash
-SERVER_DATABASE_URL=postgresql://<user>:<password>@<server>.postgres.database.azure.com:5432/zzyix?sslmode=verify-full
-```
-
-Optional keys in the env file:
-
-```bash
-SERVER_CORS_ORIGIN
-AZURE_GHCR_USERNAME
-AZURE_GHCR_PASSWORD
-```
-
-If `SERVER_CORS_ORIGIN` is not set, CD will deploy the client app first,
-resolve its Container App ingress URL, and use that URL as the server CORS
-origin automatically.
+zzyix is an active learning project. Expect experiments, evolving architecture,
+and occasional rough edges. The repository uses Conventional Commits and checks
+builds, tests, and commit messages in CI.

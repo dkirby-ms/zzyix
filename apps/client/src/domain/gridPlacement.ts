@@ -5,6 +5,7 @@ import type { Vec2 } from './math2d'
 import type { GridPattern, GridPatternSlot } from './gridPatterns'
 import type { BoundsPolicy, MosaicBounds, TileInstance, ValidationResult } from './placementSolver'
 import type { TileShape, Transform2D } from './tileGeometry'
+import type { QuiltTopology } from '../../../server/src/domain/quiltTopology'
 
 export type GridPlacementResult = {
   slot: GridPatternSlot
@@ -37,6 +38,7 @@ const createCandidates = (
   shape: TileShape | undefined,
   settled: TileInstance[],
   bounds: MosaicBounds | BoundsPolicy,
+  topology?: QuiltTopology,
 ): GridPlacementCandidate[] =>
   getNearestGridCells(pattern, pointer)
     .flatMap((cell) =>
@@ -47,7 +49,7 @@ const createCandidates = (
     .map((slot) => ({
       slot,
       distance: dist(pointer, slot.transform.position),
-      validation: validatePlacement(slot.shape, slot.transform, settled, bounds),
+      validation: validatePlacement(slot.shape, slot.transform, settled, bounds, topology),
     }))
     .sort(compareCandidates)
 
@@ -57,11 +59,12 @@ export const resolveGridPlacement = (
   pattern: GridPattern,
   settled: TileInstance[],
   bounds: MosaicBounds | BoundsPolicy,
+  topology?: QuiltTopology,
 ): GridPlacementResult => {
   const compatibleShapes = getPatternCompatibleShapes(pattern)
 
   if (!compatibleShapes.includes(activeShape)) {
-    const nearest = createCandidates(pointer, pattern, undefined, settled, bounds)[0]
+    const nearest = createCandidates(pointer, pattern, undefined, settled, bounds, topology)[0]
     const compatibleLabels = compatibleShapes.map((shape) => shapeLabels[shape]).join(' or ')
 
     return {
@@ -74,7 +77,7 @@ export const resolveGridPlacement = (
     }
   }
 
-  const candidates = createCandidates(pointer, pattern, activeShape, settled, bounds)
+  const candidates = createCandidates(pointer, pattern, activeShape, settled, bounds, topology)
   const selected = candidates.find((candidate) => candidate.validation.valid) ?? candidates[0]
 
   return {

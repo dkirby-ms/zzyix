@@ -1,876 +1,809 @@
-import { describe, expect, it, vi } from 'vitest'
+import { sql } from 'drizzle-orm'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { Server as SocketServer } from 'socket.io'
+import { io as createSocketClient, type Socket as SocketClient } from 'socket.io-client'
 import {
-  applyPlaceTile,
-  buildListSessionsResponse,
-  createAuthoritativeSessionState,
-  finalizeParticipantPresence,
-  getSessionState,
-  initializeParticipantPresence,
-  isPlaceTilePayload,
-  isSelectionUpdatePayload,
-  registerClientSocket,
-  unregisterClientSocket,
+  buildChunkAggregate,
+  isQuiltClientRuntimeMetrics,
+  isQuiltPlaceTileRequest,
+  isQuiltRemoveTileRequest,
+  isQuiltRoomRequest,
+  isSocketHandshakeOriginAllowed,
+  ownershipRequest,
+  recordQuiltClientRuntimeMetrics,
+  recordCanonicalClientTelemetry,
+  renewPresenceLeaseOrDisconnect,
+  resolveLegacySocketAccess,
+  haveEqualChunkScope,
+  selectScopedReplayOperations,
+  sendOwnershipResult,
+  sendCanonicalWorldDiscovery,
+  configureTokenVerifierForTests,
+  enforceCanonicalSocketCompatibility,
+  httpServer,
+  io,
+  registerCanonicalTelemetryHandler,
 } from './index.js'
+import { buildPatchRoomAccess } from './realtime/quiltRooms.js'
+import type { PersistedVisibilityPolicy } from './domain/authorizationPolicy.js'
+import type { PatchDeliveryOperation } from './db/repository.js'
 import { vec2 } from './domain/math2d.js'
+import { configureQuiltTelemetry } from './migration/quiltTelemetry.js'
+import { createHttpAuth } from './auth/httpAuth.js'
+import { AuthenticationError } from './auth/errors.js'
+import { createSocketAuth } from './auth/socketAuth.js'
+import {
+  consumeCanonicalAttempt,
+  issueCanonicalAttempt,
+} from './migration/canonicalAttempts.js'
+import { createPostgresTestDatabase, type PostgresTestDatabase } from './test/postgresTestDatabase.js'
 
-let sessionCounter = 0
+let attemptDatabase: PostgresTestDatabase
+let liveBaseUrl: string
 
-const nextSessionId = (): string => {
-  sessionCounter += 1
-  return `integration-session-${sessionCounter}`
+const PRINCIPAL_A = '11111111-1111-4111-8111-111111111111'
+const PRINCIPAL_B = '22222222-2222-4222-8222-222222222222'
+const CANVAS_ID = '30000000-0000-4000-8000-000000000001'
+const QUILT_ID = '40000000-0000-4000-8000-000000000001'
+const PATCH_A = '50000000-0000-4000-8000-000000000001'
+const PATCH_B = '50000000-0000-4000-8000-000000000002'
+const TEST_ISSUER = 'https://issuer.example/'
+
+beforeAll(async () => {
+  attemptDatabase = await createPostgresTestDatabase('zzyix_index_attempts')
+  configureTokenVerifierForTests(async (token) => {
+    if (token === 'denied') throw new AuthenticationError('insufficient_scope')
+    return {
+      issuer: TEST_ISSUER,
+      subject: token === 'second' ? 'subject-b' : 'subject-a',
+      expiresAt: new Date(Date.now() + 60_000),
+      scope: ['access'],
+    }
+  })
+  await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
+  liveBaseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
+}, 30_000)
+
+beforeEach(async () => {
+  for (const socket of await io.fetchSockets()) socket.disconnect(true)
+  await attemptDatabase.db.execute(sql`truncate table canvases, principals cascade`)
+  await attemptDatabase.db.execute(sql`
+    insert into principals (id, kind) values
+      (${PRINCIPAL_A}, 'human'),
+      (${PRINCIPAL_B}, 'human')
+  `)
+})
+
+afterAll(async () => {
+  await new Promise<void>((resolve) => io.close(() => resolve()))
+  await attemptDatabase?.dispose()
+}, 30_000)
+
+const seedCanonicalBoundary = async (): Promise<void> => {
+  await attemptDatabase.db.execute(sql`
+    insert into external_principal_mappings (provider_namespace, external_subject, principal_id)
+    values
+      (${TEST_ISSUER}, 'subject-a', ${PRINCIPAL_A}),
+      (${TEST_ISSUER}, 'subject-b', ${PRINCIPAL_B})
+  `)
+  await attemptDatabase.db.execute(sql`insert into canvases (id, version) values (${CANVAS_ID}, 0)`)
+  await attemptDatabase.db.execute(sql`
+    insert into quilts (
+      id, legacy_canvas_id, patch_rows, patch_columns, patch_width, patch_height,
+      origin_x, origin_y, topology, protocol_version
+    ) values (${QUILT_ID}, ${CANVAS_ID}, 1, 2, 10, 10, 0, 0, 'toroidal', 2)
+  `)
+  await attemptDatabase.db.execute(sql`
+    insert into patches (id, quilt_id, row, "column", state, revision)
+    values
+      (${PATCH_A}, ${QUILT_ID}, 0, 0, 'unclaimed', 0),
+      (${PATCH_B}, ${QUILT_ID}, 0, 1, 'unclaimed', 0)
+  `)
+  await attemptDatabase.db.execute(sql`
+    insert into patch_visibility_policies (
+      patch_id, existence, fine_data, aggregate_data, presence, search,
+      durable_events, claim_enabled, policy_version
+    ) values
+      (${PATCH_A}, 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', true, 1),
+      (${PATCH_B}, 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', 'authenticated', true, 1)
+  `)
+  await attemptDatabase.db.execute(sql`
+    insert into canonical_world (product_key, quilt_id, status, generation)
+    values ('canonical', ${QUILT_ID}, 'active', 2)
+  `)
 }
 
-describe('authoritative snapshot reconciliation', () => {
-  it('builds snapshot payload from canonical server tiles for first connect', () => {
-    const sessionId = nextSessionId()
-    const state = getSessionState(sessionId)
+const authenticatedRequest = (
+  path: string,
+  token = 'allowed',
+  init: RequestInit = {},
+): Promise<Response> => fetch(`${liveBaseUrl}${path}`, {
+  ...init,
+  headers: {
+    authorization: `Bearer ${token}`,
+    ...init.headers,
+  },
+})
 
-    const place = applyPlaceTile(
-      state,
-      {
-        tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-        shape: 'square',
-        color: '#abc',
-        material: 'ceramic',
-        transform: { position: vec2(0, 0), rotation: 0 },
-      },
-      'authoritative-client',
-    )
+const discoverEntryAttempt = async (token: string): Promise<string> => {
+  const response = await authenticatedRequest('/quilts/canonical', token)
+  expect(response.status).toBe(200)
+  return ((await response.json()) as { entryAttemptId: string }).entryAttemptId
+}
 
-    expect(place.ack.rejected).toBe(false)
+describe('Socket.IO handshake origin boundary', () => {
+  const allowedOrigin = 'https://app.example.com'
 
-    const joinedAt = 10
-    state.clients.set('client-1', { clientId: 'client-1', joinedAt })
-    const snapshot = {
-      session: state.session,
-      clients: [...state.clients.values()],
-      lastOpSeq: state.lastOpSeq,
-      revision: state.lastOpSeq,
-    }
-
-    expect(snapshot.session.id).toBe(sessionId)
-    expect(snapshot.session.tiles).toHaveLength(1)
-    expect(snapshot.clients).toEqual([{ clientId: 'client-1', joinedAt }])
-    expect(snapshot.lastOpSeq).toBe(1)
-    expect(snapshot.revision).toBe(1)
+  it('accepts only the exact configured browser origin', () => {
+    expect(isSocketHandshakeOriginAllowed(allowedOrigin, allowedOrigin, 'production')).toBe(true)
+    expect(isSocketHandshakeOriginAllowed('https://app.example.com.evil.net', allowedOrigin, 'production')).toBe(false)
+    expect(isSocketHandshakeOriginAllowed('https://example.com', allowedOrigin, 'production')).toBe(false)
+    expect(isSocketHandshakeOriginAllowed(['https://app.example.com'], allowedOrigin, 'production')).toBe(false)
   })
 
-  it('reconnect snapshot reflects latest canonical session state', () => {
-    const sessionId = nextSessionId()
-    const state = getSessionState(sessionId)
-
-    const firstPlace = applyPlaceTile(
-      state,
-      {
-        tileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-        shape: 'square',
-        color: '#123',
-        material: 'glass',
-        transform: { position: vec2(0, 0), rotation: 0 },
-      },
-      'client-a',
-    )
-
-    expect(firstPlace.ack.rejected).toBe(false)
-
-  state.clients.set('client-a', { clientId: 'client-a', joinedAt: 5 })
-
-    // Simulate reconnect: same session id resolves to the same authoritative state.
-  const reconnectState = getSessionState(sessionId)
-    reconnectState.clients.set('client-a', { clientId: 'client-a', joinedAt: 15 })
-
-    const reconnectSnapshot = {
-      session: reconnectState.session,
-      clients: [...reconnectState.clients.values()],
-      lastOpSeq: reconnectState.lastOpSeq,
-      revision: reconnectState.lastOpSeq,
-    }
-
-    expect(reconnectSnapshot.session.id).toBe(sessionId)
-    expect(reconnectSnapshot.session.tiles).toHaveLength(1)
-    expect(reconnectSnapshot.clients).toEqual([{ clientId: 'client-a', joinedAt: 15 }])
-    expect(reconnectSnapshot.lastOpSeq).toBe(1)
-    expect(reconnectSnapshot.revision).toBe(1)
-  })
-
-  it('initializes participant presence from persisted replay state', async () => {
-    const repository = {
-      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
-      loadSessionReplayRecord: vi.fn().mockResolvedValue({
-        session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
-        canvasConfig: {
-          canvasSize: { width: 31.2, height: 20.4 },
-          boundsPolicy: {
-            mode: 'bounded',
-            bounds: { minX: -15.6, maxX: 15.6, minY: -10.2, maxY: 10.2 },
-          },
-        },
-        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
-        lastOpSeq: 3,
-        revision: 4,
-        snapshotOpSeq: 3,
-        replayedOperations: [],
-      }),
-      listActiveParticipants: vi.fn(),
-      markParticipantLeft: vi.fn(),
-    }
-
-    const result = await initializeParticipantPresence('session-1', 'client-a', 1_000, repository)
-
-    expect(repository.markParticipantJoined).toHaveBeenCalledWith('session-1', 'client-a', 1_000)
-    expect(repository.loadSessionReplayRecord).toHaveBeenCalledWith('session-1')
-    expect(result).toEqual({
-      joinedClient: { clientId: 'client-a', joinedAt: 1_000 },
-      snapshot: {
-        session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
-        canvasConfig: {
-          canvasSize: { width: 31.2, height: 20.4 },
-          boundsPolicy: {
-            mode: 'bounded',
-            bounds: { minX: -15.6, maxX: 15.6, minY: -10.2, maxY: 10.2 },
-          },
-        },
-        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
-        lastOpSeq: 3,
-        revision: 4,
-      },
-    })
-  })
-
-  it('finalizes participant presence and requests cleanup when the room becomes empty', async () => {
-    const repository = {
-      markParticipantJoined: vi.fn(),
-      loadSessionReplayRecord: vi.fn(),
-      markParticipantLeft: vi.fn().mockResolvedValue(undefined),
-      listActiveParticipants: vi.fn().mockResolvedValue([]),
-    }
-
-    const result = await finalizeParticipantPresence('session-1', 'client-a', 2_000, repository)
-
-    expect(repository.markParticipantLeft).toHaveBeenCalledWith('session-1', 'client-a', 2_000)
-    expect(repository.listActiveParticipants).toHaveBeenCalledWith('session-1')
-    expect(result).toEqual({ activeClients: [], shouldCleanup: true })
-  })
-
-  it('keeps deterministic sequencing when duplicate place payload is replayed through production path', () => {
-    const sessionId = nextSessionId()
-    const state = getSessionState(sessionId)
-    const payload = {
-      tileId: '11111111-1111-4111-8111-111111111111',
-      shape: 'square' as const,
-      color: '#123',
-      material: 'glass' as const,
-      transform: { position: vec2(0, 0), rotation: 0 },
-    }
-
-    expect(isPlaceTilePayload(payload)).toBe(true)
-
-    const first = applyPlaceTile(state, payload, 'client-a')
-    const replay = applyPlaceTile(state, payload, 'client-a')
-
-    expect(first.ack.rejected).toBe(false)
-    expect(replay.ack.rejected).toBe(true)
-    if (!first.ack.rejected) {
-      expect(first.ack.opSeq).toBe(1)
-      expect(first.ack.placed.id).toBe(payload.tileId)
-    }
-    if (replay.ack.rejected) {
-      expect(replay.ack.reason).toBe('OVERLAP')
-    }
-    expect(state.lastOpSeq).toBe(2)
-  })
-
-  it('models handler precondition behavior for stale and out-of-order checks before mutation', () => {
-    const revision = 6
-    const staleExpectedRevision = 4
-    const futureExpectedRevision = 7
-
-    const placeStaleAck =
-      staleExpectedRevision < revision
-        ? { placed: null, rejected: true as const, reason: 'STALE_REVISION' as const }
-        : { placed: null, rejected: true as const, reason: 'PLACEMENT_REJECTED' as const }
-
-    const removeFutureAck =
-      futureExpectedRevision > revision
-        ? { removed: false as const, reason: 'OUT_OF_ORDER_REVISION' as const }
-        : { removed: false as const }
-
-    expect(placeStaleAck).toEqual({
-      placed: null,
-      rejected: true,
-      reason: 'STALE_REVISION',
-    })
-    expect(removeFutureAck).toEqual({
-      removed: false,
-      reason: 'OUT_OF_ORDER_REVISION',
-    })
-  })
-
-  it('suppresses duplicate remove replay broadcast and snapshot write while preserving opSeq', () => {
-    const emit = vi.fn()
-    const room = { emit }
-    const io = {
-      to: vi.fn().mockReturnValue(room),
-    }
-    const persistSnapshotIfNeeded = vi.fn()
-
-    const firstRemoval = {
-      opSeq: 12,
-      revision: 7,
-      session: { id: 'session-1', tiles: [], createdAt: 10, updatedAt: 20 },
-      ack: { removed: true as const, opSeq: 12 },
-      event: { tileId: '11111111-1111-4111-8111-111111111111', removedBy: 'client-a', opSeq: 12, revision: 7 },
-    }
-
-    const replayRemoval = {
-      ...firstRemoval,
-      ack: { ...firstRemoval.ack, idempotent: true },
-    }
-
-    const handleRemoveResult = async (result: typeof firstRemoval): Promise<void> => {
-      if (result.event && 'tileId' in result.event && 'opSeq' in result && !result.ack.idempotent) {
-        io.to('session-1').emit('tile_removed', result.event)
-        await persistSnapshotIfNeeded('session-1', result.opSeq, result.session)
-      }
-    }
-
-    void handleRemoveResult(firstRemoval)
-    void handleRemoveResult(replayRemoval)
-
-    expect(firstRemoval.ack.opSeq).toBe(12)
-    expect(replayRemoval.ack.opSeq).toBe(12)
-    expect(io.to).toHaveBeenCalledTimes(1)
-    expect(emit).toHaveBeenCalledTimes(1)
-    expect(emit).toHaveBeenCalledWith('tile_removed', firstRemoval.event)
-    expect(persistSnapshotIfNeeded).toHaveBeenCalledTimes(1)
+  it('rejects missing browser origins in production but permits deliberate test and server clients', () => {
+    expect(isSocketHandshakeOriginAllowed(undefined, allowedOrigin, 'production')).toBe(false)
+    expect(isSocketHandshakeOriginAllowed(undefined, allowedOrigin, 'test')).toBe(true)
+    expect(isSocketHandshakeOriginAllowed(undefined, allowedOrigin, 'development')).toBe(true)
+    expect(isSocketHandshakeOriginAllowed('null', allowedOrigin, 'test')).toBe(false)
   })
 })
 
-describe('multi-client collaboration', () => {
-  it('only finalizes presence after the last socket for a shared client disconnects', () => {
-    const sessionId = nextSessionId()
-    const clientId = 'shared-client'
-
-    expect(registerClientSocket(sessionId, clientId, 'socket-a')).toBe(1)
-    expect(registerClientSocket(sessionId, clientId, 'socket-b')).toBe(2)
-
-    expect(unregisterClientSocket(sessionId, clientId, 'socket-a')).toBe(1)
-    expect(unregisterClientSocket(sessionId, clientId, 'socket-b')).toBe(0)
+describe('ownership HTTP contracts', () => {
+  it('requires UUID operation and resource identifiers', () => {
+    expect(ownershipRequest({
+      operationId: '10000000-0000-4000-8000-000000000001',
+      patchId: '20000000-0000-4000-8000-000000000001',
+    }, ['patchId'])).toBe(true)
+    expect(ownershipRequest({ operationId: 'not-an-id', patchId: 'also-not-an-id' }, ['patchId'])).toBe(false)
   })
 
-  it('safely handles unregister calls for unknown socket membership', () => {
-    expect(unregisterClientSocket('missing-session', 'missing-client', 'missing-socket')).toBe(0)
+  it('returns the same stable safe error for distinct internal denials', () => {
+    const response = () => {
+      const json = vi.fn()
+      const status = vi.fn(() => ({ json }))
+      return {
+        response: { status, getHeader: vi.fn(() => 'request-1') } as never,
+        json,
+      }
+    }
+    const quota = response()
+    const unavailable = response()
+
+    sendOwnershipResult(quota.response, { succeeded: false, idempotent: false })
+    sendOwnershipResult(unavailable.response, { claimed: false, idempotent: false })
+
+    expect(quota.json).toHaveBeenCalledWith({
+      code: 'ownership_command_denied',
+      message: 'The ownership command could not be completed.',
+      requestId: 'request-1',
+    })
+    expect(unavailable.json).toHaveBeenCalledWith(quota.json.mock.calls[0][0])
   })
+})
 
-  it('maps repository session summaries into lobby metadata with canonical canvas size', () => {
-    const payload = buildListSessionsResponse([
-      { id: '11111111-1111-4111-8111-111111111111', participantCount: 3 },
-      { id: '22222222-2222-4222-8222-222222222222', participantCount: 1 },
-    ])
+describe('canonical discovery HTTP contract', () => {
+  const response = () => {
+    const json = vi.fn()
+    const status = vi.fn(() => ({ json }))
+    const setHeader = vi.fn()
+    return {
+      response: { status, setHeader, getHeader: vi.fn(() => 'request-1') } as never,
+      json,
+      setHeader,
+      status,
+    }
+  }
 
-    expect(payload).toEqual({
-      sessions: [
-        {
-          id: '11111111-1111-4111-8111-111111111111',
-          displayName: 'Canvas 11111111',
-          participantCount: 3,
-          canvasSize: { width: 10.4, height: 6.8 },
-          canvasConfig: {
-            canvasSize: { width: 10.4, height: 6.8 },
-            boundsPolicy: {
-              mode: 'bounded',
-              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
-            },
-          },
-        },
-        {
-          id: '22222222-2222-4222-8222-222222222222',
-          displayName: 'Canvas 22222222',
-          participantCount: 1,
-          canvasSize: { width: 10.4, height: 6.8 },
-          canvasConfig: {
-            canvasSize: { width: 10.4, height: 6.8 },
-            boundsPolicy: {
-              mode: 'bounded',
-              bounds: { minX: -5.2, maxX: 5.2, minY: -3.4, maxY: 3.4 },
-            },
-          },
-        },
-      ],
+  it('maps missing, inactive, and invalid repository outcomes to one retryable 503', async () => {
+    const unavailable = response()
+    await sendCanonicalWorldDiscovery(unavailable.response, vi.fn().mockResolvedValue(null))
+
+    expect(unavailable.setHeader).toHaveBeenCalledWith('Retry-After', '30')
+    expect(unavailable.status).toHaveBeenCalledWith(503)
+    expect(unavailable.json).toHaveBeenCalledWith({
+      code: 'canonical_world_unavailable',
+      message: 'The canonical world is temporarily unavailable.',
+      requestId: 'request-1',
+      retryAfterSeconds: 30,
     })
   })
 
-  it('preserves participant counts from summary source records', () => {
-    const payload = buildListSessionsResponse([
-      { id: '33333333-3333-4333-8333-333333333333', participantCount: 0 },
-      { id: '44444444-4444-4444-8444-444444444444', participantCount: 7 },
-    ])
+  it('does not load the descriptor while discovery is disabled', async () => {
+    const unavailable = response()
+    const loader = vi.fn()
+    await sendCanonicalWorldDiscovery(unavailable.response, loader, false)
 
-    expect(payload.sessions.map((session) => session.participantCount)).toEqual([0, 7])
+    expect(unavailable.status).toHaveBeenCalledWith(503)
+    expect(loader).not.toHaveBeenCalled()
   })
 
-  it('two clients joining the same session receive identical snapshot tiles and revision', async () => {
-    const sessionId = nextSessionId()
-    const replayRecord = {
-      session: { id: sessionId, tiles: [], createdAt: 10, updatedAt: 20 },
-      clients: [],
-      lastOpSeq: 0,
-      revision: 0,
-      snapshotOpSeq: 0,
-      replayedOperations: [],
-    }
+  it.each([
+    { error: new AuthenticationError('authentication_required'), statusCode: 401, code: 'authentication_required' },
+    { error: new AuthenticationError('insufficient_scope'), statusCode: 403, code: 'insufficient_scope' },
+  ])('preserves authentication-first $statusCode without invoking discovery', async ({ error, statusCode, code }) => {
+    const loader = vi.fn()
+    const authResponse = response()
+    const middleware = createHttpAuth(vi.fn().mockRejectedValue(error), vi.fn())
+    const next = vi.fn(() => sendCanonicalWorldDiscovery(authResponse.response, loader))
 
-    const repositoryA = {
-      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
-      loadSessionReplayRecord: vi.fn().mockResolvedValue(replayRecord),
-      listActiveParticipants: vi.fn(),
-      markParticipantLeft: vi.fn(),
-    }
-    const repositoryB = {
-      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-b', joinedAt: 1_001 }),
-      loadSessionReplayRecord: vi.fn().mockResolvedValue(replayRecord),
-      listActiveParticipants: vi.fn(),
-      markParticipantLeft: vi.fn(),
-    }
+    await middleware({ header: vi.fn(() => 'Bearer token') } as never, authResponse.response, next)
 
-    const resultA = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repositoryA)
-    const resultB = await initializeParticipantPresence(sessionId, 'client-b', 1_001, repositoryB)
-
-    // Both clients receive snapshots from the same authoritative session record
-    expect(resultA.snapshot.session.id).toBe(sessionId)
-    expect(resultB.snapshot.session.id).toBe(sessionId)
-    expect(resultA.snapshot.session.tiles).toEqual(resultB.snapshot.session.tiles)
-    expect(resultA.snapshot.lastOpSeq).toBe(resultB.snapshot.lastOpSeq)
+    expect(authResponse.status).toHaveBeenCalledWith(statusCode)
+    expect(authResponse.json).toHaveBeenCalledWith(expect.objectContaining({ code, requestId: 'request-1' }))
+    expect(next).not.toHaveBeenCalled()
+    expect(loader).not.toHaveBeenCalled()
   })
 
-  it('client A placement produces a broadcastable event visible to client B', () => {
-    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+  it('preserves unexpected failures as safe internal errors', async () => {
+    const failed = response()
+    await sendCanonicalWorldDiscovery(failed.response, vi.fn().mockRejectedValue(new Error('database details')))
 
-    const result = applyPlaceTile(
-      state,
-      {
-        tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-        shape: 'square',
-        color: '#abc',
-        material: 'ceramic',
-        transform: { position: vec2(0, 0), rotation: 0 },
-      },
-      'client-a',
-    )
+    expect(failed.status).toHaveBeenCalledWith(500)
+    expect(failed.json).toHaveBeenCalledWith({
+      code: 'internal_error',
+      message: 'An internal error occurred.',
+      requestId: 'request-1',
+    })
+  })
+})
 
-    expect(result.ack.rejected).toBe(false)
-    expect(result.event).toBeDefined()
+describe('live canonical product boundaries', () => {
+  it('does not register session routes or advertise createSession from /me', async () => {
+    await seedCanonicalBoundary()
 
-    if (result.event) {
-      // The broadcast event that client B would receive via tile_placed
-      expect(result.event.opSeq).toBe(result.opSeq)
-      expect(result.event.placedBy).toBe('client-a')
-      expect(result.event.tile.id).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
-      expect(result.event.revision).toBe(result.ack.rejected ? -1 : result.ack.newRevision)
-    }
+    const retired = await authenticatedRequest('/sessions')
+    const me = await authenticatedRequest('/me')
+    const meBody = await me.json() as { commands: Record<string, boolean> }
+
+    expect(retired.status).toBe(404)
+    expect(me.status).toBe(200)
+    expect(meBody.commands).not.toHaveProperty('createSession')
   })
 
-  it('updates passive client revision from peer broadcast revision payload', () => {
-    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+  it('authenticates navigation and persists a claim through live HTTP routes', async () => {
+    await seedCanonicalBoundary()
 
-    const peerPlacement = applyPlaceTile(
-      state,
-      {
-        tileId: '99999999-9999-4999-8999-999999999999',
-        shape: 'square',
-        color: '#abc',
-        material: 'ceramic',
-        transform: { position: vec2(0, 0), rotation: 0 },
-      },
-      'client-a',
-    )
-
-    expect(peerPlacement.ack.rejected).toBe(false)
-    if (!peerPlacement.ack.rejected && peerPlacement.event) {
-      expect(peerPlacement.event.revision).toBe(peerPlacement.ack.newRevision)
-      const passiveClientRevision = peerPlacement.event.revision
-      expect(passiveClientRevision).toBe(1)
-    }
-  })
-
-  it('serves explicit snapshot request without reconnect side effects', async () => {
-    const sessionId = nextSessionId()
-    const repository = {
-      markParticipantJoined: vi.fn(),
-      markParticipantLeft: vi.fn(),
-      listActiveParticipants: vi.fn(),
-      loadSessionReplayRecord: vi.fn().mockResolvedValue({
-        session: { id: sessionId, tiles: [], createdAt: 10, updatedAt: 20 },
-        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
-        lastOpSeq: 2,
-        revision: 2,
-        snapshotOpSeq: 2,
-        replayedOperations: [],
+    const unauthenticated = await fetch(`${liveBaseUrl}/quilts/${QUILT_ID}/patches/${PATCH_A}/navigation`)
+    const denied = await authenticatedRequest(`/quilts/${QUILT_ID}/patches/${PATCH_A}/navigation`, 'denied')
+    const navigation = await authenticatedRequest(`/quilts/${QUILT_ID}/patches/${PATCH_A}/navigation`)
+    const claim = await authenticatedRequest('/ownership/claims', 'allowed', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        operationId: '60000000-0000-4000-8000-000000000001',
+        patchId: PATCH_B,
       }),
-    }
+    })
+    const [persisted] = await attemptDatabase.db.execute(sql`
+      select owner_principal_id, state from patches where id = ${PATCH_B}
+    `).then((result) => result.rows)
 
-    const snapshot = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repository)
-
-    expect(repository.loadSessionReplayRecord).toHaveBeenCalledTimes(1)
-    expect(snapshot.snapshot.lastOpSeq).toBe(2)
-    expect(snapshot.snapshot.revision).toBe(2)
+    expect(unauthenticated.status).toBe(401)
+    expect(denied.status).toBe(403)
+    expect(navigation.status).toBe(200)
+    await expect(navigation.json()).resolves.toMatchObject({ quiltId: QUILT_ID, patchId: PATCH_A, row: 0, column: 0 })
+    expect(claim.status).toBe(200)
+    expect(persisted).toMatchObject({ owner_principal_id: PRINCIPAL_A, state: 'active' })
   })
 
-  it('preserves placedBy through replay snapshot for per-author undo after reconnect', async () => {
-    const sessionId = nextSessionId()
-    const replayTile = {
-      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      shape: 'square' as const,
-      color: '#abc',
-      material: 'ceramic' as const,
-      transform: { position: vec2(0, 0), rotation: 0 },
-      createdAt: 10,
-      placedBy: 'client-a',
-    }
+  it('publishes presence and removes the durable lease through live socket disconnect cleanup', async () => {
+    await seedCanonicalBoundary()
+    const firstEntryAttemptId = await discoverEntryAttempt('allowed')
+    const secondEntryAttemptId = await discoverEntryAttempt('second')
+    const connect = (token: string, clientId: string, entryAttemptId: string) => createSocketClient(liveBaseUrl, {
+      transports: ['websocket'],
+      reconnection: false,
+      auth: {
+        token,
+        quiltId: QUILT_ID,
+        clientId,
+        schemaVersion: '2.0.0',
+        protocolVersion: 2,
+        canonicalGeneration: 2,
+        entryAttemptId,
+      },
+    })
+    const first = connect('allowed', 'client-a', firstEntryAttemptId)
+    let second: SocketClient | undefined
+    try {
+      await new Promise<void>((resolve) => first.once('quilt_protocol', () => resolve()))
+      const joined = new Promise<{ client: { clientId: string; joinedAt: number } }>((resolve) => {
+        first.once('client_joined', resolve)
+      })
+      second = connect('second', 'client-b', secondEntryAttemptId)
+      await new Promise<void>((resolve) => second!.once('quilt_protocol', () => resolve()))
+      await expect(joined).resolves.toEqual({
+        client: { clientId: PRINCIPAL_B, joinedAt: expect.any(Number) },
+      })
+      const left = new Promise<{ clientId: string }>((resolve) => first.once('client_left', resolve))
+      second.disconnect()
 
-    const repository = {
-      markParticipantJoined: vi.fn().mockResolvedValue({ clientId: 'client-a', joinedAt: 1_000 }),
-      markParticipantLeft: vi.fn(),
-      listActiveParticipants: vi.fn(),
-      loadSessionReplayRecord: vi.fn().mockResolvedValue({
-        session: { id: sessionId, tiles: [replayTile], createdAt: 10, updatedAt: 20 },
-        clients: [{ clientId: 'client-a', joinedAt: 1_000 }],
-        lastOpSeq: 1,
-        revision: 1,
-        snapshotOpSeq: 1,
-        replayedOperations: [],
+      await expect(left).resolves.toEqual({ clientId: PRINCIPAL_B })
+      await vi.waitFor(async () => {
+        const leases = await attemptDatabase.db.execute(sql`
+          select count(*)::integer as count from quilt_presence_leases where principal_id = ${PRINCIPAL_B}
+        `)
+        expect(leases.rows[0]?.count).toBe(0)
+      })
+    } finally {
+      first.disconnect()
+      second?.disconnect()
+    }
+  })
+
+  it('accepts one terminal for one observed disconnect and rejects duplicate fallback delivery', async () => {
+    await seedCanonicalBoundary()
+    const entryAttemptId = await discoverEntryAttempt('allowed')
+    const client = createSocketClient(liveBaseUrl, {
+      transports: ['websocket'],
+      reconnection: false,
+      auth: {
+        token: 'allowed',
+        quiltId: QUILT_ID,
+        clientId: 'client-cycle',
+        schemaVersion: '2.0.0',
+        protocolVersion: 2,
+        canonicalGeneration: 2,
+        entryAttemptId,
+      },
+    })
+    const lineage = await new Promise<string>((resolve) => {
+      client.once('canonical_lineage', (payload) => resolve(payload.lineageAttemptId))
+    })
+    await new Promise<void>((resolve) => client.once('quilt_protocol', () => resolve()))
+    client.disconnect()
+    await vi.waitFor(async () => {
+      const observations = await attemptDatabase.db.execute(sql`
+        select count(*)::integer as count
+        from canonical_attempts
+        where parent_attempt_id = ${lineage} and kind = 'reconnect' and consumed = false
+      `)
+      expect(observations.rows[0]?.count).toBe(1)
+    })
+
+    const deliver = () => authenticatedRequest('/quilts/canonical/telemetry', 'allowed', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-canonical-attempt-id': entryAttemptId,
+        'x-canonical-lineage-id': lineage,
+      },
+      body: JSON.stringify({
+        name: 'canonical_reconnect',
+        outcome: 'exhausted',
+        durationMs: 10,
+        attempts: 1,
       }),
+    })
+
+    expect((await deliver()).status).toBe(202)
+    expect((await deliver()).status).toBe(400)
+  })
+})
+
+describe('live Socket.IO compatibility boundary', () => {
+  const principalId = '11111111-1111-4111-8111-111111111111'
+  const listen = async (onConnection?: (socket: Parameters<typeof registerCanonicalTelemetryHandler>[0]) => void) => {
+    const server = createServer()
+    const socketServer = new SocketServer(server, { transports: ['websocket'] })
+    socketServer.use(createSocketAuth(
+      vi.fn().mockResolvedValue({ expiresAt: new Date(Date.now() + 60_000) }) as never,
+      vi.fn().mockResolvedValue({ principalId, status: 'active', tokenExpiresAt: new Date(Date.now() + 60_000) }) as never,
+    ))
+    socketServer.use(enforceCanonicalSocketCompatibility)
+    if (onConnection) socketServer.on('connection', onConnection as never)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address() as AddressInfo
+    return { server, socketServer, url: `http://127.0.0.1:${address.port}` }
+  }
+
+  const close = async (client: SocketClient, socketServer: SocketServer): Promise<void> => {
+    client.close()
+    await new Promise<void>((resolve) => socketServer.close(() => resolve()))
+  }
+
+  it('returns the exact upgrade payload before accepting an unsupported socket', async () => {
+    const observed = vi.fn()
+    configureQuiltTelemetry(observed)
+    const { socketServer, url } = await listen()
+    const client = createSocketClient(url, { transports: ['websocket'], auth: { token: 'token' }, reconnection: false })
+    try {
+      const error = await new Promise<Error & { data?: Record<string, unknown> }>((resolve) => client.once('connect_error', resolve))
+
+      expect(error.data).toEqual({
+        code: 'client_upgrade_required',
+        message: 'This client version is no longer supported.',
+        minimumSchemaVersion: '2.0.0',
+        minimumProtocolVersion: 2,
+      })
+      expect(observed).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'canonical_old_client_rejected',
+        quiltId: null,
+        canonicalGeneration: null,
+      }))
+    } finally {
+      configureQuiltTelemetry()
+      await close(client, socketServer)
     }
-
-    const result = await initializeParticipantPresence(sessionId, 'client-a', 1_000, repository)
-
-    expect(result.snapshot.session.tiles[0].placedBy).toBe('client-a')
   })
 
-  it('concurrent placements on non-overlapping positions both succeed and broadcast', () => {
-    const state = createAuthoritativeSessionState(nextSessionId(), 1)
-
-    const resultA = applyPlaceTile(
-      state,
-      {
-        tileId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-        shape: 'square',
-        color: '#111',
-        material: 'ceramic',
-        transform: { position: vec2(0, 0), rotation: 0 },
+  it('binds telemetry to the authenticated handshake attempt and rejects client attempt overrides', async () => {
+    const observed = vi.fn()
+    configureQuiltTelemetry(observed)
+    const entryAttemptId = (await issueCanonicalAttempt(principalId, 'entry'))!
+    const { socketServer, url } = await listen(registerCanonicalTelemetryHandler)
+    const client = createSocketClient(url, {
+      transports: ['websocket'],
+      reconnection: false,
+      auth: {
+        token: 'token',
+        quiltId: '10000000-0000-4000-8000-000000000001',
+        clientId: 'client-1',
+        schemaVersion: '2.0.0',
+        protocolVersion: 2,
+        canonicalGeneration: 2,
+        entryAttemptId,
       },
-      'client-a',
-    )
+    })
+    try {
+      await new Promise<void>((resolve) => client.once('connect', resolve))
+      client.emit('canonical_telemetry', {
+        name: 'canonical_entry',
+        attemptId: '30000000-0000-4000-8000-000000000001',
+        outcome: 'ready',
+        durationMs: 1,
+        selectedProtocolVersion: 2,
+      } as never)
+      client.emit('canonical_telemetry', {
+        name: 'canonical_entry',
+        outcome: 'ready',
+        durationMs: 1,
+        selectedProtocolVersion: 2,
+      })
+      const entryEvents = () => observed.mock.calls.filter(([event]) => event.name === 'canonical_entry')
+      await vi.waitFor(() => expect(entryEvents()).toHaveLength(1))
+      expect(observed).toHaveBeenCalledWith(expect.objectContaining({
+        name: 'canonical_entry',
+        attemptId: entryAttemptId,
+      }))
+      client.emit('canonical_telemetry', {
+        name: 'canonical_entry',
+        outcome: 'ready',
+        durationMs: 2,
+        selectedProtocolVersion: 2,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(entryEvents()).toHaveLength(1)
+    } finally {
+      configureQuiltTelemetry()
+      await close(client, socketServer)
+    }
+  })
+})
 
-    const resultB = applyPlaceTile(
-      state,
-      {
-        tileId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        shape: 'square',
-        color: '#222',
-        material: 'glass',
-        transform: { position: vec2(1.01, 0), rotation: 0 },
-      },
-      'client-b',
-    )
+describe('protocol-v2 authorization boundary', () => {
+  it('rejects replayed, foreign, and fabricated server-issued attempts', async () => {
+    const principalId = '11111111-1111-4111-8111-111111111111'
+    const attemptId = (await issueCanonicalAttempt(principalId, 'entry'))!
 
-    // Both placements succeed (non-overlapping positions)
-    expect(resultA.ack.rejected).toBe(false)
-    expect(resultB.ack.rejected).toBe(false)
-    expect(state.session.tiles).toHaveLength(2)
+    await expect(consumeCanonicalAttempt(
+      attemptId,
+      '22222222-2222-4222-8222-222222222222',
+      'entry',
+    )).resolves.toBe(false)
+    await expect(consumeCanonicalAttempt(
+      '30000000-0000-4000-8000-000000000001',
+      principalId,
+      'entry',
+    )).resolves.toBe(false)
+    await expect(consumeCanonicalAttempt(attemptId, principalId, 'entry')).resolves.toBe(true)
+    await expect(consumeCanonicalAttempt(attemptId, principalId, 'entry')).resolves.toBe(false)
+  })
 
-    // Each produces a broadcastable event
-    expect(resultA.event).toBeDefined()
-    expect(resultB.event).toBeDefined()
-
-    if (resultA.event && resultB.event) {
-      // opSeq is monotonically increasing
-      expect(resultA.event.opSeq).toBeLessThan(resultB.event.opSeq)
+  it('owns canonical telemetry envelope fields and rejects unknown client fields', () => {
+    const observer = vi.fn()
+    configureQuiltTelemetry(observer)
+    try {
+      const payload = {
+        name: 'canonical_entry',
+        outcome: 'ready',
+        durationMs: 12,
+        selectedProtocolVersion: 2,
+      }
+      expect(recordCanonicalClientTelemetry(payload, {
+        attemptId: '10000000-0000-4000-8000-000000000001',
+        quiltId: '20000000-0000-4000-8000-000000000001',
+        canonicalGeneration: 3,
+        cohort: 'global',
+      })).toBe(true)
+      expect(observer).toHaveBeenCalledWith(expect.objectContaining({
+        ...payload,
+        attemptId: '10000000-0000-4000-8000-000000000001',
+        schemaVersion: 1,
+        eventId: expect.any(String),
+        occurredAt: expect.any(String),
+        quiltId: '20000000-0000-4000-8000-000000000001',
+        canonicalGeneration: 3,
+        cohort: 'global',
+      }))
+      expect(recordCanonicalClientTelemetry({ ...payload, principalId: 'forbidden' }, {
+        attemptId: '10000000-0000-4000-8000-000000000001',
+        quiltId: '20000000-0000-4000-8000-000000000001',
+        canonicalGeneration: 3,
+        cohort: 'global',
+      })).toBe(false)
+      expect(recordCanonicalClientTelemetry({
+        ...payload,
+        attemptId: '30000000-0000-4000-8000-000000000001',
+      }, {
+        attemptId: '10000000-0000-4000-8000-000000000001',
+        quiltId: '20000000-0000-4000-8000-000000000001',
+        canonicalGeneration: 3,
+        cohort: 'global',
+      })).toBe(false)
+    } finally {
+      configureQuiltTelemetry()
     }
   })
 
-  it('stale expectedRevision is correctly identified against the advanced session revision', () => {
-    // Simulates the server-side condition that triggers STALE_REVISION + resync_required:
-    //   Client A places a tile, advancing the authoritative revision from 0 to 1.
-    //   Client B holds an expectedRevision of 0 (has not yet received A's broadcast).
-    //   The socket handler checks: payload.expectedRevision (0) < record.revision (1)
-    //   → STALE_REVISION ack is returned, and resync_required is emitted to client B.
-    const state = createAuthoritativeSessionState(nextSessionId(), 1)
+  it.each([
+    ['missing lease', vi.fn().mockResolvedValue(false)],
+    ['rejected renewal', vi.fn().mockRejectedValue(new Error('database unavailable'))],
+  ])('disconnects deterministically after %s', async (_label, renew) => {
+    const disconnect = vi.fn()
 
-    const resultA = applyPlaceTile(
-      state,
-      {
-        tileId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-        shape: 'square',
-        color: '#abc',
-        material: 'ceramic',
-        transform: { position: vec2(0, 0), rotation: 0 },
-      },
-      'client-a',
-    )
+    await expect(renewPresenceLeaseOrDisconnect(renew, disconnect)).resolves.toBe(false)
 
-    expect(resultA.ack.rejected).toBe(false)
-    // state.lastOpSeq now represents the authoritative revision (1)
-    expect(state.lastOpSeq).toBe(1)
-
-    // Client B's stale expectedRevision (0) is behind the current revision (1).
-    // The condition that the place_tile socket handler evaluates:
-    const clientBExpectedRevision = 0
-    const isStale = clientBExpectedRevision < state.lastOpSeq
-    expect(isStale).toBe(true)
-
-    // The resync_required payload the handler would emit to client B:
-    const expectedResyncPayload = {
-      currentOpSeq: state.lastOpSeq,
-      reason: 'REVISION_MISMATCH' as const,
-    }
-    expect(expectedResyncPayload).toEqual({ currentOpSeq: 1, reason: 'REVISION_MISMATCH' })
+    expect(disconnect).toHaveBeenCalledOnce()
   })
 
-  it('selection_update fanout targets room peers without local echo', () => {
-    const emitToPeers = vi.fn()
-    const socket = {
-      to: vi.fn().mockReturnValue({ emit: emitToPeers }),
-    }
+  const authenticatedPolicy: PersistedVisibilityPolicy = {
+    existence: 'authenticated',
+    fineData: 'authenticated',
+    aggregateData: 'authenticated',
+    presence: 'authenticated',
+    search: 'authenticated',
+    durableEvents: 'authenticated',
+    claimEnabled: false,
+    policyVersion: 1,
+  }
 
-    const sessionId = nextSessionId()
-    const clientId = 'client-a'
-    const payload = {
-      canvasId: sessionId,
-      clientId,
-      tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      updatedAt: Date.now(),
-    }
+  it('derives only authenticated principal capabilities for room access', () => {
+    const patchAccess = buildPatchRoomAccess({
+      id: 'patch-1',
+      state: 'active',
+      isMember: false,
+      policy: authenticatedPolicy,
+    })
 
-    socket.to(sessionId).emit('selection_update', payload)
-
-    expect(socket.to).toHaveBeenCalledTimes(1)
-    expect(socket.to).toHaveBeenCalledWith(sessionId)
-    expect(emitToPeers).toHaveBeenCalledTimes(1)
-    expect(emitToPeers).toHaveBeenCalledWith('selection_update', payload)
+    expect(patchAccess).toMatchObject({
+      principalFine: true,
+      principalAggregate: true,
+      principalPresence: true,
+      principalEvents: true,
+    })
   })
 
-  it('selection_update guard rejects payload when canvas membership mismatches', () => {
-    const sessionId = nextSessionId()
-    const clientId = 'client-a'
-    const payload = {
-      canvasId: `${sessionId}-different`,
-      clientId,
-      tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      updatedAt: Date.now(),
-    }
-
-    expect(isSelectionUpdatePayload(payload)).toBe(true)
-    const membershipMatches = payload.canvasId === sessionId && payload.clientId === clientId
-    expect(membershipMatches).toBe(false)
+  it('grants member surfaces according to lifecycle without bypassing deletion', () => {
+    expect(buildPatchRoomAccess({
+      id: 'patch-1',
+      state: 'active',
+      isMember: true,
+      policy: authenticatedPolicy,
+    })).toMatchObject({
+      principalFine: true,
+      principalAggregate: true,
+      principalPresence: true,
+      principalEvents: true,
+    })
+    expect(buildPatchRoomAccess({
+      id: 'patch-1',
+      state: 'deleted',
+      isMember: true,
+      policy: authenticatedPolicy,
+    })).toMatchObject({
+      publishesExistence: false,
+      principalFine: false,
+      principalAggregate: false,
+      principalPresence: false,
+      principalEvents: false,
+    })
   })
 
-  it('selection_update guard rejects payload when client identity mismatches', () => {
-    const sessionId = nextSessionId()
-    const clientId = 'client-a'
-    const payload = {
-      canvasId: sessionId,
-      clientId: 'client-b',
-      tileId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-      updatedAt: Date.now(),
-    }
-
-    expect(isSelectionUpdatePayload(payload)).toBe(true)
-    const membershipMatches = payload.canvasId === sessionId && payload.clientId === clientId
-    expect(membershipMatches).toBe(false)
+  it('validates each requested room before database or adapter work', () => {
+    expect(isQuiltRoomRequest({ requestId: 'fine:0:0', kind: 'fine', row: 0, column: 0 })).toBe(true)
+    expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'owner', row: 0, column: 0 })).toBe(false)
+    expect(isQuiltRoomRequest({ requestId: 'bad', kind: 'fine', row: '0', column: 0 })).toBe(false)
   })
 
-  it('pointer_update fanout payload includes sender identity and position', () => {
-    const emitToPeers = vi.fn()
-    const socket = {
-      to: vi.fn().mockReturnValue({ emit: emitToPeers }),
-    }
-
-    const sessionId = nextSessionId()
-    const payload = {
-      clientId: 'client-a',
-      position: { x: 3, y: -2 },
-    }
-
-    socket.to(sessionId).emit('pointer_update', payload)
-
-    expect(socket.to).toHaveBeenCalledWith(sessionId)
-    expect(emitToPeers).toHaveBeenCalledWith('pointer_update', payload)
-  })
-
-  it('client_joined and client_left payloads preserve collaborator identity', () => {
-    const emitRoom = vi.fn()
-    const io = {
-      to: vi.fn().mockReturnValue({ emit: emitRoom }),
-    }
-
-    const sessionId = nextSessionId()
-    const joinedPayload = {
-      client: {
-        clientId: 'client-z',
-        joinedAt: Date.now(),
-      },
-    }
-    const leftPayload = { clientId: 'client-z' }
-
-    io.to(sessionId).emit('client_joined', joinedPayload)
-    io.to(sessionId).emit('client_left', leftPayload)
-
-    expect(emitRoom).toHaveBeenNthCalledWith(1, 'client_joined', joinedPayload)
-    expect(emitRoom).toHaveBeenNthCalledWith(2, 'client_left', leftPayload)
-  })
-
-  it('disconnect leave-gating keeps presence when at least one socket remains', () => {
-    const sessionId = nextSessionId()
-    const clientId = 'shared-client'
-
-    expect(registerClientSocket(sessionId, clientId, 'socket-1')).toBe(1)
-    expect(registerClientSocket(sessionId, clientId, 'socket-2')).toBe(2)
-
-    const remainingAfterFirstDisconnect = unregisterClientSocket(sessionId, clientId, 'socket-1')
-    const shouldEmitClientLeftAfterFirstDisconnect = remainingAfterFirstDisconnect === 0
-    expect(shouldEmitClientLeftAfterFirstDisconnect).toBe(false)
-
-    const remainingAfterLastDisconnect = unregisterClientSocket(sessionId, clientId, 'socket-2')
-    const shouldEmitClientLeftAfterLastDisconnect = remainingAfterLastDisconnect === 0
-    expect(shouldEmitClientLeftAfterLastDisconnect).toBe(true)
-  })
-
-  it('fanouts chunk tile events to scoped chunk room names', () => {
-    const io = {
-      to: vi.fn().mockReturnValue({ emit: vi.fn() }),
-    }
-
-    const sessionId = nextSessionId()
-    const chunkId = '0:0'
-    const chunkRoom = `chunk:${sessionId}:${chunkId}`
-    const eventPayload = {
-      canvasId: sessionId,
-      chunkId,
+  it('validates dedicated protocol-v2 mutations with complete patch revisions', () => {
+    const request = {
+      quiltId: '20000000-0000-4000-8000-000000000001',
+      operationId: '10000000-0000-4000-8000-000000000001',
+      expectedPatchRevisions: { 'f0000000-0000-4000-8000-000000000001': 4 },
       tile: {
-        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-        shape: 'square' as const,
+        tileId: '40000000-0000-4000-8000-000000000001',
+        shape: 'square',
         color: '#abc',
-        material: 'ceramic' as const,
-        transform: { position: vec2(0, 0), rotation: 0 },
-        createdAt: Date.now(),
+        material: 'ceramic',
+        transform: { position: { x: 1, y: 2 }, rotation: 0 },
       },
-      placedBy: 'client-a',
-      opSeq: 3,
-      revision: 3,
     }
 
-    io.to(chunkRoom).emit('chunk_tile_placed', eventPayload)
-
-    expect(io.to).toHaveBeenCalledWith(chunkRoom)
-    expect(io.to(chunkRoom).emit).toHaveBeenCalledWith('chunk_tile_placed', eventPayload)
+    expect(isQuiltPlaceTileRequest(request)).toBe(true)
+    expect(isQuiltPlaceTileRequest({ ...request, expectedPatchRevisions: {} })).toBe(false)
+    expect(isQuiltPlaceTileRequest({ ...request, principalId: 'client-controlled' })).toBe(false)
+    expect(isQuiltRemoveTileRequest({
+      quiltId: request.quiltId,
+      operationId: request.operationId,
+      expectedPatchRevisions: request.expectedPatchRevisions,
+      tileId: request.tile.tileId,
+    })).toBe(true)
+    expect(isQuiltRemoveTileRequest({
+      quiltId: request.quiltId,
+      operationId: request.operationId,
+      expectedPatchRevisions: { unknown: 0 },
+      tileId: request.tile.tileId,
+    })).toBe(false)
   })
 
-  it('models chunk snapshot payload with monotonic ordering metadata', () => {
-    const sessionId = nextSessionId()
-    const chunkSnapshot = {
-      canvasId: sessionId,
-      chunks: [
-        {
-          chunkId: '0:0',
-          tiles: [
-            {
-              id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-              shape: 'square' as const,
-              color: '#abc',
-              material: 'ceramic' as const,
-              transform: { position: vec2(0, 0), rotation: 0 },
-              createdAt: 10,
-            },
-          ],
-          opSeq: 4,
-          revision: 4,
-        },
-      ],
-      serverOpSeq: 4,
-      serverRevision: 4,
-    }
-
-    expect(chunkSnapshot.chunks[0].opSeq).toBe(chunkSnapshot.serverOpSeq)
-    expect(chunkSnapshot.chunks[0].revision).toBe(chunkSnapshot.serverRevision)
-  })
-
-  it('flags chunk resync_required when client cursor outruns server ordering', () => {
-    const serverCursor = { opSeq: 5, revision: 5 }
-    const clientCursor = { opSeq: 6, revision: 5 }
-    const requiresResync = clientCursor.opSeq > serverCursor.opSeq || clientCursor.revision > serverCursor.revision
-
-    expect(requiresResync).toBe(true)
-    expect({
-      canvasId: 'session-1',
-      chunkId: '0:0',
-      payloadMode: 'fine' as const,
-      coordination: {
-        replicaId: 'replica-a',
-        membershipScope: 'process-local' as const,
-        membershipAssumption: 'best-effort' as const,
-        emittedAt: 1,
+  it('fails the monolithic legacy protocol closed unless every exposed patch surface is visible', () => {
+    const baseContext = {
+      topology: {
+        quiltId: 'quilt-1',
+        protocolVersion: 2,
+        topology: 'toroidal' as const,
+        patchRows: 1,
+        patchColumns: 1,
+        patchWidth: 10,
+        patchHeight: 10,
       },
-      currentOpSeq: serverCursor.opSeq,
-      currentRevision: serverCursor.revision,
-      reason: 'REVISION_MISMATCH' as const,
-    }).toEqual({
-      canvasId: 'session-1',
-      chunkId: '0:0',
-      payloadMode: 'fine',
-      coordination: {
-        replicaId: 'replica-a',
-        membershipScope: 'process-local',
-        membershipAssumption: 'best-effort',
-        emittedAt: 1,
-      },
-      currentOpSeq: 5,
-      currentRevision: 5,
-      reason: 'REVISION_MISMATCH',
-    })
+      principalId: 'principal-1',
+      patches: [{
+        id: 'patch-1',
+        row: 0,
+        column: 0,
+        state: 'active' as const,
+        revision: 0,
+        isMember: true,
+        isOwner: true,
+        policy: authenticatedPolicy,
+      }],
+    }
+
+    expect(resolveLegacySocketAccess(baseContext)).toEqual({ allowed: true, mutationAllowed: true })
+    expect(resolveLegacySocketAccess({
+      ...baseContext,
+      patches: [{ ...baseContext.patches[0], policy: { ...authenticatedPolicy, presence: 'hidden' }, isMember: false }],
+    })).toEqual({ allowed: false, mutationAllowed: true })
+    expect(resolveLegacySocketAccess({
+      ...baseContext,
+      patches: [{ ...baseContext.patches[0], isOwner: false }],
+    })).toEqual({ allowed: true, mutationAllowed: false })
   })
 
-  it('supports aggregate chunk snapshot payload mode contract for far zoom tiers', () => {
-    const sessionId = nextSessionId()
-    const payloadMode = 'aggregate' as const
-    const coordination = {
-      replicaId: 'replica-a',
-      membershipScope: 'adapter-shared' as const,
-      membershipAssumption: 'authoritative' as const,
-      emittedAt: Date.now(),
+  it('accepts finite normal-operation client runtime measurements', () => {
+    const payload = {
+      sampleId: '10000000-0000-4000-8000-000000000001',
+      entryAttemptId: '20000000-0000-4000-8000-000000000001',
+      canonicalGeneration: 2,
+      quiltId: '30000000-0000-4000-8000-000000000001',
+      retainedPatchCount: 2,
+      retainedTileCount: 12,
+      sceneObjectCount: 24,
+      drawCalls: 5,
+      frameTimeMs: 16.7,
     }
+    expect(isQuiltClientRuntimeMetrics(payload)).toBe(true)
+    expect(isQuiltClientRuntimeMetrics({
+      ...payload,
+      retainedPatchCount: -1,
+    })).toBe(false)
 
-    const chunkSnapshot = {
-      canvasId: sessionId,
-      payloadMode,
-      coordination,
-      chunks: [
-        {
-          chunkId: '0:0',
-          tiles: [],
-          aggregate: {
-            tileCount: 3,
-            byShape: { square: 2, triangle: 1 },
-            byMaterial: { ceramic: 2, glass: 1 },
-          },
-          opSeq: 5,
-          revision: 5,
-        },
-      ],
-      serverOpSeq: 5,
-      serverRevision: 5,
+    const observer = vi.fn()
+    configureQuiltTelemetry(observer)
+    try {
+      expect(recordQuiltClientRuntimeMetrics(payload, {
+        canaryTelemetryEnabled: true,
+        quiltId: payload.quiltId,
+        entryAttemptId: payload.entryAttemptId,
+        canonicalGeneration: 2,
+        cohort: 'global',
+      })).toBe(true)
+      expect(observer).toHaveBeenCalledWith(expect.objectContaining({
+        schemaVersion: 1,
+        eventId: payload.sampleId,
+        attemptId: payload.entryAttemptId,
+        name: 'client_runtime',
+        quiltId: payload.quiltId,
+        canonicalGeneration: 2,
+        cohort: 'global',
+        outcome: 'sampled',
+        retainedPatchCount: 2,
+        retainedTileCount: 12,
+        sceneObjectCount: 24,
+        drawCalls: 5,
+        frameTimeMs: 16.7,
+      }))
+      expect(recordQuiltClientRuntimeMetrics(payload, {
+        canaryTelemetryEnabled: true,
+        quiltId: payload.quiltId,
+        entryAttemptId: payload.entryAttemptId,
+        canonicalGeneration: 3,
+        cohort: 'global',
+      })).toBe(false)
+    } finally {
+      configureQuiltTelemetry()
     }
+  })
+})
 
-    expect(chunkSnapshot.payloadMode).toBe('aggregate')
-    expect(chunkSnapshot.chunks[0].tiles).toEqual([])
-    expect(chunkSnapshot.chunks[0].aggregate?.tileCount).toBe(3)
-    expect(chunkSnapshot.chunks[0].aggregate?.byShape.square).toBe(2)
-    expect(chunkSnapshot.coordination.membershipScope).toBe('adapter-shared')
+describe('protocol-v2 scoped recovery delivery', () => {
+  const operation = (overrides: Partial<PatchDeliveryOperation> = {}): PatchDeliveryOperation => ({
+    eventId: crypto.randomUUID(),
+    opSeq: 1,
+    opType: 'tile_placed',
+    payload: {
+      tileId: crypto.randomUUID(),
+      shape: 'square',
+      color: '#abc',
+      material: 'ceramic',
+      transform: { position: vec2(0, 0), rotation: 0 },
+    },
+    createdAt: 1,
+    chunkIds: ['0:0'],
+    ...overrides,
   })
 
-  it('models delayed leave in process-local mode as best-effort until adapter-shared state is enabled', () => {
-    const firstReplicaView = {
-      replicaId: 'replica-a',
-      membershipScope: 'process-local' as const,
-      membershipAssumption: 'best-effort' as const,
-      activeSocketsForClient: 0,
-    }
-    const secondReplicaView = {
-      replicaId: 'replica-b',
-      membershipScope: 'process-local' as const,
-      membershipAssumption: 'best-effort' as const,
-      activeSocketsForClient: 1,
-    }
-
-    const shouldEmitClientLeftFromReplicaA = firstReplicaView.activeSocketsForClient === 0
-    const globallySafeToTreatClientAsAbsent =
-      firstReplicaView.membershipScope === 'adapter-shared'
-      && secondReplicaView.activeSocketsForClient === 0
-
-    expect(shouldEmitClientLeftFromReplicaA).toBe(true)
-    expect(globallySafeToTreatClientAsAbsent).toBe(false)
-  })
-
-  it('represents duplicate cross-replica chunk joins as idempotent room membership state', () => {
-    const joinEvents = [
-      { replicaId: 'replica-a', socketId: 'socket-1', chunkId: '2:3' },
-      { replicaId: 'replica-b', socketId: 'socket-1', chunkId: '2:3' },
+  it('replays all applicable operations for a deliberately stale scoped cursor in order', () => {
+    const staleCursorScope = ['0:0'] as const
+    const retained = [
+      operation({ opSeq: 3, chunkIds: ['0:0'] }),
+      operation({ opSeq: 4, chunkIds: ['1:0'] }),
+      operation({ opSeq: 5, chunkIds: ['0:0', '1:0'] }),
     ]
 
-    const membershipKeys = new Set(joinEvents.map((event) => `${event.socketId}:${event.chunkId}`))
-
-    expect(joinEvents).toHaveLength(2)
-    expect(membershipKeys.size).toBe(1)
+    expect(haveEqualChunkScope(staleCursorScope, ['0:0'])).toBe(true)
+    expect(selectScopedReplayOperations(retained, ['0:0'])?.map((entry) => entry.opSeq)).toEqual([3, 5])
   })
 
-  it('chunk snapshot parity includes only tiles from requested chunks', () => {
-    const chunkWorldSize = 8
-    const worldToChunkId = (x: number, y: number): string =>
-      `${Math.floor(x / chunkWorldSize)}:${Math.floor(y / chunkWorldSize)}`
+  it('requires scoped snapshot fallback when a retained operation has no provable chunk scope', () => {
+    const retained = [
+      operation({ opSeq: 3 }),
+      operation({ opSeq: 4, opType: 'tile_removed', payload: { tileId: crypto.randomUUID() }, chunkIds: [] }),
+    ]
 
-    const requestedChunks = ['0:0', '1:0']
-    const allTiles = [
+    expect(selectScopedReplayOperations(retained, ['0:0'])).toBeNull()
+    expect(haveEqualChunkScope(undefined, ['0:0'])).toBe(false)
+  })
+
+  it('builds useful aggregate content from only the scoped tiles', () => {
+    const aggregate = buildChunkAggregate([
       {
-        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-        shape: 'square' as const,
+        id: crypto.randomUUID(),
+        shape: 'square',
         color: '#abc',
-        material: 'ceramic' as const,
+        material: 'ceramic',
         transform: { position: vec2(0, 0), rotation: 0 },
         createdAt: 1,
       },
       {
-        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-        shape: 'square' as const,
+        id: crypto.randomUUID(),
+        shape: 'triangle',
         color: '#def',
-        material: 'glass' as const,
-        transform: { position: vec2(8.2, 0), rotation: 0 },
+        material: 'glass',
+        transform: { position: vec2(1, 0), rotation: 0 },
         createdAt: 2,
       },
-      {
-        id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
-        shape: 'square' as const,
-        color: '#123',
-        material: 'stone' as const,
-        transform: { position: vec2(-8.2, 0), rotation: 0 },
-        createdAt: 3,
-      },
-    ]
+    ])
 
-    const chunkedTiles = allTiles.filter((tile) => requestedChunks.includes(worldToChunkId(
-      tile.transform.position.x,
-      tile.transform.position.y,
-    )))
-
-    const legacyUnionTiles = allTiles.filter((tile) => requestedChunks.includes(worldToChunkId(
-      tile.transform.position.x,
-      tile.transform.position.y,
-    )))
-
-    const toIdentity = (tile: { id: string; transform: { position: { x: number; y: number } } }): string =>
-      `${tile.id}:${worldToChunkId(tile.transform.position.x, tile.transform.position.y)}`
-
-    expect(chunkedTiles.map(toIdentity).sort()).toEqual(legacyUnionTiles.map(toIdentity).sort())
-  })
-
-  it('chunk boundary parity test detects mismatched chunk assignment at x=8 seam', () => {
-    const chunkWorldSize = 8
-    const worldToChunkId = (x: number, y: number): string =>
-      `${Math.floor(x / chunkWorldSize)}:${Math.floor(y / chunkWorldSize)}`
-
-    const legacyTile = {
-      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      transform: { position: vec2(7.99, 0) },
-    }
-    const chunkTile = {
-      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-      transform: { position: vec2(8.01, 0) },
-    }
-
-    const legacyIdentity = `${legacyTile.id}:${worldToChunkId(legacyTile.transform.position.x, legacyTile.transform.position.y)}`
-    const chunkIdentity = `${chunkTile.id}:${worldToChunkId(chunkTile.transform.position.x, chunkTile.transform.position.y)}`
-
-    expect(legacyIdentity).not.toBe(chunkIdentity)
-    expect(legacyIdentity).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd:0:0')
-    expect(chunkIdentity).toBe('dddddddd-dddd-4ddd-8ddd-dddddddddddd:1:0')
+    expect(aggregate).toEqual({
+      tileCount: 2,
+      byShape: { square: 1, triangle: 1 },
+      byMaterial: { ceramic: 1, glass: 1 },
+    })
   })
 })

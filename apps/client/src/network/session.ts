@@ -1,13 +1,10 @@
-import { resolveServerUrl } from './serverUrl'
-import type { CanvasSizePreset } from '../../../server/src/contracts'
+import type {
+  CanonicalPatchNavigation,
+  CanonicalWorldEntryDescriptor,
+  OwnershipCommandResponse,
+} from '../../../server/src/contracts'
 
-const SERVER_URL = resolveServerUrl()
-const SESSION_STORAGE_KEY = 'zzyix_session_id'
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
-
-export type CreateSessionOptions = {
-  canvasPreset: CanvasSizePreset
-}
 
 export type ChunkId = `${number}:${number}`
 
@@ -21,91 +18,72 @@ export const parseChunkId = (chunkId: ChunkId): { x: number; y: number } => {
   }
 }
 
-export type SessionSummary = {
-  id: string
-  displayName: string
-  connectedUserCount: number
-  canvasSize: {
-    width: number
-    height: number
+export const claimPatch = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+  patchId: string,
+): Promise<void> => {
+  const response = await authenticatedFetch(`${apiOrigin}/ownership/claims`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ operationId: crypto.randomUUID(), patchId }),
+  })
+  const result = await response.json() as OwnershipCommandResponse
+  if (!response.ok || result.status !== 'succeeded') {
+    throw new Error('Failed to claim the new canvas patch')
   }
 }
 
-type ListSessionsResponse = {
-  sessions: Array<{
-    id: string
-    displayName?: string
-    connectedUserCount?: number
-    participantCount?: number
-    canvasSize?: {
-      width?: number
-      height?: number
-    }
-  }>
+export const discoverCanonicalWorld = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+): Promise<CanonicalWorldEntryDescriptor> => {
+  const response = await authenticatedFetch(`${apiOrigin}/quilts/canonical`, { method: 'GET' })
+  if (!response.ok) throw new Error(`Canonical world is unavailable (${response.status})`)
+
+  const descriptor = await response.json() as Partial<CanonicalWorldEntryDescriptor>
+  if (descriptor.protocolVersion !== 2 || typeof descriptor.quiltId !== 'string' || descriptor.quiltId === ''
+    || typeof descriptor.entryAttemptId !== 'string' || descriptor.entryAttemptId === ''
+    || typeof descriptor.assignedPatch?.id !== 'string' || descriptor.assignedPatch.id === '') {
+    throw new Error('Canonical world descriptor is invalid')
+  }
+
+  return descriptor as CanonicalWorldEntryDescriptor
 }
 
-export const getStoredSessionId = (): string | null => sessionStorage.getItem(SESSION_STORAGE_KEY)
-
-export const setStoredSessionId = (sessionId: string): void => {
-  sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId)
+export const resolveCanonicalPatchNavigation = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+  quiltId: string,
+  patchId: string,
+): Promise<CanonicalPatchNavigation> => {
+  const response = await authenticatedFetch(
+    `${apiOrigin}/quilts/${encodeURIComponent(quiltId)}/patches/${encodeURIComponent(patchId)}/navigation`,
+    { method: 'GET' },
+  )
+  if (!response.ok) throw new Error(`Patch navigation is unavailable (${response.status})`)
+  return response.json() as Promise<CanonicalPatchNavigation>
 }
 
-export const clearStoredSessionId = (): void => {
-  sessionStorage.removeItem(SESSION_STORAGE_KEY)
+export const getCanonicalPatchLink = (): { quiltId: string; patchId: string } | null => {
+  const params = new URLSearchParams(window.location.search)
+  const quiltId = params.get('quilt')
+  const patchId = params.get('patch')
+  return quiltId && patchId ? { quiltId, patchId } : null
 }
 
-export const createSession = async (options?: CreateSessionOptions): Promise<string> => {
-  const response = await fetch(`${SERVER_URL}/sessions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(options ?? {}),
-  })
-  if (!response.ok) throw new Error(`Failed to create session: ${response.status}`)
-
-  const data = (await response.json()) as { session: { id: string } }
-  return data.session.id
+export const setCanonicalPatchLink = (navigation: CanonicalPatchNavigation): void => {
+  const url = new URL(window.location.href)
+  url.searchParams.set('quilt', navigation.quiltId)
+  url.searchParams.set('patch', navigation.patchId)
+  window.history.replaceState(window.history.state, '', url)
 }
 
-export const listSessions = async (): Promise<SessionSummary[]> => {
-  const response = await fetch(`${SERVER_URL}/sessions`, { method: 'GET' })
-  if (!response.ok) throw new Error(`Failed to list sessions: ${response.status}`)
-
-  const data = (await response.json()) as ListSessionsResponse
-  const sessions = Array.isArray(data.sessions) ? data.sessions : []
-
-  return sessions
-    .filter((session): session is ListSessionsResponse['sessions'][number] => typeof session.id === 'string' && session.id.length > 0)
-    .map((session) => {
-      const connectedUserCount = Number.isFinite(session.connectedUserCount)
-        ? Number(session.connectedUserCount)
-        : Number.isFinite(session.participantCount)
-          ? Number(session.participantCount)
-          : 0
-
-      const width = Number.isFinite(session.canvasSize?.width) ? Number(session.canvasSize?.width) : 0
-      const height = Number.isFinite(session.canvasSize?.height) ? Number(session.canvasSize?.height) : 0
-
-      return {
-        id: session.id,
-        displayName: session.displayName?.trim() ? session.displayName : `Canvas ${session.id.slice(0, 8)}`,
-        connectedUserCount,
-        canvasSize: {
-          width,
-          height,
-        },
-      }
-    })
-}
-
-export const ensureSession = async (): Promise<string> => {
-  const stored = getStoredSessionId()
-  if (stored) return stored
-
-  const sessionId = await createSession()
-  setStoredSessionId(sessionId)
-  return sessionId
+export const clearCanonicalPatchLink = (): void => {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('quilt')
+  url.searchParams.delete('patch')
+  window.history.replaceState(window.history.state, '', url)
 }
 
 export const ensureClientId = (): string => {
