@@ -85,6 +85,19 @@ describe('resolveGridPlacement', () => {
     expect(result.transform.position).not.toEqual({ x: 8.33, y: 8.67 })
   })
 
+  it('does not guide placement outside owned patch bounds', () => {
+    const result = resolveGridPlacement(
+      { x: 3, y: 3 },
+      'square',
+      squarePattern,
+      [],
+      { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5 },
+    )
+
+    expect(result.valid).toBe(false)
+    expect(result.reason).toContain('out-of-bounds')
+  })
+
   it('uses nearest periodic settled geometry when snapping across a seam', () => {
     const settled: TileInstance[] = [{
       id: 'edge',

@@ -17,7 +17,7 @@ import { GridOverlay } from './GridOverlay'
 import { useCraftMaterial, useRemoteSelectionMaterial } from './materials'
 import type { ThreeEvent } from '@react-three/fiber'
 import type { GridPattern } from '../domain/gridPatterns'
-import type { TileInstance } from '../domain/placementSolver'
+import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 import { getCollaboratorColor } from '../ui/palettes'
 import { deriveOrthographicViewport, enumerateVisibleTileImages, nearestPeriodicPoint, resolveDisplayHitPoint } from './periodicImages'
@@ -54,6 +54,7 @@ type MosaicSceneProps = {
   gridOverlay?: {
     pattern: GridPattern
     activeSlotId?: string
+    bounds?: MosaicBounds
   }
   worldBounds?: {
     minX: number
@@ -467,7 +468,7 @@ const SceneContents = ({
             pattern={gridOverlay.pattern}
             activeShape={activeShape}
             tiles={tiles}
-            bounds={topology ? { mode: 'unbounded' } : worldBounds ?? DEFAULT_WORLD_BOUNDS}
+            bounds={gridOverlay.bounds ?? (topology ? { mode: 'unbounded' } : worldBounds ?? DEFAULT_WORLD_BOUNDS)}
             activeSlotId={gridOverlay.activeSlotId}
             topology={topology}
           />

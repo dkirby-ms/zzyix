@@ -436,6 +436,12 @@ function ProtectedApp() {
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
   const isQuiltV2 = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology !== undefined
   const mutationControlsEnabled = !isQuiltV2 || quiltProtocol.mutationEnabled
+  const ownedPatchBounds = useMemo(() => canonicalDescriptor ? {
+    minX: canonicalDescriptor.originX + canonicalDescriptor.assignedPatch.column * canonicalDescriptor.patchWidth,
+    maxX: canonicalDescriptor.originX + (canonicalDescriptor.assignedPatch.column + 1) * canonicalDescriptor.patchWidth,
+    minY: canonicalDescriptor.originY + canonicalDescriptor.assignedPatch.row * canonicalDescriptor.patchHeight,
+    maxY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 1) * canonicalDescriptor.patchHeight,
+  } : undefined, [canonicalDescriptor])
   const visibleTiles = useMemo(
     () => isQuiltV2 ? selectQuiltTiles(quiltCache) : sequencedState.tiles,
     [isQuiltV2, quiltCache, sequencedState.tiles],
@@ -974,8 +980,15 @@ function ProtectedApp() {
 
   const resolveGhostFromPointer = useCallback(
     (pointer: { x: number; y: number }) =>
-      updateGhostTarget(pointer, activeTile, visibleTiles, isQuiltV2 ? { mode: 'unbounded' } : worldBounds, placementGuide, quiltProtocol?.topology),
-    [activeTile, isQuiltV2, placementGuide, quiltProtocol?.topology, visibleTiles, worldBounds],
+      updateGhostTarget(
+        pointer,
+        activeTile,
+        visibleTiles,
+        isQuiltV2 && ownedPatchBounds ? { mode: 'bounded', bounds: ownedPatchBounds } : worldBounds,
+        placementGuide,
+        quiltProtocol?.topology,
+      ),
+    [activeTile, isQuiltV2, ownedPatchBounds, placementGuide, quiltProtocol?.topology, visibleTiles, worldBounds],
   )
 
   useEffect(() => {
@@ -1429,6 +1442,7 @@ function ProtectedApp() {
                   ? {
                       pattern: selectedGridPattern,
                       activeSlotId: ghost.guideSlotId,
+                      bounds: ownedPatchBounds,
                     }
                   : undefined}
                 worldBounds={worldBounds}

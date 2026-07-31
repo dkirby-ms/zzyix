@@ -81,6 +81,9 @@ export const buildGridOverlaySegments = ({
   const slots = generateGridPatternSlots(pattern, range)
 
   for (const slot of slots) {
+    const ownershipValidation = validatePlacement(slot.shape, slot.transform, [], bounds)
+    if (ownershipValidation.reason.startsWith('out-of-bounds')) continue
+
     const state = classifyGridPatternSlot(slot, activeShape, tiles, bounds, activeSlotId, topology)
     const outline = transformPolygon(getTileDefinition(slot.shape).outline, slot.transform)
     appendOutlineSegments(groups[state], outline)
