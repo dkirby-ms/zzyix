@@ -331,6 +331,12 @@ describe('live canonical product boundaries', () => {
     } finally {
       first.disconnect()
       second?.disconnect()
+      await vi.waitFor(async () => {
+        const leases = await attemptDatabase.db.execute(sql`
+          select count(*)::integer as count from quilt_presence_leases
+        `)
+        expect(leases.rows[0]?.count).toBe(0)
+      })
     }
   })
 
