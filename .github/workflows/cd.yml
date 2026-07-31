@@ -531,10 +531,11 @@ jobs:
               --name "${MIGRATION_JOB_NAME}" \
               --query "[properties.configuration.triggerType, properties.configuration.manualTriggerConfig.parallelism, properties.configuration.manualTriggerConfig.replicaCompletionCount, properties.configuration.replicaTimeout, properties.configuration.replicaRetryLimit]" \
               --output tsv)"
-            expected_settings=$'Manual\t1\t1\t1800\t2'
+            normalized_job_settings="$(printf '%s' "${job_settings}" | tr '\n\t\r' '   ' | tr -s ' ' | sed -e 's/^ //' -e 's/ $//')"
+            expected_settings='Manual 1 1 1800 2'
 
-            if [[ "${job_settings}" != "${expected_settings}" ]]; then
-              echo "Migration job settings are unsafe: ${job_settings}" >&2
+            if [[ "${normalized_job_settings}" != "${expected_settings}" ]]; then
+              echo "Migration job settings are unsafe: ${normalized_job_settings}" >&2
               exit 1
             fi
 
