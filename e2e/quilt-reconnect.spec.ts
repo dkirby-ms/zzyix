@@ -121,7 +121,9 @@ test('reconnects through another replica with cursor convergence and an attachme
   const deniedToken = await issueToken('e2e-denied-member')
   const ownerToken = await issueToken(externalSubject)
 
-  const { socket: presenceObserver } = await connect(REPLICA_A, quiltId, await issueToken(`e2e-presence-observer-${crypto.randomUUID()}`))
+  // Reuse the denied principal as presence observer so the scenario consumes one
+  // fewer automatic canonical patch assignment before the denied reconnect step.
+  const { socket: presenceObserver } = await connect(REPLICA_A, quiltId, deniedToken)
   const joinedPromise = onceMatching<ClientJoinedPayload>(presenceObserver, 'client_joined', (payload) => payload.client.clientId === principalId)
   const { socket: ownerPresenceA } = await connect(REPLICA_A, quiltId, ownerToken)
   await expect(joinedPromise).resolves.toMatchObject({ client: { clientId: principalId } })

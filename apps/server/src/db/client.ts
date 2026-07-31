@@ -1,5 +1,5 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
-import { Pool, type PoolConfig } from 'pg'
+import { Pool, type PoolConfig, type PoolClient } from 'pg'
 import * as schema from './schema.js'
 import { emitQuiltTelemetry } from '../migration/quiltTelemetry.js'
 
@@ -28,6 +28,16 @@ const buildPoolConfig = (): PoolConfig => {
 
 export const createDatabaseBundle = (poolConfig: PoolConfig = buildPoolConfig()): DatabaseBundle => {
   const pool = new Pool(poolConfig)
+  const onDatabaseError = (error: unknown): void => {
+    console.error('[db] pool client error', error)
+  }
+
+  // Pg pools can emit async client errors (for example when test teardown force-drops a DB).
+  // Always handle the event to avoid process termination on an unhandled 'error'.
+  pool.on('error', onDatabaseError)
+  pool.on('connect', (client: PoolClient) => {
+    client.on('error', onDatabaseError)
+  })
   return {
     pool,
     db: drizzle(pool, { schema }),
