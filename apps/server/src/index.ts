@@ -786,8 +786,33 @@ export const app = express()
 export const httpServer = createServer(app)
 const isTestControlEnabled = process.env.NODE_ENV === 'test' && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
 const testControlToken = (process.env.E2E_RESET_TOKEN ?? TEST_CONTROL_DEFAULT_TOKEN).trim()
+const HTTP_RATE_LIMIT_WINDOW_MS = Number(process.env.HTTP_RATE_LIMIT_WINDOW_MS ?? 60_000)
+const HTTP_AUTH_READ_RATE_LIMIT_MAX = Number(process.env.HTTP_AUTH_READ_RATE_LIMIT_MAX ?? 240)
+const HTTP_AUTH_MUTATION_RATE_LIMIT_MAX = Number(process.env.HTTP_AUTH_MUTATION_RATE_LIMIT_MAX ?? 120)
+const HTTP_TEST_CONTROL_RATE_LIMIT_MAX = Number(process.env.HTTP_TEST_CONTROL_RATE_LIMIT_MAX ?? 180)
 
 app.use(express.json())
+
+const createHttpRateLimiter = (max: number, message: string): ReturnType<typeof rateLimit> => rateLimit({
+  windowMs: HTTP_RATE_LIMIT_WINDOW_MS,
+  max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: message },
+})
+
+const authenticatedReadRateLimiter = createHttpRateLimiter(
+  HTTP_AUTH_READ_RATE_LIMIT_MAX,
+  'Too many authenticated read requests, please try again later.',
+)
+const authenticatedMutationRateLimiter = createHttpRateLimiter(
+  HTTP_AUTH_MUTATION_RATE_LIMIT_MAX,
+  'Too many authenticated mutation requests, please try again later.',
+)
+const testControlRateLimiter = createHttpRateLimiter(
+  HTTP_TEST_CONTROL_RATE_LIMIT_MAX,
+  'Too many test control requests, please try again later.',
+)
 
 let configuredTokenVerifier: TokenVerifier | undefined
 export const configureTokenVerifierForTests = (verifier: TokenVerifier): void => {
@@ -898,7 +923,7 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', version: '0.0.0' })
 })
 
-app.get('/me', requireHttpPrincipal, async (req, res) => {
+app.get('/me', requireHttpPrincipal, authenticatedReadRateLimiter, async (req, res) => {
   const principal = getPrincipalContext(req)
   const profile = await loadPrincipalProfile(principal.principalId)
   const response: MeResponse = buildMeResponse(profile)
@@ -1002,7 +1027,7 @@ app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
   }
 })
 
-app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, async (req, res) => {
+app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, authenticatedReadRateLimiter, async (req, res) => {
   const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
   const result = await listEligibleCanonicalPatches(getPrincipalContext(req).principalId)
   if (!result) {
@@ -1017,7 +1042,7 @@ app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, async (req, 
   res.status(200).json(result)
 })
 
-app.post('/quilts/canonical/telemetry', requireHttpPrincipal, async (req, res) => {
+app.post('/quilts/canonical/telemetry', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   const principal = getPrincipalContext(req)
   const attemptId = req.header('x-canonical-attempt-id')
   const lineageAttemptId = req.header('x-canonical-lineage-id')
@@ -1100,7 +1125,7 @@ app.post('/quilts/canonical/telemetry', requireHttpPrincipal, async (req, res) =
   res.status(202).end()
 })
 
-app.get('/quilts/:quiltId/patches/:patchId/navigation', requireHttpPrincipal, async (req, res) => {
+app.get('/quilts/:quiltId/patches/:patchId/navigation', requireHttpPrincipal, authenticatedReadRateLimiter, async (req, res) => {
   getPrincipalContext(req)
   const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
   const { quiltId, patchId } = req.params
@@ -1117,7 +1142,7 @@ app.get('/quilts/:quiltId/patches/:patchId/navigation', requireHttpPrincipal, as
   res.status(200).json(navigation)
 })
 
-app.post('/ownership/claims', requireHttpPrincipal, async (req, res) => {
+app.post('/ownership/claims', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   if (!ownershipRequest(req.body, ['patchId'])) return sendInvalidOwnershipRequest(res)
   const principalId = getPrincipalContext(req).principalId
   sendOwnershipResult(res, await claimPatch({
@@ -1126,7 +1151,7 @@ app.post('/ownership/claims', requireHttpPrincipal, async (req, res) => {
   }))
 })
 
-app.post('/ownership/transfers', requireHttpPrincipal, async (req, res) => {
+app.post('/ownership/transfers', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   if (!ownershipRequest(req.body, ['patchId', 'recipientPrincipalId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await createOwnershipTransfer({
     operationId: req.body.operationId, patchId: req.body.patchId,
@@ -1135,7 +1160,7 @@ app.post('/ownership/transfers', requireHttpPrincipal, async (req, res) => {
   }))
 })
 
-app.post('/ownership/transfers/accept', requireHttpPrincipal, async (req, res) => {
+app.post('/ownership/transfers/accept', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   if (!ownershipRequest(req.body, ['transferId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await acceptOwnershipTransfer({
     operationId: req.body.operationId, transferId: req.body.transferId,
@@ -1143,7 +1168,7 @@ app.post('/ownership/transfers/accept', requireHttpPrincipal, async (req, res) =
   }))
 })
 
-app.post('/ownership/transfers/cancel', requireHttpPrincipal, async (req, res) => {
+app.post('/ownership/transfers/cancel', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   if (!ownershipRequest(req.body, ['transferId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await cancelOwnershipTransfer({
     operationId: req.body.operationId, transferId: req.body.transferId,
@@ -1151,7 +1176,7 @@ app.post('/ownership/transfers/cancel', requireHttpPrincipal, async (req, res) =
   }))
 })
 
-app.post('/ownership/abandon', requireHttpPrincipal, async (req, res) => {
+app.post('/ownership/abandon', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   if (!ownershipRequest(req.body, ['patchId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await abandonPatch({
     operationId: req.body.operationId, patchId: req.body.patchId,
@@ -1159,7 +1184,7 @@ app.post('/ownership/abandon', requireHttpPrincipal, async (req, res) => {
   }))
 })
 
-app.post('/account/deletion', requireHttpPrincipal, async (req, res) => {
+app.post('/account/deletion', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   if (!ownershipRequest(req.body, [])) return sendInvalidOwnershipRequest(res)
   const result = await requestPrincipalDeletion({
     operationId: req.body.operationId, principalId: getPrincipalContext(req).principalId,
@@ -1171,7 +1196,7 @@ app.post('/account/deletion', requireHttpPrincipal, async (req, res) => {
   } satisfies AccountDeletionResponse)
 })
 
-app.post('/account/deletion/recover', requireDeletionPendingPrincipal, async (req, res) => {
+app.post('/account/deletion/recover', requireDeletionPendingPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
   if (!ownershipRequest(req.body, [])) return sendInvalidOwnershipRequest(res)
   const result = await recoverPrincipalDeletion({
     operationId: req.body.operationId, principalId: getPrincipalContext(req).principalId,
@@ -1309,7 +1334,7 @@ if (isTestControlEnabled) {
     }
   })
 
-  app.post('/test/quilt/setup', async (req, res) => {
+  app.post('/test/quilt/setup', testControlRateLimiter, async (req, res) => {
     if (req.header(TEST_CONTROL_HEADER) !== testControlToken) {
       res.status(403).json({ error: 'Forbidden' })
       return
@@ -1390,7 +1415,7 @@ if (isTestControlEnabled) {
     }
   })
 
-  app.post('/test/quilt/publish', async (req, res) => {
+  app.post('/test/quilt/publish', testControlRateLimiter, async (req, res) => {
     if (req.header(TEST_CONTROL_HEADER) !== testControlToken) {
       res.status(403).json({ error: 'Forbidden' })
       return
@@ -1467,7 +1492,7 @@ if (isTestControlEnabled) {
     }
   })
 
-  app.post('/test/shutdown', (req, res) => {
+  app.post('/test/shutdown', testControlRateLimiter, (req, res) => {
     if (req.header(TEST_CONTROL_HEADER) !== testControlToken) {
       res.status(403).json({ error: 'Forbidden' })
       return
