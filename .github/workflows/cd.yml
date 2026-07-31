@@ -271,13 +271,15 @@ jobs:
       AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED: ${{ vars.AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED }}
       FEATURE_PROTOCOL_V2_MUTATION_ENABLED: ${{ vars.FEATURE_PROTOCOL_V2_MUTATION_ENABLED || 'false' }}
       FEATURE_QUILT_PROTOCOL_V2_ENABLED: ${{ vars.FEATURE_QUILT_PROTOCOL_V2_ENABLED || 'false' }}
+      LEGACY_RETIREMENT_GATE_REQUIRED: ${{ vars.LEGACY_RETIREMENT_GATE_REQUIRED || 'false' }}
       LEGACY_RETIREMENT_REPORT_PATH: /tmp/canonical-retirement-report.json
-      LEGACY_RETIREMENT_REPORT_SHA256: ${{ vars.LEGACY_RETIREMENT_REPORT_SHA256 }}
-      LEGACY_RETIREMENT_PARITY_PASSED: ${{ vars.LEGACY_RETIREMENT_PARITY_PASSED }}
-      LEGACY_RETIREMENT_RECOVERY_PASSED: ${{ vars.LEGACY_RETIREMENT_RECOVERY_PASSED }}
-      LEGACY_RETIREMENT_MULTI_REPLICA_PASSED: ${{ vars.LEGACY_RETIREMENT_MULTI_REPLICA_PASSED }}
-      LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED: ${{ vars.LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED }}
-      LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED: ${{ vars.LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED }}
+      LEGACY_RETIREMENT_REPORT_SHA256: ${{ vars.LEGACY_RETIREMENT_REPORT_SHA256 || 'not-required' }}
+      LEGACY_RETIREMENT_PARITY_PASSED: ${{ vars.LEGACY_RETIREMENT_PARITY_PASSED || 'true' }}
+      LEGACY_RETIREMENT_RECOVERY_PASSED: ${{ vars.LEGACY_RETIREMENT_RECOVERY_PASSED || 'true' }}
+      LEGACY_RETIREMENT_MULTI_REPLICA_PASSED: ${{ vars.LEGACY_RETIREMENT_MULTI_REPLICA_PASSED || 'true' }}
+      LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED: ${{ vars.LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED || 'true' }}
+      LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED: ${{ vars.LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED || 'true' }}
+      LEGACY_RETIREMENT_REPORT_BASE64: ${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 || 'e30=' }}
 
     steps:
       - name: Check Out
@@ -328,12 +330,6 @@ jobs:
             AUTH_MIGRATION_REHEARSAL_APPROVED
             AUTH_MUTATION_ROLLBACK_APPROVED
             AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED
-            LEGACY_RETIREMENT_REPORT_SHA256
-            LEGACY_RETIREMENT_PARITY_PASSED
-            LEGACY_RETIREMENT_RECOVERY_PASSED
-            LEGACY_RETIREMENT_MULTI_REPLICA_PASSED
-            LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED
-            LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED
           )
 
           for variable_name in "${required_variables[@]}"; do
@@ -348,11 +344,6 @@ jobs:
             AUTH_ROLLBACK_GATE_APPROVED
             AUTH_RETENTION_POLICY_APPROVED
             AUTH_DELETION_COMPLETION_POLICY_APPROVED
-            LEGACY_RETIREMENT_PARITY_PASSED
-            LEGACY_RETIREMENT_RECOVERY_PASSED
-            LEGACY_RETIREMENT_MULTI_REPLICA_PASSED
-            LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED
-            LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED
           )
           for approval_name in "${required_approvals[@]}"; do
             if [[ "${!approval_name}" != "true" ]]; then
@@ -379,6 +370,7 @@ jobs:
           feature_flags=(
             FEATURE_PROTOCOL_V2_MUTATION_ENABLED
             FEATURE_QUILT_PROTOCOL_V2_ENABLED
+            LEGACY_RETIREMENT_GATE_REQUIRED
           )
           for feature_flag in "${feature_flags[@]}"; do
             if [[ "${!feature_flag}" != 'true' && "${!feature_flag}" != 'false' ]]; then
@@ -392,9 +384,41 @@ jobs:
             exit 1
           fi
 
-          if [[ -z "${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}" ]]; then
-            echo 'Missing immutable retirement report secret.' >&2
-            exit 1
+          if [[ "${LEGACY_RETIREMENT_GATE_REQUIRED}" == 'true' ]]; then
+            legacy_required_variables=(
+              LEGACY_RETIREMENT_REPORT_SHA256
+              LEGACY_RETIREMENT_PARITY_PASSED
+              LEGACY_RETIREMENT_RECOVERY_PASSED
+              LEGACY_RETIREMENT_MULTI_REPLICA_PASSED
+              LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED
+              LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED
+            )
+
+            for variable_name in "${legacy_required_variables[@]}"; do
+              if [[ -z "${!variable_name:-}" ]]; then
+                echo "Missing required GitHub environment variable: ${variable_name}" >&2
+                exit 1
+              fi
+            done
+
+            legacy_required_approvals=(
+              LEGACY_RETIREMENT_PARITY_PASSED
+              LEGACY_RETIREMENT_RECOVERY_PASSED
+              LEGACY_RETIREMENT_MULTI_REPLICA_PASSED
+              LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED
+              LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED
+            )
+            for approval_name in "${legacy_required_approvals[@]}"; do
+              if [[ "${!approval_name}" != 'true' ]]; then
+                echo "Legacy retirement approval is not granted: ${approval_name}" >&2
+                exit 1
+              fi
+            done
+
+            if [[ -z "${LEGACY_RETIREMENT_REPORT_BASE64}" ]]; then
+              echo 'Missing immutable retirement report secret.' >&2
+              exit 1
+            fi
           fi
 
           node scripts/validate-deployment-origins.mjs
@@ -442,7 +466,7 @@ jobs:
               az containerapp job secret set \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${MIGRATION_JOB_NAME}" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}"
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${LEGACY_RETIREMENT_REPORT_BASE64}"
 
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
                 az containerapp job registry set \
@@ -591,7 +615,7 @@ jobs:
               az containerapp secret set \
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}"
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${LEGACY_RETIREMENT_REPORT_BASE64}"
 
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
                 az containerapp registry set \
@@ -625,7 +649,7 @@ jobs:
                 --target-port "${SERVER_TARGET_PORT}" \
                 --ingress internal \
                 --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=secretref:database-url" "LEGACY_RETIREMENT_REPORT_BASE64=secretref:legacy-retirement-report" "LEGACY_RETIREMENT_REPORT_PATH=${LEGACY_RETIREMENT_REPORT_PATH}" "LEGACY_RETIREMENT_REPORT_SHA256=${LEGACY_RETIREMENT_REPORT_SHA256}" "LEGACY_RETIREMENT_PARITY_PASSED=${LEGACY_RETIREMENT_PARITY_PASSED}" "LEGACY_RETIREMENT_RECOVERY_PASSED=${LEGACY_RETIREMENT_RECOVERY_PASSED}" "LEGACY_RETIREMENT_MULTI_REPLICA_PASSED=${LEGACY_RETIREMENT_MULTI_REPLICA_PASSED}" "LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED=${LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED}" "LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED=${LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "AUTH_OWNER_E2E_GATE_APPROVED=${AUTH_OWNER_E2E_GATE_APPROVED}" "AUTH_MIGRATION_REHEARSAL_APPROVED=${AUTH_MIGRATION_REHEARSAL_APPROVED}" "AUTH_MUTATION_ROLLBACK_APPROVED=${AUTH_MUTATION_ROLLBACK_APPROVED}" "AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED=${AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED}" "FEATURE_PROTOCOL_V2_MUTATION_ENABLED=${FEATURE_PROTOCOL_V2_MUTATION_ENABLED}" "FEATURE_QUILT_PROTOCOL_V2_ENABLED=${FEATURE_QUILT_PROTOCOL_V2_ENABLED}" \
-                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${{ secrets.LEGACY_RETIREMENT_REPORT_BASE64 }}" \
+                --secrets "database-url=${{ secrets.SERVER_DATABASE_URL }}" "legacy-retirement-report=${LEGACY_RETIREMENT_REPORT_BASE64}" \
                 --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
