@@ -35,12 +35,16 @@ export const validateProductionRolloutGates = (environment: RolloutEnvironment =
     }
   }
 
-  const decision = decideLegacyRetirement(loadLegacyRetirementGates({
-    ...environment,
-    FEATURE_LEGACY_RETIREMENT_REQUESTED: 'true',
-  }))
-  if (!decision.retireLegacy) {
-    throw new Error(`Production legacy retirement gates are incomplete: ${decision.unmetGates.join(', ')}`)
+  const legacyRetirementRequired = enabled(environment, 'LEGACY_RETIREMENT_GATE_REQUIRED')
+    || enabled(environment, 'FEATURE_LEGACY_RETIREMENT_REQUESTED')
+  if (legacyRetirementRequired) {
+    const decision = decideLegacyRetirement(loadLegacyRetirementGates({
+      ...environment,
+      FEATURE_LEGACY_RETIREMENT_REQUESTED: 'true',
+    }))
+    if (!decision.retireLegacy) {
+      throw new Error(`Production legacy retirement gates are incomplete: ${decision.unmetGates.join(', ')}`)
+    }
   }
 }
 

@@ -154,18 +154,24 @@ describe('production rollout gates', () => {
   })
 
   it('requires digest-bound promote evidence for production retirement', () => {
-    expect(() => validateProductionRolloutGates(approvedProduction)).toThrow('report path and SHA-256')
+    expect(() => validateProductionRolloutGates(approvedProduction)).not.toThrow()
     expect(() => validateProductionRolloutGates({
       ...approvedProduction,
+      LEGACY_RETIREMENT_GATE_REQUIRED: 'true',
       FEATURE_LEGACY_RETIREMENT_REQUESTED: 'true',
     })).toThrow('report path and SHA-256')
     expect(() => validateProductionRolloutGates({
       ...retirementEnvironment(),
+      LEGACY_RETIREMENT_GATE_REQUIRED: 'true',
       LEGACY_RETIREMENT_REPORT_SHA256: '0'.repeat(64),
     })).toThrow('digest mismatch')
-    expect(() => validateProductionRolloutGates(retirementEnvironment('hold'))).toThrow('does not recommend promotion')
+    expect(() => validateProductionRolloutGates({
+      ...retirementEnvironment('hold'),
+      LEGACY_RETIREMENT_GATE_REQUIRED: 'true',
+    })).toThrow('does not recommend promotion')
     expect(() => validateProductionRolloutGates({
       ...retirementEnvironment(),
+      LEGACY_RETIREMENT_GATE_REQUIRED: 'true',
       LEGACY_RETIREMENT_MEASURED_WINDOW_APPROVED: 'false',
       LEGACY_RETIREMENT_CLIENT_BUDGET_PASSED: 'false',
     })).not.toThrow()
