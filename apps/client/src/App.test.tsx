@@ -7,6 +7,7 @@ import type { MeResponse } from '../../server/src/contracts'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 
 const {
+  clearCanonicalPatchLinkMock,
   discoverCanonicalWorldMock,
   getStoredSessionIdMock,
   getCanonicalPatchLinkMock,
@@ -18,6 +19,7 @@ const {
   resolveCanvasDebugMock,
   authSessionState,
 } = vi.hoisted(() => ({
+  clearCanonicalPatchLinkMock: vi.fn(),
   discoverCanonicalWorldMock: vi.fn(),
   getStoredSessionIdMock: vi.fn(),
   getCanonicalPatchLinkMock: vi.fn(),
@@ -111,6 +113,7 @@ const enterCanonicalCanvas = async (): Promise<void> => {
 }
 
 vi.mock('./network/session', () => ({
+  clearCanonicalPatchLink: clearCanonicalPatchLinkMock,
   ensureClientId: vi.fn(() => 'client-1'),
   listSessions: listSessionsMock,
   discoverCanonicalWorld: discoverCanonicalWorldMock,
@@ -241,6 +244,8 @@ describe('App canonical canvas behavior', () => {
       },
     }
     authSessionState.error = null
+    delete (authSessionState as typeof authSessionState & { testIdentity?: unknown }).testIdentity
+    clearCanonicalPatchLinkMock.mockClear()
     authSessionState.login.mockClear()
     authSessionState.logout.mockClear()
     authSessionState.handleAuthLoss.mockClear()
@@ -263,6 +268,30 @@ describe('App canonical canvas behavior', () => {
   afterEach(() => {
     vi.useRealTimers()
     cleanup()
+  })
+
+  it('shows local identity choices only when test auth provides them', () => {
+    const setSubject = vi.fn()
+    authSessionState.status = 'signed_out'
+    authSessionState.principal = null
+    Object.assign(authSessionState, { testIdentity: { subject: 'dev-alice', setSubject } })
+
+    render(<App />)
+
+    expect(screen.getByLabelText('Local test user')).toHaveValue('dev-alice')
+    fireEvent.click(screen.getByRole('button', { name: 'Bob' }))
+    expect(setSubject).toHaveBeenCalledWith('dev-bob')
+  })
+
+  it('clears previous patch navigation before signing in', () => {
+    authSessionState.status = 'signed_out'
+    authSessionState.principal = null
+
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+
+    expect(clearCanonicalPatchLinkMock).toHaveBeenCalledOnce()
+    expect(authSessionState.login).toHaveBeenCalledOnce()
   })
 
   it('discovers and enters the canonical canvas without session storage', async () => {
@@ -309,6 +338,7 @@ describe('App canonical canvas behavior', () => {
     }))
 
     expect(await screen.findByTestId('mosaic-scene')).toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene').parentElement).toHaveClass('canvas-scene')
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '5,5')
     expect(screen.getByRole('region', { name: 'Canonical patch navigation' })).toBeInTheDocument()
     expect(setCanonicalPatchLinkMock).toHaveBeenCalledWith(expect.objectContaining({ patchId: 'patch-assigned' }))
@@ -1105,19 +1135,26 @@ describe('App canonical canvas behavior', () => {
     }
     act(() => {
       onQuiltPatchSnapshot({
-        quiltId: 'quilt-1', canonicalRoomId: 'room-a', patchId: 'patch-a', tiles: [tileA],
+        quiltId: 'quilt-1', canonicalRoomId: 'room-a:fine', patchId: 'patch-a', payloadMode: 'fine', chunkIds: ['0:0'], tiles: [tileA],
         cursor: { patchId: 'patch-a', opSeq: 1, revision: 1, eventId: 'event-a' },
       })
       onQuiltPatchSnapshot({
-        quiltId: 'quilt-1', canonicalRoomId: 'room-b', patchId: 'patch-b', tiles: [tileB],
+        quiltId: 'quilt-1', canonicalRoomId: 'room-b:fine', patchId: 'patch-b', payloadMode: 'fine', chunkIds: ['1:0'], tiles: [tileB],
         cursor: { patchId: 'patch-b', opSeq: 1, revision: 1, eventId: 'event-b' },
       })
     })
     expect(screen.getByText('2 placed')).toBeInTheDocument()
 
     act(() => onQuiltPatchSnapshot({
-      quiltId: 'quilt-1', canonicalRoomId: 'room-a', patchId: 'patch-a', tiles: [],
-      cursor: { patchId: 'patch-a', opSeq: 2, revision: 2, eventId: 'event-c' },
+      quiltId: 'quilt-1', canonicalRoomId: 'room-a:aggregate', patchId: 'patch-a', payloadMode: 'aggregate', chunkIds: ['0:0'], tiles: [],
+      aggregates: [{ chunkId: '0:0', aggregate: { tileCount: 1, byShape: { square: 1 }, byMaterial: { ceramic: 1 } } }],
+      cursor: { patchId: 'patch-a', opSeq: 2, revision: 2, eventId: 'event-aggregate' },
+    }))
+    expect(screen.getByText('2 placed')).toBeInTheDocument()
+
+    act(() => onQuiltPatchSnapshot({
+      quiltId: 'quilt-1', canonicalRoomId: 'room-a:fine', patchId: 'patch-a', payloadMode: 'fine', chunkIds: ['0:0'], tiles: [],
+      cursor: { patchId: 'patch-a', opSeq: 3, revision: 3, eventId: 'event-c' },
     }))
     expect(screen.getByText('1 placed')).toBeInTheDocument()
   })

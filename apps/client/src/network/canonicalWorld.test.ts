@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { discoverCanonicalWorld } from './session'
+import { clearCanonicalPatchLink, discoverCanonicalWorld } from './session'
 
 const descriptor = {
   quiltId: '10000000-0000-4000-8000-000000000001',
@@ -19,6 +19,14 @@ const descriptor = {
 }
 
 describe('canonical world discovery', () => {
+  it('clears patch navigation without removing unrelated query parameters', () => {
+    window.history.replaceState(null, '', '/?quilt=quilt-1&patch=patch-1&debug=true')
+
+    clearCanonicalPatchLink()
+
+    expect(window.location.search).toBe('?debug=true')
+  })
+
   it('maps the authenticated descriptor without touching session storage', async () => {
     const authenticatedFetch = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(descriptor), { status: 200 }),

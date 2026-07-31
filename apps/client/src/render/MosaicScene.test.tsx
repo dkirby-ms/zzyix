@@ -56,6 +56,7 @@ describe('MosaicScene interaction plane', () => {
     const { getByTestId } = render(
       <MosaicScene
         tiles={[]}
+        clientId="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -99,6 +100,7 @@ describe('MosaicScene interaction plane', () => {
     const { getByTestId } = render(
       <MosaicScene
         tiles={[]}
+        clientId="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -129,5 +131,41 @@ describe('MosaicScene interaction plane', () => {
     expect(onPointerMove).not.toHaveBeenCalled()
     expect(onPointerDown).not.toHaveBeenCalled()
     expect(onPointerUp).not.toHaveBeenCalled()
+  })
+
+  it('outlines tiles placed by other users without outlining local tiles', () => {
+    const tile = {
+      id: 'tile-a', shape: 'square' as const, color: '#fff', material: 'ceramic' as const,
+      transform: { position: { x: 0.2, y: 0.3 }, rotation: 0 }, createdAt: 1,
+    }
+
+    const { container } = render(
+      <MosaicScene
+        tiles={[
+          { ...tile, id: 'local-tile', placedBy: 'client-1' },
+          { ...tile, id: 'remote-tile', placedBy: 'client-2' },
+        ]}
+        clientId="client-1"
+        activeShape="square"
+        ghost={{
+          transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
+          confidence: 'valid',
+          color: '#d4614f',
+          material: 'ceramic',
+          visible: false,
+        }}
+        remoteCursors={[]}
+        remoteSelections={[]}
+        onPointerMove={vi.fn()}
+        onPointerDown={vi.fn()}
+        onPointerUp={vi.fn()}
+        onRotateDrag={vi.fn()}
+        onCameraPan={vi.fn()}
+        cameraPan={{ x: 0, y: 0 }}
+      />,
+    )
+
+    expect(container.querySelector('[data-owner-boundary="client-2"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-owner-boundary="client-1"]')).not.toBeInTheDocument()
   })
 })

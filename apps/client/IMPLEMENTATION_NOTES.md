@@ -31,7 +31,7 @@ Raw-pointer placement remains the default. When the local grid overlay is enable
 
 `GridOverlay.tsx` generates slots only for the current orthographic viewport plus one-cell overscan. Canonical tile outlines are transformed and batched into structural, placeable, blocked, and active line geometry. The overlay has no pointer handlers and is composed behind settled tiles and the ghost.
 
-The server remains authoritative and unchanged: the client sends the ordinary final `Transform2D`, and server overlap, bounds, adjacency, revision, and concurrency validation still determine whether placement is accepted.
+The server remains authoritative: the client sends the ordinary final `Transform2D`, and server overlap, bounds, revision, and concurrency validation determine whether placement is accepted. Placement does not require proximity to a settled tile.
 
 ## Ghost-to-Settle Animation System
 

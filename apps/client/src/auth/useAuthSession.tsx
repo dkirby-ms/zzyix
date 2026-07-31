@@ -8,6 +8,10 @@ export type AuthSession = {
   status: AuthSessionStatus
   principal: MeResponse | null
   error: string | null
+  testIdentity?: {
+    subject: string
+    setSubject: (subject: string) => void
+  }
   apiOrigin: string
   authenticatedFetch: typeof fetch
   acquireAccessToken: AccessTokenProvider

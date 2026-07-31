@@ -58,6 +58,17 @@ const listen = (server: Server, port: number, host: string): Promise<void> =>
 const close = (server: Server): Promise<void> =>
   new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
 
+const resolveDisplayName = (subject: string, name?: string): string => {
+  if (name) return name
+  if (!subject.startsWith('dev-')) return 'E2E Canvas User'
+  return subject
+    .slice(4)
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(' ') || 'E2E Canvas User'
+}
+
 export const createTestOidcIssuer = async (
   port = 3199,
   environment: TestOidcEnvironment = process.env,
@@ -75,13 +86,13 @@ export const createTestOidcIssuer = async (
     expiresInSeconds = 300,
     notBeforeSeconds = 0,
     scope = TEST_OIDC_SCOPE,
-    name = 'E2E Canvas User',
+    name,
     email,
   }: TestOidcTokenOptions): Promise<string> => {
     const now = Math.floor(Date.now() / 1_000)
     return new SignJWT({
       scp: scope,
-      name,
+      name: resolveDisplayName(subject, name),
       ...(email ? { email } : {}),
     })
       .setProtectedHeader({ alg: 'RS256', kid: activeKey.kid, typ: 'JWT' })

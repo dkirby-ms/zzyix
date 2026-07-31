@@ -46,6 +46,7 @@ type RemoteSelection = {
 
 type MosaicSceneProps = {
   tiles: TileInstance[]
+  clientId: string
   activeShape: TileShape
   ghost: Ghost
   remoteCursors: RemoteCursor[]
@@ -119,10 +120,13 @@ const createExtrudeGeometry = (shape: TileShape): ExtrudeGeometry => {
   return geometry
 }
 
-const TileMesh = ({ tile }: { tile: TileInstance }) => {
+const TileMesh = ({ tile, clientId }: { tile: TileInstance; clientId: string }) => {
   const groupRef = useRef<Group>(null)
   const animationDone = useRef(false)
   const material = useCraftMaterial(tile.color, tile.material)
+  const ownerColor = tile.placedBy && tile.placedBy !== clientId
+    ? getCollaboratorColor(tile.placedBy)
+    : undefined
 
   const geometry = useMemo(() => createExtrudeGeometry(tile.shape), [tile.shape])
 
@@ -159,6 +163,11 @@ const TileMesh = ({ tile }: { tile: TileInstance }) => {
   return (
     <group ref={groupRef}>
       <mesh castShadow receiveShadow geometry={geometry} material={material} />
+      {ownerColor && (
+        <mesh geometry={geometry} scale={[1.035, 1.035, 1.035]} data-owner-boundary={tile.placedBy}>
+          <meshBasicMaterial color={ownerColor} wireframe transparent opacity={0.72} depthWrite={false} />
+        </mesh>
+      )}
     </group>
   )
 }
@@ -389,6 +398,7 @@ const CameraPositionController = ({ position }: { position: { x: number; y: numb
 
 const SceneContents = ({
   tiles,
+  clientId,
   activeShape,
   ghost,
   remoteCursors,
@@ -464,7 +474,7 @@ const SceneContents = ({
         )}
         {tileImages.map((image) => (
           <group key={image.key} position={[image.position.x - image.tile.transform.position.x, image.position.y - image.tile.transform.position.y, 0]} data-canonical-id={image.canonicalId}>
-            <TileMesh tile={image.tile} />
+            <TileMesh tile={image.tile} clientId={clientId} />
           </group>
         ))}
         {remoteSelections.map((selection) => {
@@ -541,6 +551,7 @@ const SceneContents = ({
 
 export const MosaicScene = ({
   tiles,
+  clientId,
   activeShape,
   ghost,
   remoteCursors,
@@ -632,6 +643,7 @@ export const MosaicScene = ({
           <fog attach="fog" args={['#e8e3d7', 10, 24]} />
           <SceneContents
             tiles={tiles}
+            clientId={clientId}
             activeShape={activeShape}
             worldBounds={resolvedBounds}
             onRotateDrag={onRotateDrag}

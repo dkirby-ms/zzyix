@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from 'jose'
+import { createRemoteJWKSet, decodeJwt, decodeProtectedHeader, jwtVerify } from 'jose'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createTestOidcIssuer,
@@ -22,14 +22,24 @@ describe('local test OIDC issuer', () => {
     await issuer.start()
 
     const discovery = await fetch(`${issuer.issuer}.well-known/openid-configuration`).then((response) => response.json())
-    const token = await issuer.issueToken({ subject: 'user-1' })
+    const token = await issuer.issueToken({ subject: 'dev-alice' })
     const verified = await jwtVerify(token, createRemoteJWKSet(new URL(discovery.jwks_uri)), {
       issuer: issuer.issuer,
       audience: TEST_OIDC_AUDIENCE,
       algorithms: ['RS256'],
     })
 
-    expect(verified.payload).toMatchObject({ sub: 'user-1', scp: TEST_OIDC_SCOPE })
+    expect(verified.payload).toMatchObject({ sub: 'dev-alice', name: 'Alice', scp: TEST_OIDC_SCOPE })
+  })
+
+  it('preserves explicit and legacy test display names', async () => {
+    issuer = await createTestOidcIssuer(0, testEnvironment)
+    await issuer.start()
+    const explicitToken = await issuer.issueToken({ subject: 'dev-bob', name: 'Robert' })
+    const legacyToken = await issuer.issueToken({ subject: 'user-1' })
+
+    expect(decodeJwt(explicitToken)).toMatchObject({ name: 'Robert' })
+    expect(decodeJwt(legacyToken)).toMatchObject({ name: 'E2E Canvas User' })
   })
 
   it('supports overlapping key rotation and expired token tests', async () => {

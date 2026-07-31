@@ -24,6 +24,7 @@ import type { ActiveTile, PlacementGuide, SequencedTilesState } from './interact
 import { ensureClientId } from './network/session'
 import { derivePlacementBounds } from './domain/placementSolver'
 import {
+  clearCanonicalPatchLink,
   discoverCanonicalWorld,
   getCanonicalPatchLink,
   resolveCanonicalPatchNavigation,
@@ -142,7 +143,7 @@ class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErro
       )
     }
 
-    return <div key={this.state.retryKey}>{this.props.children}</div>
+    return <div key={this.state.retryKey} className="canvas-scene">{this.props.children}</div>
   }
 }
 
@@ -638,13 +639,15 @@ function ProtectedApp() {
 
   const onQuiltPatchState = useCallback((payload: QuiltScopedStatePayload): void => {
     quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
-    setQuiltCache((previous) => mergeQuiltPatchSnapshot(previous, {
-      patchId: payload.patchId,
-      roomId: payload.canonicalRoomId,
-      chunkIds: payload.chunkIds,
-      tiles: payload.tiles,
-      cursor: payload.cursor,
-    }))
+    if (payload.payloadMode === 'fine') {
+      setQuiltCache((previous) => mergeQuiltPatchSnapshot(previous, {
+        patchId: payload.patchId,
+        roomId: payload.canonicalRoomId,
+        chunkIds: payload.chunkIds,
+        tiles: payload.tiles,
+        cursor: payload.cursor,
+      }))
+    }
     setSequencedState((previous) => ({ ...previous, lastOpSeq: Math.max(previous.lastOpSeq, payload.cursor.opSeq), revision: Math.max(previous.revision, payload.cursor.revision) }))
   }, [])
 
@@ -1407,6 +1410,7 @@ function ProtectedApp() {
             <Suspense fallback={<CanvasLoadingFallback />}>
               <MosaicScene
                 tiles={visibleTiles}
+                clientId={clientId}
                 activeShape={activeTile.shape}
                 ghost={{
                   transform: ghost.current,
@@ -1519,7 +1523,39 @@ function App() {
         <section className="auth-panel">
           <h1>Mosaic Atelier</h1>
           <p>{auth.error ?? 'Sign in to view your canvases.'}</p>
-          <button type="button" className="active" onClick={() => void auth.login()}>Sign in</button>
+          {auth.testIdentity && (
+            <div className="test-identity-control">
+              <label htmlFor="test-identity">Local test user</label>
+              <div className="test-identity-presets" aria-label="Local test user presets">
+                {['dev-alice', 'dev-bob'].map((subject) => (
+                  <button
+                    key={subject}
+                    type="button"
+                    className={auth.testIdentity?.subject === subject ? 'active' : undefined}
+                    onClick={() => auth.testIdentity?.setSubject(subject)}
+                  >
+                    {subject === 'dev-alice' ? 'Alice' : 'Bob'}
+                  </button>
+                ))}
+              </div>
+              <input
+                id="test-identity"
+                value={auth.testIdentity.subject}
+                onChange={(event) => auth.testIdentity?.setSubject(event.target.value)}
+                autoComplete="off"
+              />
+            </div>
+          )}
+          <button
+            type="button"
+            className="active"
+            onClick={() => {
+              clearCanonicalPatchLink()
+              void auth.login()
+            }}
+          >
+            Sign in
+          </button>
         </section>
       </main>
     )

@@ -79,6 +79,13 @@ export const setCanonicalPatchLink = (navigation: CanonicalPatchNavigation): voi
   window.history.replaceState(window.history.state, '', url)
 }
 
+export const clearCanonicalPatchLink = (): void => {
+  const url = new URL(window.location.href)
+  url.searchParams.delete('quilt')
+  url.searchParams.delete('patch')
+  window.history.replaceState(window.history.state, '', url)
+}
+
 export const ensureClientId = (): string => {
   const stored = localStorage.getItem(CLIENT_STORAGE_KEY)
   if (stored) return stored

@@ -139,7 +139,7 @@ Accessibility notes:
 
 - `src/domain/math2d.ts`: vector/math/easing utilities
 - `src/domain/tileGeometry.ts`: shape definitions, convex decomposition, transforms
-- `src/domain/placementSolver.ts`: SAT collision, bounds, adjacency, and raw-pointer validation
+- `src/domain/placementSolver.ts`: SAT collision, bounds, and raw-pointer validation; isolated placements are allowed
 - `src/domain/gridPatterns.ts`: constructible world-origin pattern catalog and viewport-local slot generation
 - `src/domain/gridPlacement.ts`: strict exact-slot candidate selection through the existing validator
 - `src/interaction/controller.ts`: pointer-target updates, ghost interpolation, release placement logic

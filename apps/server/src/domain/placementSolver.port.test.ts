@@ -72,6 +72,27 @@ describe('placementSolver server parity', () => {
     expect(result.reason).toBe('ok')
   })
 
+  it('accepts isolated placement away from settled tiles', () => {
+    const settled: TileInstance[] = [{
+      id: 'existing',
+      shape: 'square',
+      color: '#fff',
+      material: 'ceramic',
+      transform: { position: vec2(0, 0), rotation: 0 },
+      createdAt: 0,
+    }]
+
+    const result = validatePlacement(
+      'square',
+      { position: vec2(20, 20), rotation: 0 },
+      settled,
+      { mode: 'unbounded' },
+    )
+
+    expect(result.valid).toBe(true)
+    expect(result.reason).toBe('ok')
+  })
+
   it('derives the rotated geometry footprint and collision halo', () => {
     const bounds = derivePlacementBounds(
       'rectangle',

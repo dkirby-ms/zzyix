@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { getDatabaseBundle, closeDatabaseBundle } from './client.js'
+import { activateCanonicalWorld, getCanonicalWorldStatus, provisionCanonicalWorld } from './repository.js'
 import { users, canvases, tiles, participants } from './schema.js'
 import { tileShapeValues, materialVariantValues } from './types.js'
 
@@ -7,6 +8,7 @@ import { tileShapeValues, materialVariantValues } from './types.js'
 const DEMO_CANVAS_ID = '00000000-0000-4000-8000-000000000001'
 const DEMO_USER_CLIENT_ID = 'demo-client-001'
 const DEMO_USER_NAME = 'Demo User'
+const CANONICAL_OPERATOR_ID = 'db-seed'
 
 const TILE_SHAPES = tileShapeValues
 const DEMO_COLORS = [
@@ -15,6 +17,36 @@ const DEMO_COLORS = [
   '#BB8FCE', '#85C1E2', '#F8B88B',
 ]
 const DEMO_MATERIALS = materialVariantValues
+
+const ensureCanonicalWorld = async (): Promise<void> => {
+  let status = await getCanonicalWorldStatus()
+  if (status.pointerStatus === 'missing') {
+    console.log('[db:seed] Provisioning canonical world...')
+    status = await provisionCanonicalWorld({
+      action: 'provision',
+      expectedGeneration: 0,
+      patchRows: 32,
+      patchColumns: 32,
+      patchWidth: 31.2,
+      patchHeight: 20.4,
+      originX: 0,
+      originY: 0,
+      operatorId: CANONICAL_OPERATOR_ID,
+      reason: 'provision canonical world during database seed',
+    })
+  }
+
+  if (status.pointerStatus === 'inactive' && status.quilt) {
+    console.log('[db:seed] Activating canonical world...')
+    await activateCanonicalWorld({
+      action: 'activate',
+      quiltId: status.quilt.id,
+      expectedGeneration: status.generation,
+      operatorId: CANONICAL_OPERATOR_ID,
+      reason: 'activate canonical world during database seed',
+    })
+  }
+}
 
 // Generate demo tiles for a grid pattern
 const generateDemoTiles = (canvasId: string): Array<typeof tiles.$inferInsert> => {
@@ -97,6 +129,8 @@ const run = async (): Promise<void> => {
     } else {
       console.log('[db:seed] Demo canvas already exists, skipping seeding')
     }
+
+    await ensureCanonicalWorld()
     
     console.log('[db:seed] Database seeding completed successfully')
   } catch (error) {

@@ -93,11 +93,10 @@ export type ClientPresence = {
 // A tile placement is VALID when ALL of the following conditions hold:
 //   1. The tile transform's position is within the canvas bounds (default: minX=-5.2, maxX=5.2, minY=-3.4, maxY=3.4).
 //   2. The transformed tile polygon does NOT overlap with any settled tile polygon.
-//   3. The transformed tile polygon is NOT penetrating the canvas boundary (edge-to-edge
-//      contact is allowed via grout gap tolerance MAX_GROUT_GAP = 0.22).
+// Tiles may be placed at any distance from settled tiles.
 //
 // A tile placement is NEAR-VALID when:
-//   - Conditions 1 and 2 hold, but slight boundary penetration exists (< 0.5 unit).
+//   - Conditions 1 and 2 hold, but slight boundary penetration exists (< 0.22 unit).
 //   - Used for ghost preview to provide soft directional correction without hard rejection.
 //
 // A tile placement is INVALID when:
