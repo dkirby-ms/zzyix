@@ -28,7 +28,7 @@ const TILE_B_CROSS_ANCHOR_ID = 'bb100000-0000-4000-8000-000000000002'
 
 const seedGameData = async (pool: Pool): Promise<void> => {
   await pool.query(
-    'INSERT INTO canvases (id) VALUES ($1), ($2)',
+    'INSERT INTO canvases (id) VALUES ($1), ($2) ON CONFLICT (id) DO NOTHING',
     [CANVAS_A_ID, CANVAS_B_ID],
   )
   await pool.query(
