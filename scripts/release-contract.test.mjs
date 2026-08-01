@@ -57,11 +57,11 @@ test('CD releases queue without cancelling an in-flight migration owner', async 
   const workflow = await readWorkflow()
 
   assert.match(workflow, /concurrency:\n  group: cd-\$\{\{ github\.ref \}\}\n  cancel-in-progress: false/)
-  assert.match(workflow, /if az containerapp job show[\s\S]*job execution list[\s\S]*job secret set/)
+  assert.match(workflow, /if az containerapp job show[\s\S]*job execution list[\s\S]*job update[\s\S]*job start/)
   assert.match(workflow, /properties\.status/)
 })
 
-test('production rollout requires immutable retirement evidence and keeps mutation disabled', async () => {
+test('production rollout excludes legacy migration gates', async () => {
   const workflow = await readWorkflow()
   const deploymentBranches = extractServerDeploymentBranches(workflow)
 
@@ -74,33 +74,20 @@ test('production rollout requires immutable retirement evidence and keeps mutati
     assert.match(workflow, new RegExp(`${approval}: \\$\\{\\{ vars\\.${approval} \\}\\}`))
   }
   assert.match(workflow, /Release approval is not granted: \$\{approval_name\}/)
-  assert.doesNotMatch(workflow, /"FEATURE_PROTOCOL_V2_MUTATION_ENABLED=true"/)
-  assert.match(workflow, /FEATURE_PROTOCOL_V2_MUTATION_ENABLED: \$\{\{ vars\.FEATURE_PROTOCOL_V2_MUTATION_ENABLED \|\| 'false' \}\}/)
-  assert.match(workflow, /AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED/)
-  assert.match(workflow, /Mutation approval is not granted: \$\{approval_name\}/)
-  for (const evidenceSetting of [
-    'LEGACY_RETIREMENT_REPORT_SHA256',
-    'LEGACY_RETIREMENT_PARITY_PASSED',
-    'LEGACY_RETIREMENT_RECOVERY_PASSED',
-    'LEGACY_RETIREMENT_MULTI_REPLICA_PASSED',
-    'LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED',
-    'LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED',
+  for (const legacySetting of [
+    'AUTH_OWNER_E2E_GATE_APPROVED',
+    'AUTH_MIGRATION_REHEARSAL_APPROVED',
+    'AUTH_MUTATION_ROLLBACK_APPROVED',
+    'AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED',
+    'FEATURE_PROTOCOL_V2_MUTATION_ENABLED',
+    'FEATURE_QUILT_PROTOCOL_V2_ENABLED',
+    'LEGACY_RETIREMENT_',
   ]) {
-    assert.match(workflow, new RegExp(evidenceSetting))
+    assert.doesNotMatch(workflow, new RegExp(legacySetting))
   }
   for (const [branchName, branch] of Object.entries(deploymentBranches)) {
-    assert.match(
-      branch,
-      /legacy-retirement-report=\$\{\{ secrets\.LEGACY_RETIREMENT_REPORT_BASE64 \}\}/,
-      `${branchName} deployment must install immutable retirement evidence`,
-    )
-    assert.match(
-      branch,
-      /LEGACY_RETIREMENT_REPORT_BASE64=secretref:legacy-retirement-report/,
-      `${branchName} deployment must reference the installed retirement evidence`,
-    )
+    assert.doesNotMatch(branch, /LEGACY_RETIREMENT|FEATURE_PROTOCOL_V2|AUTH_MIGRATION_REHEARSAL/, `${branchName} deployment must exclude legacy gates`)
   }
-  assert.equal(workflow.match(/LEGACY_RETIREMENT_REPORT_PATH=\$\{LEGACY_RETIREMENT_REPORT_PATH\}/g)?.length, 3)
   assert.doesNotMatch(workflow, /FEATURE_CANONICAL_DISCOVERY_ENABLED|FEATURE_CANONICAL_ENTRY_ENABLED/)
 })
 
