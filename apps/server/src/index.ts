@@ -923,7 +923,7 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', version: '0.0.0' })
 })
 
-app.get('/me', requireHttpPrincipal, authenticatedReadRateLimiter, async (req, res) => {
+app.get('/me', authenticatedReadRateLimiter, requireHttpPrincipal, async (req, res) => {
   const principal = getPrincipalContext(req)
   const profile = await loadPrincipalProfile(principal.principalId)
   const response: MeResponse = buildMeResponse(profile)
@@ -996,7 +996,7 @@ export const sendCanonicalWorldDiscovery = async (
   }
 }
 
-app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
+app.get('/quilts/canonical', authenticatedReadRateLimiter, requireHttpPrincipal, async (req, res) => {
   try {
     const principal = getPrincipalContext(req)
     const attemptId = await issueCanonicalAttempt(principal.principalId, 'entry')
@@ -1027,7 +1027,7 @@ app.get('/quilts/canonical', requireHttpPrincipal, async (req, res) => {
   }
 })
 
-app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, authenticatedReadRateLimiter, async (req, res) => {
+app.get('/quilts/canonical/patches/eligible', authenticatedReadRateLimiter, requireHttpPrincipal, async (req, res) => {
   const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
   const result = await listEligibleCanonicalPatches(getPrincipalContext(req).principalId)
   if (!result) {
@@ -1042,7 +1042,7 @@ app.get('/quilts/canonical/patches/eligible', requireHttpPrincipal, authenticate
   res.status(200).json(result)
 })
 
-app.post('/quilts/canonical/telemetry', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/quilts/canonical/telemetry', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {
   const principal = getPrincipalContext(req)
   const attemptId = req.header('x-canonical-attempt-id')
   const lineageAttemptId = req.header('x-canonical-lineage-id')
@@ -1125,7 +1125,7 @@ app.post('/quilts/canonical/telemetry', requireHttpPrincipal, authenticatedMutat
   res.status(202).end()
 })
 
-app.get('/quilts/:quiltId/patches/:patchId/navigation', requireHttpPrincipal, authenticatedReadRateLimiter, async (req, res) => {
+app.get('/quilts/:quiltId/patches/:patchId/navigation', authenticatedReadRateLimiter, requireHttpPrincipal, async (req, res) => {
   getPrincipalContext(req)
   const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
   const { quiltId, patchId } = req.params
@@ -1142,7 +1142,7 @@ app.get('/quilts/:quiltId/patches/:patchId/navigation', requireHttpPrincipal, au
   res.status(200).json(navigation)
 })
 
-app.post('/ownership/claims', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/ownership/claims', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, ['patchId'])) return sendInvalidOwnershipRequest(res)
   const principalId = getPrincipalContext(req).principalId
   sendOwnershipResult(res, await claimPatch({
@@ -1151,7 +1151,7 @@ app.post('/ownership/claims', requireHttpPrincipal, authenticatedMutationRateLim
   }))
 })
 
-app.post('/ownership/transfers', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/ownership/transfers', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, ['patchId', 'recipientPrincipalId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await createOwnershipTransfer({
     operationId: req.body.operationId, patchId: req.body.patchId,
@@ -1160,7 +1160,7 @@ app.post('/ownership/transfers', requireHttpPrincipal, authenticatedMutationRate
   }))
 })
 
-app.post('/ownership/transfers/accept', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/ownership/transfers/accept', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, ['transferId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await acceptOwnershipTransfer({
     operationId: req.body.operationId, transferId: req.body.transferId,
@@ -1168,7 +1168,7 @@ app.post('/ownership/transfers/accept', requireHttpPrincipal, authenticatedMutat
   }))
 })
 
-app.post('/ownership/transfers/cancel', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/ownership/transfers/cancel', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, ['transferId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await cancelOwnershipTransfer({
     operationId: req.body.operationId, transferId: req.body.transferId,
@@ -1176,7 +1176,7 @@ app.post('/ownership/transfers/cancel', requireHttpPrincipal, authenticatedMutat
   }))
 })
 
-app.post('/ownership/abandon', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/ownership/abandon', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, ['patchId'])) return sendInvalidOwnershipRequest(res)
   sendOwnershipResult(res, await abandonPatch({
     operationId: req.body.operationId, patchId: req.body.patchId,
@@ -1184,7 +1184,7 @@ app.post('/ownership/abandon', requireHttpPrincipal, authenticatedMutationRateLi
   }))
 })
 
-app.post('/account/deletion', requireHttpPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/account/deletion', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, [])) return sendInvalidOwnershipRequest(res)
   const result = await requestPrincipalDeletion({
     operationId: req.body.operationId, principalId: getPrincipalContext(req).principalId,
@@ -1196,7 +1196,7 @@ app.post('/account/deletion', requireHttpPrincipal, authenticatedMutationRateLim
   } satisfies AccountDeletionResponse)
 })
 
-app.post('/account/deletion/recover', requireDeletionPendingPrincipal, authenticatedMutationRateLimiter, async (req, res) => {
+app.post('/account/deletion/recover', authenticatedMutationRateLimiter, requireDeletionPendingPrincipal, async (req, res) => {
   if (!ownershipRequest(req.body, [])) return sendInvalidOwnershipRequest(res)
   const result = await recoverPrincipalDeletion({
     operationId: req.body.operationId, principalId: getPrincipalContext(req).principalId,
