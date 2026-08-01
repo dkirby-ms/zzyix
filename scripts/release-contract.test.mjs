@@ -15,6 +15,7 @@ const recoveryJobModulePath = new URL('../infra/bicep/modules/recovery-job.bicep
 const dockerfilePath = new URL('../apps/client/Dockerfile', import.meta.url)
 const nginxPath = new URL('../apps/client/nginx.conf', import.meta.url)
 const migrationScriptPath = new URL('./verify-quilt-migration.sh', import.meta.url)
+const purgeScriptPath = new URL('./database-purge.sh', import.meta.url)
 const execFileAsync = promisify(execFile)
 
 const readWorkflow = () => readFile(workflowPath, 'utf8')
@@ -238,4 +239,74 @@ test('migration rehearsal help is dependency-free and prefix cleanup is scoped',
 
   const { stdout } = await execFileAsync(migrationScriptPath.pathname, ['--help'])
   assert.match(stdout, /^Usage: verify-quilt-migration\.sh/)
+})
+
+test('database-purge enforces safety contracts and rejects invalid arguments', async () => {
+  const script = await readFile(purgeScriptPath, 'utf8')
+  const main = script.slice(script.indexOf('main() {'))
+
+  // Help flag must be handled inside the arg-parsing loop, before psql is required
+  assert.ok(
+    main.indexOf('--help|-h)') < main.indexOf("require_command 'psql'"),
+    'help must be accessible before psql is required',
+  )
+
+  // Script must use strict error handling
+  assert.match(script, /set -euo pipefail/)
+
+  // purge_all must delete every canonical game-data table to avoid partial purges
+  for (const table of ['authorization_audit_events', 'canonical_world', 'tiles', 'quilts', 'canvases']) {
+    assert.match(script, new RegExp(`DELETE FROM ${table}`), `purge_all must delete from ${table}`)
+  }
+
+  // Canvas-scoped purge must gate audit deletion on quilt and patch membership
+  assert.match(script, /WHERE quilt_id IN \(SELECT id FROM target_quilt\)/)
+  assert.match(script, /FROM patches\b/)
+
+  // --yes bypass must be an explicit opt-in to skip interactive confirmation
+  assert.match(script, /bypass_confirmation.*==.*['"']true['"']/)
+
+  // --help output must describe all supported options
+  const { stdout } = await execFileAsync(purgeScriptPath.pathname, ['--help'])
+  assert.match(stdout, /^Usage: database-purge\.sh/)
+  assert.match(stdout, /--canvas-id/)
+  assert.match(stdout, /--database-url/)
+  assert.match(stdout, /--yes/)
+
+  // Unknown argument must be rejected before any database connection attempt
+  await assert.rejects(
+    execFileAsync(purgeScriptPath.pathname, ['--bogus']),
+    (err) => { assert.match(err.stderr, /Unknown argument: --bogus/); return true },
+  )
+
+  // --canvas-id must require a non-flag value
+  await assert.rejects(
+    execFileAsync(purgeScriptPath.pathname, ['--canvas-id']),
+    (err) => { assert.match(err.stderr, /--canvas-id requires a value/); return true },
+  )
+
+  // --database-url must require a non-flag value
+  await assert.rejects(
+    execFileAsync(purgeScriptPath.pathname, ['--database-url']),
+    (err) => { assert.match(err.stderr, /--database-url requires a value/); return true },
+  )
+
+  // Missing DATABASE_URL and SERVER_DATABASE_URL must produce a clear error
+  await assert.rejects(
+    execFileAsync(purgeScriptPath.pathname, ['--yes'], { env: { ...process.env, DATABASE_URL: '', SERVER_DATABASE_URL: '' } }),
+    (err) => { assert.match(err.stderr, /DATABASE_URL or SERVER_DATABASE_URL must be set/); return true },
+  )
+
+  // Incorrect confirmation text must abort the purge
+  await assert.rejects(
+    new Promise((resolve, reject) => {
+      const child = execFile(
+        purgeScriptPath.pathname,
+        ['--database-url', 'postgresql://localhost/test'],
+        (err, stdout, stderr) => (err ? reject(Object.assign(err, { stdout, stderr })) : resolve({ stdout, stderr })),
+      )
+      child.stdin.end('wrong\n')
+    }),
+    (err) => { assert.match(err.stderr, /Confirmation text did not match/); return true },
+  )
 })
