@@ -97,8 +97,6 @@ spawnService('API server', serverArgs, {
   AUTH_JWKS_URI: `${issuerUrl}jwks`,
   AUTH_ACCEPTED_ALGORITHM: 'RS256',
   FEATURE_MULTI_REPLICA_READY: 'true',
-  FEATURE_QUILT_PROTOCOL_V2_ENABLED: 'true',
-  FEATURE_PROTOCOL_V2_MUTATION_ENABLED: 'true',
 })
 
 spawnService('Vite client', [
