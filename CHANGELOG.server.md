@@ -1,3 +1,5 @@
+## [1.1.2](https://github.com/dkirby-ms/zzyix/compare/server-v1.1.1...server-v1.1.2) (2026-08-01)
+
 ## [1.1.1](https://github.com/dkirby-ms/zzyix/compare/server-v1.1.0...server-v1.1.1) (2026-07-31)
 
 ## [1.1.0](https://github.com/dkirby-ms/zzyix/compare/server-v1.0.1...server-v1.1.0) (2026-07-31)
