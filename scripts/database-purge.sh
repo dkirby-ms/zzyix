@@ -122,10 +122,15 @@ purge_canvas() {
 	local db_url="$1"
 	local canvas_id="$2"
 
+	# Validate UUID format before embedding in SQL to prevent injection.
+	if ! [[ "${canvas_id}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+		err "canvas_id must be a valid UUID: ${canvas_id}"
+	fi
+
 	local sql=''
 	sql+="BEGIN;"
 	sql+=" WITH target_quilt AS ("
-	sql+="  SELECT id FROM quilts WHERE legacy_canvas_id = :'canvas_id'"
+	sql+="  SELECT id FROM quilts WHERE legacy_canvas_id = '${canvas_id}'"
 	sql+="), deleted AS ("
 	sql+="  DELETE FROM authorization_audit_events"
 	sql+="  WHERE quilt_id IN (SELECT id FROM target_quilt)"
@@ -138,35 +143,34 @@ purge_canvas() {
 	sql+=" WITH deleted AS ("
 	sql+="  DELETE FROM canonical_world"
 	sql+="  WHERE quilt_id IN ("
-	sql+="   SELECT id FROM quilts WHERE legacy_canvas_id = :'canvas_id'"
+	sql+="   SELECT id FROM quilts WHERE legacy_canvas_id = '${canvas_id}'"
 	sql+="  )"
 	sql+="  RETURNING 1"
 	sql+=") SELECT count(*) AS deleted_canonical_worlds FROM deleted;"
 	sql+=" WITH deleted AS ("
 	sql+="  DELETE FROM tiles"
-	sql+="  WHERE canvas_id = :'canvas_id'"
+	sql+="  WHERE canvas_id = '${canvas_id}'"
 	sql+="     OR quilt_id IN ("
-	sql+="      SELECT id FROM quilts WHERE legacy_canvas_id = :'canvas_id'"
+	sql+="      SELECT id FROM quilts WHERE legacy_canvas_id = '${canvas_id}'"
 	sql+="     )"
 	sql+="     OR anchor_patch_id IN ("
 	sql+="      SELECT id FROM patches"
 	sql+="      WHERE quilt_id IN ("
-	sql+="       SELECT id FROM quilts WHERE legacy_canvas_id = :'canvas_id'"
+	sql+="       SELECT id FROM quilts WHERE legacy_canvas_id = '${canvas_id}'"
 	sql+="      )"
 	sql+="     )"
 	sql+="  RETURNING 1"
 	sql+=") SELECT count(*) AS deleted_tiles FROM deleted;"
 	sql+=" WITH deleted AS ("
-	sql+="  DELETE FROM quilts WHERE legacy_canvas_id = :'canvas_id' RETURNING 1"
+	sql+="  DELETE FROM quilts WHERE legacy_canvas_id = '${canvas_id}' RETURNING 1"
 	sql+=") SELECT count(*) AS deleted_quilts FROM deleted;"
 	sql+=" WITH deleted AS ("
-	sql+="  DELETE FROM canvases WHERE id = :'canvas_id' RETURNING 1"
+	sql+="  DELETE FROM canvases WHERE id = '${canvas_id}' RETURNING 1"
 	sql+=") SELECT count(*) AS deleted_canvases FROM deleted;"
 	sql+=" COMMIT;"
 
 	psql "${db_url}" \
 		--set ON_ERROR_STOP=1 \
-		--set "canvas_id=${canvas_id}" \
 		--command "${sql}"
 }
 
