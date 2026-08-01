@@ -1,3 +1,20 @@
+## [1.2.0](https://github.com/dkirby-ms/zzyix/compare/server-v1.1.4...server-v1.2.0) (2026-08-01)
+
+### Features
+
+* UX improvements and streamlining ([0f37843](https://github.com/dkirby-ms/zzyix/commit/0f37843524362957529e8a5e257afb9dd3e1e078))
+
+### Bug Fixes
+
+* **client:** e2e test failures after ux changes ([fdd0814](https://github.com/dkirby-ms/zzyix/commit/fdd08145fc1c20eb4a045fe387b96314aa002952))
+* **client:** test failing assertion after ux changes ([c22b93d](https://github.com/dkirby-ms/zzyix/commit/c22b93d13e110d49b207c854be573b0c675dd940))
+
+### Miscellaneous Chores
+
+* fix release bugs ([d0070bc](https://github.com/dkirby-ms/zzyix/commit/d0070bc913be408f8f88d2cfe285ba45f4df269a))
+* **release:** client-v1.1.2 [skip ci] ([f25baaa](https://github.com/dkirby-ms/zzyix/commit/f25baaac7accefe8314ec61840469db2bc2c4b03))
+* **release:** client-v1.2.0 [skip ci] ([da6ad10](https://github.com/dkirby-ms/zzyix/commit/da6ad10ddf2750afe9b3756e99fe47743814184b))
+
 ## [1.1.4](https://github.com/dkirby-ms/zzyix/compare/server-v1.1.3...server-v1.1.4) (2026-08-01)
 
 ## [1.1.3](https://github.com/dkirby-ms/zzyix/compare/server-v1.1.2...server-v1.1.3) (2026-08-01)
