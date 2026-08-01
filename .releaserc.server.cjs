@@ -1,15 +1,15 @@
 const releaseNotesPresetConfig = {
   types: [
-    { type: 'feat', section: 'Features' },
-    { type: 'fix', section: 'Bug Fixes' },
-    { type: 'perf', section: 'Performance Improvements' },
-    { type: 'revert', section: 'Reverts' },
-    { type: 'docs', section: 'Documentation' },
-    { type: 'refactor', section: 'Code Refactoring' },
-    { type: 'test', section: 'Tests' },
-    { type: 'ci', section: 'Continuous Integration' },
-    { type: 'build', section: 'Build System' },
-    { type: 'chore', section: 'Miscellaneous Chores' }
+    { type: 'feat', section: 'Features', hidden: false },
+    { type: 'fix', section: 'Bug Fixes', hidden: false },
+    { type: 'perf', section: 'Performance Improvements', hidden: false },
+    { type: 'revert', section: 'Reverts', hidden: false },
+    { type: 'docs', section: 'Documentation', hidden: false },
+    { type: 'refactor', section: 'Code Refactoring', hidden: false },
+    { type: 'test', section: 'Tests', hidden: false },
+    { type: 'ci', section: 'Continuous Integration', hidden: false },
+    { type: 'build', section: 'Build System', hidden: false },
+    { type: 'chore', section: 'Miscellaneous Chores', hidden: false }
   ]
 };
 
