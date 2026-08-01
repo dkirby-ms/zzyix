@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 import test from 'node:test'
 import { parseExactHttpsOrigin, validateDeploymentOrigins } from './deployment-origin.mjs'
@@ -16,8 +17,14 @@ const dockerfilePath = new URL('../apps/client/Dockerfile', import.meta.url)
 const nginxPath = new URL('../apps/client/nginx.conf', import.meta.url)
 const migrationScriptPath = new URL('./verify-quilt-migration.sh', import.meta.url)
 const execFileAsync = promisify(execFile)
+const require = createRequire(import.meta.url)
+const clientReleaseConfig = require('../.releaserc.client.cjs')
+const serverReleaseConfig = require('../.releaserc.server.cjs')
 
 const readWorkflow = () => readFile(workflowPath, 'utf8')
+
+const extractPluginConfig = (releaseConfig, pluginName) =>
+  releaseConfig.plugins.find(([name]) => name === pluginName)?.[1]
 
 const extractServerDeploymentBranches = (workflow) => {
   const deploymentStart = workflow.indexOf('      - name: Deploy Server Container App')
@@ -91,6 +98,25 @@ test('CI requires authenticated multi-replica E2E', async () => {
   assert.match(workflow, /name: Authenticated multi-replica E2E/)
   assert.match(workflow, /needs: authenticated-e2e/)
   assert.match(workflow, /run: npm run test:e2e:multi-replica/)
+})
+
+test('release notes generator maps conventional commit types to changelog sections', () => {
+  for (const [name, releaseConfig] of [
+    ['client', clientReleaseConfig],
+    ['server', serverReleaseConfig],
+  ]) {
+    const releaseNotesPlugin = extractPluginConfig(releaseConfig, '@semantic-release/release-notes-generator')
+    assert.ok(releaseNotesPlugin?.presetConfig?.types, `${name} release notes generator must declare changelog sections`)
+
+    assert.deepEqual(
+      releaseNotesPlugin.presetConfig.types.filter(({ type }) => type === 'feat' || type === 'fix'),
+      [
+        { type: 'feat', section: 'Features' },
+        { type: 'fix', section: 'Bug Fixes' },
+      ],
+      `${name} release notes generator must render Features and Bug Fixes sections`,
+    )
+  }
 })
 
 test('restricted recovery job is provisioned and resolved from infrastructure output', async () => {
