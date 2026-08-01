@@ -2,7 +2,12 @@ import { getTileDefinition } from './tileGeometry'
 import type { Vec2 } from './math2d'
 import type { TileShape, Transform2D } from './tileGeometry'
 
-export type GridPatternId = 'square-lattice' | 'running-bond' | 'triangle-tessellation'
+export type GridPatternId =
+  | 'square-lattice'
+  | 'running-bond'
+  | 'triangle-tessellation'
+  | 'large-square-lattice'
+  | 'right-triangle-pinwheel'
 
 export type GridPatternTemplateSlot = {
   id: string
@@ -64,11 +69,16 @@ const getOutlineSize = (shape: TileShape): Vec2 => {
 const squareSize = getOutlineSize('square')
 const rectangleSize = getOutlineSize('rectangle')
 const triangleSize = getOutlineSize('triangle')
+const largeSquareSize = getOutlineSize('large-square')
+const rightTriangleSize = getOutlineSize('right-triangle')
 const squareStep = squareSize.x + GRID_GAP
 const rectangleStepX = rectangleSize.x + GRID_GAP
 const rectangleStepY = rectangleSize.y + GRID_GAP
 const triangleStepX = triangleSize.x / 2 + 0.13
 const triangleStepY = triangleSize.y + GRID_GAP
+const largeSquareStep = largeSquareSize.x + GRID_GAP
+const rightTriangleStep = rightTriangleSize.x + GRID_GAP
+const rightTrianglePairOffset = rightTriangleSize.x / 3
 
 export const GRID_PATTERNS: readonly GridPattern[] = [
   {
@@ -134,6 +144,49 @@ export const GRID_PATTERNS: readonly GridPattern[] = [
         id: 'down',
         shape: 'triangle',
         offset: { x: triangleStepX, y: 0 },
+        rotation: Math.PI,
+        mirrored: false,
+      },
+    ],
+  },
+  {
+    id: 'large-square-lattice',
+    label: 'Large square lattice',
+    description: 'Even rows and columns of large square tiles.',
+    basis: [
+      { x: largeSquareStep, y: 0 },
+      { x: 0, y: largeSquareStep },
+    ],
+    slots: [
+      {
+        id: 'large-square',
+        shape: 'large-square',
+        offset: { x: 0, y: 0 },
+        rotation: 0,
+        mirrored: false,
+      },
+    ],
+  },
+  {
+    id: 'right-triangle-pinwheel',
+    label: 'Right triangle pinwheel',
+    description: 'Pairs of right triangles sharing a hypotenuse.',
+    basis: [
+      { x: rightTriangleStep, y: 0 },
+      { x: 0, y: rightTriangleStep },
+    ],
+    slots: [
+      {
+        id: 'forward',
+        shape: 'right-triangle',
+        offset: { x: 0, y: 0 },
+        rotation: 0,
+        mirrored: false,
+      },
+      {
+        id: 'back',
+        shape: 'right-triangle',
+        offset: { x: rightTrianglePairOffset, y: rightTrianglePairOffset },
         rotation: Math.PI,
         mirrored: false,
       },
