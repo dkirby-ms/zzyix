@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 import test from 'node:test'
+import { generateNotes } from '@semantic-release/release-notes-generator'
 import { parseExactHttpsOrigin, validateDeploymentOrigins } from './deployment-origin.mjs'
 
 const workflowPath = new URL('../.github/workflows/cd.yml', import.meta.url)
@@ -101,7 +102,7 @@ test('CI requires authenticated multi-replica E2E', async () => {
   assert.match(workflow, /run: npm run test:e2e:multi-replica/)
 })
 
-test('release notes generator maps conventional commit types to changelog sections', () => {
+test('release notes generator includes conventional commits in changelog sections', async () => {
   for (const [name, releaseConfig] of [
     ['client', clientReleaseConfig],
     ['server', serverReleaseConfig],
@@ -112,11 +113,27 @@ test('release notes generator maps conventional commit types to changelog sectio
     assert.deepEqual(
       releaseNotesPlugin.presetConfig.types.filter(({ type }) => type === 'feat' || type === 'fix'),
       [
-        { type: 'feat', section: 'Features' },
-        { type: 'fix', section: 'Bug Fixes' },
+        { type: 'feat', section: 'Features', hidden: false },
+        { type: 'fix', section: 'Bug Fixes', hidden: false },
       ],
       `${name} release notes generator must render Features and Bug Fixes sections`,
     )
+
+    const notes = await generateNotes(releaseNotesPlugin, {
+      commits: [
+        { hash: '1234567890abcdef', message: `fix(${name}): preserve release details` },
+        { hash: 'abcdef1234567890', message: `test(${name}): cover changelog generation` },
+      ],
+      lastRelease: { gitTag: `${name}-v1.0.0` },
+      nextRelease: { gitTag: `${name}-v1.0.1`, version: '1.0.1' },
+      options: { repositoryUrl: 'https://github.com/dkirby-ms/zzyix.git' },
+      cwd: new URL('..', import.meta.url).pathname,
+    })
+
+    assert.match(notes, /### Bug Fixes/)
+    assert.match(notes, /preserve release details/)
+    assert.match(notes, /### Tests/)
+    assert.match(notes, /cover changelog generation/)
   }
 })
 
