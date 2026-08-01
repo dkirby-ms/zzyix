@@ -216,6 +216,24 @@ vi.mock('./render/MosaicScene', () => ({
       >
         Emit Viewport
       </button>
+      {[1, 2, 3].map((step) => (
+        <button
+          key={step}
+          type="button"
+          onClick={() => onViewportChanged?.({
+            center: { x: step * RUNTIME_CHUNK_WORLD_SIZE, y: 0 },
+            viewport: {
+              minX: (step - 1) * RUNTIME_CHUNK_WORLD_SIZE,
+              maxX: step * RUNTIME_CHUNK_WORLD_SIZE,
+              minY: -RUNTIME_CHUNK_WORLD_SIZE,
+              maxY: 0,
+            },
+            zoom: 60,
+          })}
+        >
+          Emit Viewport {step}
+        </button>
+      ))}
       <button type="button" onClick={() => onZoomTierChanged?.(30)}>
         Zoom Aggregate
       </button>
@@ -1054,6 +1072,55 @@ describe('App canonical canvas behavior', () => {
 
     const enabledSocketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
     expect(enabledSocketCall[16]).toBe(true)
+  })
+
+  it('coalesces rapid viewport changes without resubscribing after snapshots', async () => {
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'subscribe_quilt_area') callback?.({ outcomes: [], acceptedCursors: {} })
+    })
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[3] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock, on: vi.fn(), off: vi.fn(), connected: true } }
+      if (actionRef) actionRef.current = socketRef.current
+      return socketRef as any
+    })
+
+    render(<App />)
+    await enterCanonicalCanvas()
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onQuiltProtocol = socketCall[6] as (payload: any) => void
+    const onQuiltPatchSnapshot = socketCall[7] as (payload: any) => void
+
+    vi.useFakeTimers()
+    act(() => onQuiltProtocol({
+      selectedProtocolVersion: 2,
+      v1CompatibilityEnabled: false,
+      mutationEnabled: false,
+      topology: {
+        quiltId: 'quilt-1', topology: 'toroidal', patchRows: 1, patchColumns: 4,
+        patchWidth: RUNTIME_CHUNK_WORLD_SIZE, patchHeight: RUNTIME_CHUNK_WORLD_SIZE,
+      },
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 3' }))
+    act(() => vi.advanceTimersByTime(119))
+    expect(emitMock).not.toHaveBeenCalledWith('subscribe_quilt_area', expect.anything(), expect.anything())
+    act(() => vi.advanceTimersByTime(1))
+
+    const subscriptions = () => emitMock.mock.calls.filter((call) => call[0] === 'subscribe_quilt_area')
+    expect(subscriptions()).toHaveLength(1)
+    expect(subscriptions()[0]?.[1]).toEqual(expect.objectContaining({
+      rooms: expect.arrayContaining([expect.objectContaining({ column: 3 })]),
+    }))
+
+    act(() => onQuiltPatchSnapshot({
+      quiltId: 'quilt-1', canonicalRoomId: 'room-c:fine', patchId: 'patch-c', payloadMode: 'fine', chunkIds: ['3:0'], tiles: [],
+      cursor: { patchId: 'patch-c', opSeq: 1, revision: 1, eventId: 'event-c' },
+    }))
+    act(() => vi.advanceTimersByTime(500))
+    expect(subscriptions()).toHaveLength(1)
   })
 
   it('subscribes canonical v2 AOI rooms and replaces only the recovered patch', async () => {

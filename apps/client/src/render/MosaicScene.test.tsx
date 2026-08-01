@@ -57,6 +57,7 @@ describe('MosaicScene interaction plane', () => {
       <MosaicScene
         tiles={[]}
         clientId="client-1"
+        ownershipIdentity="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -101,6 +102,7 @@ describe('MosaicScene interaction plane', () => {
       <MosaicScene
         tiles={[]}
         clientId="client-1"
+        ownershipIdentity="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -146,6 +148,7 @@ describe('MosaicScene interaction plane', () => {
           { ...tile, id: 'remote-tile', placedBy: 'client-2' },
         ]}
         clientId="client-1"
+        ownershipIdentity="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },

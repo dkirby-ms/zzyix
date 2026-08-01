@@ -479,6 +479,7 @@ export type QuiltProtocolHandshake = {
   selectedProtocolVersion: 1 | 2
   v1CompatibilityEnabled: boolean
   mutationEnabled: boolean
+  ownershipIdentity?: string
   canaryTelemetryEnabled?: boolean
   topology?: QuiltTopologyHandshake
   limits?: QuiltProtocolLimits

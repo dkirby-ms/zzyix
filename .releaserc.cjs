@@ -16,21 +16,12 @@ const releaseNotesPresetConfig = {
 module.exports = {
   branches: ['main'],
   repositoryUrl: 'https://github.com/dkirby-ms/zzyix.git',
-  tagFormat: 'server-v${version}',
+  tagFormat: 'v${version}',
   plugins: [
     [
       '@semantic-release/commit-analyzer',
       {
         preset: 'conventionalcommits',
-        releaseRules: [
-          { scope: 'server', release: 'patch' },
-          { scope: 'db', release: 'patch' },
-          { scope: 'jobs', release: 'patch' },
-          { scope: 'api', release: 'patch' },
-          { scope: 'domain-server', release: 'patch' },
-          { scope: 'deps-server', release: 'patch' },
-          { scope: 'repo', release: false }
-        ],
         parserOpts: {
           noteKeywords: ['BREAKING CHANGE', 'BREAKING CHANGES', 'BREAKING']
         }
@@ -49,13 +40,14 @@ module.exports = {
     [
       '@semantic-release/changelog',
       {
-        changelogFile: 'CHANGELOG.server.md'
+        changelogFile: 'CHANGELOG.md',
+        changelogTitle: '---\ntitle: Changelog\ndescription: Release notes and notable changes by version.\n---\n\n## Changelog'
       }
     ],
     [
       '@semantic-release/git',
       {
-        assets: ['CHANGELOG.server.md'],
+        assets: ['CHANGELOG.md'],
         message: 'chore(release): ${nextRelease.gitTag} [skip ci]\n\n${nextRelease.notes}'
       }
     ],

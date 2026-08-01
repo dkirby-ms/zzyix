@@ -93,6 +93,7 @@ const CHUNK_SOFT_SUBSCRIPTION_LIMIT = 64
 const CHUNK_HARD_SUBSCRIPTION_LIMIT = 128
 const CHUNK_MOVEMENT_HYSTERESIS_RATIO = 0.25
 const CHUNK_ZOOM_HYSTERESIS = 0.5
+const CHUNK_SUBSCRIPTION_DEBOUNCE_MS = 120
 const QUILT_CACHE_PATCH_BUDGET = 64
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
@@ -428,6 +429,7 @@ function ProtectedApp() {
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
   const isQuiltV2 = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology !== undefined
+  const ownershipIdentity = quiltProtocol?.ownershipIdentity ?? clientId
   const mutationControlsEnabled = !isQuiltV2 || quiltProtocol.mutationEnabled
   const ownedPatchBounds = useMemo(() => canonicalDescriptor ? {
     minX: canonicalDescriptor.originX + canonicalDescriptor.assignedPatch.column * canonicalDescriptor.patchWidth,
@@ -869,14 +871,18 @@ function ProtectedApp() {
       chunkIds: entry.chunks,
     }))
 
-    socket.emit('subscribe_quilt_area', {
-      quiltId: topology.quiltId,
-      rooms,
-      cursors: selectQuiltCursors(quiltCache),
-    }, (ack) => {
-      quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
-    })
-  }, [activeChunkIds, connectionEpoch, quiltCache, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
+    const timeoutId = window.setTimeout(() => {
+      socket.emit('subscribe_quilt_area', {
+        quiltId: topology.quiltId,
+        rooms,
+        cursors: quiltCursorsRef.current,
+      }, (ack) => {
+        quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
+      })
+    }, CHUNK_SUBSCRIPTION_DEBOUNCE_MS)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activeChunkIds, connectionEpoch, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
 
   useEffect(() => {
     if (pointerEmitThrottleRef.current.timeoutId !== null) {
@@ -899,7 +905,7 @@ function ProtectedApp() {
   }, [])
 
   const handleUndo = useCallback((): void => {
-    const lastSettled = [...visibleTiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)
+    const lastSettled = [...visibleTiles].reverse().find((tile) => isServerTileId(tile.id) && tile.placedBy === ownershipIdentity)
     if (!lastSettled) return
 
     const socket = socketRef.current
@@ -936,7 +942,7 @@ function ProtectedApp() {
       })
       return
     }
-  }, [clientId, isQuiltV2, quiltCache, quiltProtocol, socketRef, visibleTiles])
+  }, [isQuiltV2, ownershipIdentity, quiltCache, quiltProtocol, socketRef, visibleTiles])
 
   useEffect(() => {
     if (mode !== 'canvas') {
@@ -1043,7 +1049,7 @@ function ProtectedApp() {
     if (!socket) return
 
     const tileId = createServerTileId()
-    const tempTile = { ...result.placed, id: tileId, placedBy: clientId }
+    const tempTile = { ...result.placed, id: tileId, placedBy: ownershipIdentity }
     const quiltPatchId = isQuiltV2
       ? findCachedPatchId(quiltCache, tempTile.transform.position)
       : undefined
@@ -1085,7 +1091,7 @@ function ProtectedApp() {
           if (ack.status === 'rejected') return cleared
           const applied = patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, {
             ...ack.tile,
-            placedBy: clientId,
+            placedBy: ownershipIdentity,
           }, {
             patchId,
             opSeq: ack.patchRevisions[patchId],
@@ -1103,7 +1109,7 @@ function ProtectedApp() {
       return
     }
     triggerInvalidPulse()
-  }, [clientId, emitSelectionUpdate, isQuiltV2, quiltCache, quiltProtocol, socketRef, triggerInvalidPulse, visibleTiles])
+  }, [emitSelectionUpdate, isQuiltV2, ownershipIdentity, quiltCache, quiltProtocol, socketRef, triggerInvalidPulse, visibleTiles])
 
   const updatePointer = useCallback((x: number, y: number): void => {
     const pointer = vec2(x, y)
@@ -1233,7 +1239,7 @@ function ProtectedApp() {
         }
       }
 
-      const tempTile = { ...result.placed, placedBy: clientId }
+      const tempTile = { ...result.placed, placedBy: ownershipIdentity }
       setSequencedState((prev) => ({
         ...prev,
         tiles: [...prev.tiles, tempTile],
@@ -1251,7 +1257,7 @@ function ProtectedApp() {
       if (isQuiltV2) {
         const topology = quiltProtocol?.topology
         const tileId = createServerTileId()
-        const quiltTile = { ...result.placed, id: tileId, placedBy: clientId }
+        const quiltTile = { ...result.placed, id: tileId, placedBy: ownershipIdentity }
         const patchIds = topology ? findAffectedCachedPatchIds(quiltCache, quiltTile, topology) : null
         if (!quiltProtocol?.mutationEnabled || !topology || !patchIds || patchIds.length === 0) {
           triggerInvalidPulse()
@@ -1287,7 +1293,7 @@ function ProtectedApp() {
           if (ack.status === 'rejected') return cleared
           return patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, {
             ...ack.tile,
-            placedBy: clientId,
+            placedBy: ownershipIdentity,
           }, {
             patchId,
             opSeq: ack.patchRevisions[patchId],
@@ -1425,6 +1431,7 @@ function ProtectedApp() {
               <MosaicScene
                 tiles={visibleTiles}
                 clientId={clientId}
+                ownershipIdentity={ownershipIdentity}
                 activeShape={activeTile.shape}
                 ghost={{
                   transform: ghost.current,

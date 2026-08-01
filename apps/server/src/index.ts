@@ -1738,6 +1738,7 @@ io.on('connection', (socket) => {
     let quiltAdapterRoomIds = new Set<string>()
   let roomChurnWindowStartedAt = Date.now()
   let roomChurnInWindow = 0
+    let quiltAreaSubscriptionInFlight = false
 
   registerCanonicalTelemetryHandler(socket)
   socket.emit('canonical_lineage', { lineageAttemptId: socket.data.lineageAttemptId })
@@ -1805,7 +1806,15 @@ io.on('connection', (socket) => {
         socket.disconnect(true)
       }).catch((error) => writeLog('error', 'canonical_target_validation_failed', { quiltId, socketId: socket.id, error }))
     }, CANONICAL_TARGET_VALIDATION_INTERVAL_MS)
-    socket.emit('quilt_protocol', { selectedProtocolVersion: 2, v1CompatibilityEnabled: false, mutationEnabled: isProtocolV2MutationEnabled, canaryTelemetryEnabled, topology: deliveryContext.topology, limits: QUILT_PROTOCOL_LIMITS })
+    socket.emit('quilt_protocol', {
+      selectedProtocolVersion: 2,
+      v1CompatibilityEnabled: false,
+      mutationEnabled: isProtocolV2MutationEnabled,
+      ownershipIdentity: selectedPrincipalId,
+      canaryTelemetryEnabled,
+      topology: deliveryContext.topology,
+      limits: QUILT_PROTOCOL_LIMITS,
+    })
     if (presence.isFirstLease) socket.to(presenceRoom).emit('client_joined', { client: { clientId: presence.clientId, joinedAt: presence.joinedAt } })
   }
 
@@ -1870,7 +1879,7 @@ io.on('connection', (socket) => {
         quiltId: payload.quiltId,
         operationId: payload.operationId,
         principalId: selectedPrincipalId,
-        placedBy: clientId,
+        placedBy: selectedPrincipalId,
         expectedPatchRevisions: payload.expectedPatchRevisions,
         payload: payload.tile,
       })
@@ -1908,7 +1917,7 @@ io.on('connection', (socket) => {
               eventId,
               opSeq: revision,
               revision,
-              operation: { tile: result.tile, placedBy: clientId, opSeq: revision, revision },
+              operation: { tile: result.tile, placedBy: selectedPrincipalId, opSeq: revision, revision },
             })
           }
         }
@@ -1973,7 +1982,7 @@ io.on('connection', (socket) => {
               eventId,
               opSeq: revision,
               revision,
-              operation: { tileId: result.tileId, removedBy: clientId, opSeq: revision, revision },
+              operation: { tileId: result.tileId, removedBy: selectedPrincipalId, opSeq: revision, revision },
             })
           }
         }
@@ -2044,6 +2053,19 @@ io.on('connection', (socket) => {
       return
     }
 
+    if (quiltAreaSubscriptionInFlight) {
+      invokeAckSafely<SubscribeQuiltAreaAck>(ack, {
+        outcomes: payload.rooms.map((room) => ({
+          requestId: room.requestId,
+          status: 'invalid',
+          reason: 'SUBSCRIPTION_IN_PROGRESS',
+        })),
+        acceptedCursors: {},
+      })
+      return
+    }
+
+    quiltAreaSubscriptionInFlight = true
     try {
       const deliveryContext = await loadQuiltDeliveryContext({ quiltId, principalId: socket.data.principalId })
       if (!deliveryContext || deliveryContext.topology.quiltId !== payload.quiltId) {
@@ -2261,6 +2283,8 @@ io.on('connection', (socket) => {
         acceptedCursors: {},
       })
       await recordResubscribe(outcomes)
+    } finally {
+      quiltAreaSubscriptionInFlight = false
     }
   })
 

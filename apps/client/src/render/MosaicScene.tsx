@@ -47,6 +47,7 @@ type RemoteSelection = {
 type MosaicSceneProps = {
   tiles: TileInstance[]
   clientId: string
+  ownershipIdentity: string
   activeShape: TileShape
   ghost: Ghost
   remoteCursors: RemoteCursor[]
@@ -122,11 +123,11 @@ const createExtrudeGeometry = (shape: TileShape): ExtrudeGeometry => {
   return geometry
 }
 
-const TileMesh = ({ tile, clientId }: { tile: TileInstance; clientId: string }) => {
+const TileMesh = ({ tile, ownershipIdentity }: { tile: TileInstance; ownershipIdentity: string }) => {
   const groupRef = useRef<Group>(null)
   const animationDone = useRef(false)
   const material = useCraftMaterial(tile.color, tile.material)
-  const ownerColor = tile.placedBy && tile.placedBy !== clientId
+  const ownerColor = tile.placedBy && tile.placedBy !== ownershipIdentity
     ? getCollaboratorColor(tile.placedBy)
     : undefined
 
@@ -416,7 +417,7 @@ const CameraZoomController = ({ zoom }: { zoom?: number }) => {
 
 const SceneContents = ({
   tiles,
-  clientId,
+  ownershipIdentity,
   activeShape,
   ghost,
   remoteCursors,
@@ -493,7 +494,7 @@ const SceneContents = ({
         )}
         {tileImages.map((image) => (
           <group key={image.key} position={[image.position.x - image.tile.transform.position.x, image.position.y - image.tile.transform.position.y, 0]} data-canonical-id={image.canonicalId}>
-            <TileMesh tile={image.tile} clientId={clientId} />
+            <TileMesh tile={image.tile} ownershipIdentity={ownershipIdentity} />
           </group>
         ))}
         {remoteSelections.map((selection) => {
@@ -572,6 +573,7 @@ const SceneContents = ({
 export const MosaicScene = ({
   tiles,
   clientId,
+  ownershipIdentity,
   activeShape,
   ghost,
   remoteCursors,
@@ -665,6 +667,7 @@ export const MosaicScene = ({
           <SceneContents
             tiles={tiles}
             clientId={clientId}
+            ownershipIdentity={ownershipIdentity}
             activeShape={activeShape}
             worldBounds={resolvedBounds}
             onRotateDrag={onRotateDrag}
