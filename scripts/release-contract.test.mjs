@@ -263,6 +263,15 @@ test('database-purge enforces safety contracts and rejects invalid arguments', a
   assert.match(script, /WHERE quilt_id IN \(SELECT id FROM target_quilt\)/)
   assert.match(script, /FROM patches\b/)
 
+  // Canvas-scoped tile deletion must include tiles that reference target-quilt patches via
+  // anchor_patch_id even when those tiles belong to a different canvas (quilt_id = NULL).
+  // Without this clause, cascade-deleting quilt patches raises a RESTRICT FK violation.
+  assert.match(
+    script,
+    /anchor_patch_id IN[\s\S]*SELECT id FROM patches[\s\S]*quilt_id IN/,
+    'purge_canvas must clear cross-canvas anchor_patch_id references before deleting patches',
+  )
+
   // --yes bypass must be an explicit opt-in to skip interactive confirmation
   assert.match(script, /bypass_confirmation.*==.*['"']true['"']/)
 
