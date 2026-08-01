@@ -59,9 +59,6 @@ Configure these GitHub environment variables for each deployment environment:
 	authorization audit and pseudonymous attribution retention
 * `AUTH_DELETION_COMPLETION_POLICY_APPROVED`: Confirms approved deletion
 	completion behavior when ownership remains blocked
-* `AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED`: Confirms production-like
-	authorization benchmark thresholds and rollback criteria are approved before
-	mutation enablement
 
 The corresponding client values are `AUTH_AUTHORITY`, `AUTH_CLIENT_ID`,
 `AUTH_API_SCOPE`, `AUTH_API_ORIGIN`, `AUTH_REDIRECT_URI`, and
@@ -119,13 +116,10 @@ These values are conservative canary defaults. They are not final measured produ
 
 Protocol-v2 clients request `protocolVersion: 2` in Socket.IO auth. The server selects v2 only for quilts whose persisted `protocol_version` is `2`, announces immutable topology and negotiated limits with `quilt_protocol`, and accepts canonical `subscribe_quilt_area` requests. Acknowledgements report `accepted`, `forbidden`, `invalid`, or `budget-exceeded` for every requested room. Reconnect recovery compares patch operation sequence, revision, and event ID cursors, then emits only the required `quilt_patch_snapshot`; it does not send a whole-quilt snapshot.
 
-Protocol-v2 execution is fail-closed. `FEATURE_QUILT_PROTOCOL_V2_ENABLED=true`
-enables it globally. Otherwise, only authenticated quilt and principal pairs
-selected by the canary controls receive v2; other requested v2 connections
-negotiate v1. `FEATURE_QUILT_DUAL_READ_ENABLED=true` enables migration dual
-reads globally. Otherwise, dual reads run only for selected canary pairs.
-
-Protocol v1 remains available only through explicit compatibility settings. V2 connections suppress session-wide durable mutation events. Toroidal mutation stays disabled until authentication maps an external identity to a stable internal principal; `clientId`, socket identity, and attribution fields are not principals.
+Canonical connections use protocol v2. V2 connections suppress session-wide
+durable mutation events. Authentication maps each external identity to a stable
+internal principal before toroidal mutation; `clientId`, socket identity, and
+attribution fields are not principals.
 
 ### Mutation acceptance gates
 
@@ -142,15 +136,8 @@ Delegated-capability and moderator acceptance remains deferred. The
 `test:e2e:delegated` command intentionally fails so automation cannot treat that
 work as complete.
 
-Production CD reads `FEATURE_PROTOCOL_V2_MUTATION_ENABLED` from the deployment
-environment and defaults it to `false` when the variable is absent. Set it to
-`true` only after the owner-only gate, migration rehearsal, telemetry,
-retention, deletion, and rollback approvals are recorded. Runtime startup
-additionally requires
-`AUTH_OWNER_E2E_GATE_APPROVED`, `AUTH_MIGRATION_REHEARSAL_APPROVED`, and
-`AUTH_MUTATION_ROLLBACK_APPROVED`, and
-`AUTH_PRODUCTION_AUTHORIZATION_BENCHMARK_APPROVED` whenever mutation is
-requested.
+Canonical mutation is enabled by default in development and production. Tests
+must set `E2E_TEST_MODE=true` to enable mutation behavior.
 
 Rollout notes:
 - Keep `FEATURE_CHUNK_STREAMING_ENABLED=false` to hard-disable chunk streaming and preserve legacy session snapshot + tile events.
@@ -172,7 +159,6 @@ Canary telemetry requires both a quilt and a resolved authenticated principal.
 * `FEATURE_QUILT_DUAL_READ_CANARY_PRINCIPAL_IDS`
 * `FEATURE_QUILT_DUAL_READ_CANARY_PERCENT`
 * `FEATURE_QUILT_DUAL_READ_ENABLED`
-* `FEATURE_QUILT_PROTOCOL_V2_ENABLED`
 
 The structured migration events cover parity failures, patch lock wait,
 mutation latency, snapshot bytes, resyncs, room churn, attachment bytes,
@@ -241,27 +227,6 @@ authorship remain. Run `recover` to recreate additive data and verify parity.
 > `QUILT_MIGRATION_CHANGE_ID` is nonempty, and
 > `QUILT_MIGRATION_CONFIRM_DATABASE` exactly matches the URL database name.
 > The script never prints `DATABASE_URL`.
-
-## Legacy Retirement Gates
-
-Protocol v1 and legacy storage are still available. No contract migration has
-removed legacy columns or constraints. Setting
-`FEATURE_LEGACY_RETIREMENT_REQUESTED=true` records intent only; startup reports
-the unmet gates and continues preserving both rollback paths.
-
-Every gate must be explicitly true before a later reviewed removal can proceed:
-
-* `LEGACY_RETIREMENT_PARITY_PASSED`
-* `LEGACY_RETIREMENT_RECOVERY_PASSED`
-* `LEGACY_RETIREMENT_MULTI_REPLICA_PASSED`
-* `LEGACY_RETIREMENT_AUTHENTICATED_PRINCIPAL_INTEGRATION_PASSED`
-* `LEGACY_RETIREMENT_CLIENT_BUDGET_PASSED`
-* `LEGACY_RETIREMENT_MEASURED_WINDOW_APPROVED`
-* `LEGACY_RETIREMENT_ROLLBACK_POLICY_APPROVED`
-
-The decision surface does not remove code or data even when every variable is
-true. Actual protocol and storage retirement remains a separately reviewed
-follow-on after the measured exit window and rollback policy are approved.
 
 ## Architecture
 
