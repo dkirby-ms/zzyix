@@ -113,8 +113,8 @@ test('release notes generator includes conventional commits in changelog section
     assert.deepEqual(
       releaseNotesPlugin.presetConfig.types.filter(({ type }) => type === 'feat' || type === 'fix'),
       [
-        { type: 'feat', section: 'Features', effect: 'changelog' },
-        { type: 'fix', section: 'Bug Fixes', effect: 'changelog' },
+        { type: 'feat', section: 'Features', hidden: false },
+        { type: 'fix', section: 'Bug Fixes', hidden: false },
       ],
       `${name} release notes generator must render Features and Bug Fixes sections`,
     )
