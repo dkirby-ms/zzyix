@@ -1,4 +1,13 @@
-export const tileShapeValues = ['square', 'triangle', 'rectangle', 'l-shape'] as const
+export const tileShapeValues = [
+  'square',
+  'triangle',
+  'rectangle',
+  'l-shape',
+  'large-square',
+  'circle',
+  'right-triangle',
+  'large-right-triangle',
+] as const
 
 export const materialVariantValues = ['ceramic', 'glass', 'stone'] as const
 

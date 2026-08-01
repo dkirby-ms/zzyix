@@ -71,6 +71,13 @@
       "when": 1785412420794,
       "tag": "0009_charming_siren",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785626954568,
+      "tag": "0010_new_tile_shapes",
+      "breakpoints": true
     }
   ]
 }

@@ -260,6 +260,16 @@ export const TilePalette = ({
                   spellCheck={false}
                   autoComplete="off"
                 />
+                <input
+                  type="color"
+                  value={customColorValue.startsWith('#') ? customColorValue : activeTile.color}
+                  onChange={(event) => {
+                    setCustomColorValue(event.target.value)
+                    setCustomColorError('')
+                    onColor(event.target.value)
+                  }}
+                  title="Color picker"
+                />
                 <button type="button" onClick={applyCustomColor}>
                   Apply
                 </button>

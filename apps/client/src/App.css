@@ -697,9 +697,7 @@ button:focus-visible,
 
 .tile-palette-swatch[data-state='on'] {
   border-color: rgba(41, 27, 19, 0.72);
-  box-shadow:
-    0 0 0 2px var(--focus-ring-color),
-    inset 0 0 0 2px rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
 }
 
 .tile-palette-swatch span {
@@ -774,23 +772,33 @@ button:focus-visible,
 }
 
 .palette-custom-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   gap: 0.5rem;
   align-items: center;
   min-width: 0;
 }
 
-.palette-custom-input-row input {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+.palette-custom-input-row input[type='color'] {
+  width: 3rem;
+  height: 3rem;
+  min-width: 3rem;
+  flex-shrink: 0;
+  padding: 0.3rem;
+  cursor: pointer;
   border: 1px solid rgba(66, 47, 37, 0.2);
   border-radius: 12px;
-  padding: 0.58rem 0.7rem;
+}
+
+.palette-custom-input-row input[type='text'] {
+  width: 5.5rem;
+  flex-shrink: 0;
+  border: 1px solid rgba(66, 47, 37, 0.2);
+  border-radius: 12px;
+  padding: 0.48rem 0.6rem;
   background: rgba(255, 255, 255, 0.82);
   color: inherit;
   font: inherit;
+  font-size: 0.85rem;
 }
 
 .palette-custom-input-row input:focus-visible {
@@ -799,7 +807,7 @@ button:focus-visible,
 }
 
 .palette-custom-input-row button {
-  min-width: 0;
+  display: none;
 }
 
 .palette-custom-input-help,

@@ -1,6 +1,6 @@
 import { expect, test as base, type APIRequestContext, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { createIsolatedCanonicalQuilt, resetSharedCanvasState } from './testState'
-import type { PlaceTileAck } from '../../apps/server/src/contracts'
+import type { PlaceTileAck, TileShape } from '../../apps/server/src/contracts'
 
 const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
 const DEFAULT_CLIENT_URL = 'http://127.0.0.1:4173/'
@@ -10,7 +10,7 @@ type CanvasConnectionStatus = 'connecting' | 'connected' | 'disconnecting' | 'di
 type CanvasMode = 'lobby' | 'canvas'
 export type CanvasTileSnapshot = {
   id: string
-  shape: 'square' | 'triangle' | 'rectangle' | 'l-shape'
+  shape: TileShape
   color: string
   material: 'ceramic' | 'glass' | 'stone'
   position: {
