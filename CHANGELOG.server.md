@@ -1,3 +1,5 @@
+## [1.1.4](https://github.com/dkirby-ms/zzyix/compare/server-v1.1.3...server-v1.1.4) (2026-08-01)
+
 ## [1.1.3](https://github.com/dkirby-ms/zzyix/compare/server-v1.1.2...server-v1.1.3) (2026-08-01)
 
 ### Bug Fixes
