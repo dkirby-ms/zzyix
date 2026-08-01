@@ -10,7 +10,16 @@ const extractCoordinates = (pathData: string): number[] => {
 }
 
 describe('TileShapePreview', () => {
-  const cases: TileShape[] = ['square', 'triangle', 'rectangle', 'l-shape']
+  const cases: TileShape[] = [
+    'square',
+    'triangle',
+    'rectangle',
+    'l-shape',
+    'large-square',
+    'circle',
+    'right-triangle',
+    'large-right-triangle',
+  ]
 
   it('covers all canonical tile shapes for preview rendering', () => {
     expect(cases).toEqual(TILE_SHAPES)

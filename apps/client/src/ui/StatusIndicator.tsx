@@ -5,6 +5,7 @@ import './StatusIndicator.css'
 
 export interface StatusIndicatorProps {
   connectionState: ConnectionState
+  showLabel?: boolean
 }
 
 const getStatusDisplay = (status: ConnectionState): { text: string; className: string } => {
@@ -23,15 +24,20 @@ const getStatusDisplay = (status: ConnectionState): { text: string; className: s
   }
 }
 
-export const StatusIndicator: React.FC<StatusIndicatorProps> = ({ connectionState }) => {
+export const StatusIndicator: React.FC<StatusIndicatorProps> = ({ connectionState, showLabel = true }) => {
   const display = getStatusDisplay(connectionState)
   const lastError = connectionState.lastError?.trim()
   const hasErrorDetails = display.className === 'status-error' && Boolean(lastError)
+  const indicatorLabel = `Connection status: ${display.text}`
 
   const indicator = (
-    <div className={`status-indicator ${display.className}`}>
+    <div
+      className={`status-indicator ${display.className}${showLabel ? '' : ' status-indicator--compact'}`}
+      aria-label={indicatorLabel}
+      title={indicatorLabel}
+    >
       <div className="status-dot" />
-      <span className="status-text">{display.text}</span>
+      {showLabel && <span className="status-text">{display.text}</span>}
     </div>
   )
 

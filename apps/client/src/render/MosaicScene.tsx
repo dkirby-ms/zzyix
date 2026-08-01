@@ -69,6 +69,7 @@ type MosaicSceneProps = {
   onRotateDrag: (deltaX: number) => void
   onCameraPan: (deltaX: number, deltaY: number) => void
   cameraPan: { x: number; y: number }
+  cameraZoom?: number
   cameraPolicy?: {
     minZoom: number
     maxZoom: number
@@ -397,6 +398,22 @@ const CameraPositionController = ({ position }: { position: { x: number; y: numb
   return null
 }
 
+const CameraZoomController = ({ zoom }: { zoom?: number }) => {
+  const { camera } = useThree()
+
+  useEffect(() => {
+    if (zoom === undefined) {
+      return
+    }
+
+    const orthographic = camera as OrthographicCamera
+    orthographic.zoom = zoom
+    orthographic.updateProjectionMatrix()
+  }, [camera, zoom])
+
+  return null
+}
+
 const SceneContents = ({
   tiles,
   clientId,
@@ -412,6 +429,7 @@ const SceneContents = ({
   onRotateDrag,
   onCameraPan,
   cameraPan,
+  cameraZoom,
   cameraPolicy,
   onViewportChanged,
   onZoomTierChanged,
@@ -546,6 +564,7 @@ const SceneContents = ({
         target={[cameraPan.x, cameraPan.y, 0]}
       />
       <CameraPositionController position={cameraPan} />
+      <CameraZoomController zoom={cameraZoom} />
     </>
   )
 }
@@ -565,6 +584,7 @@ export const MosaicScene = ({
   onRotateDrag,
   onCameraPan,
   cameraPan,
+  cameraZoom,
   cameraPolicy,
   onViewportChanged,
   onZoomTierChanged,
@@ -650,6 +670,7 @@ export const MosaicScene = ({
             onRotateDrag={onRotateDrag}
             onCameraPan={onCameraPan}
             cameraPan={cameraPan}
+            cameraZoom={cameraZoom}
             cameraPolicy={cameraPolicy}
             ghost={ghost}
             remoteCursors={remoteCursors}

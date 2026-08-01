@@ -16,7 +16,6 @@ const {
   setCanonicalPatchLinkMock,
   setStoredSessionIdMock,
   useSocketConnectionMock,
-  resolveCanvasDebugMock,
   authSessionState,
 } = vi.hoisted(() => ({
   clearCanonicalPatchLinkMock: vi.fn(),
@@ -28,7 +27,6 @@ const {
   setCanonicalPatchLinkMock: vi.fn(),
   setStoredSessionIdMock: vi.fn(),
   useSocketConnectionMock: vi.fn(() => ({ current: null })),
-  resolveCanvasDebugMock: vi.fn(() => false),
   authSessionState: {
     status: 'authenticated',
     principal: {
@@ -132,10 +130,6 @@ vi.mock('./auth/useAuthSession', () => ({
   useAuthSession: () => authSessionState,
 }))
 
-vi.mock('./config/debugFlags', () => ({
-  resolveCanvasDebug: resolveCanvasDebugMock,
-}))
-
 vi.mock('./render/MosaicScene', () => ({
   MosaicScene: ({
     remoteCursors,
@@ -148,6 +142,7 @@ vi.mock('./render/MosaicScene', () => ({
     onPointerUp,
     cameraPolicy,
     cameraPan,
+    cameraZoom,
     onCameraPan,
     onViewportChanged,
     onZoomTierChanged,
@@ -162,6 +157,7 @@ vi.mock('./render/MosaicScene', () => ({
     onPointerUp?: () => void
     cameraPolicy?: { minZoom: number; maxZoom: number; panSensitivity: number }
     cameraPan?: { x: number; y: number }
+    cameraZoom?: number
     onCameraPan?: (deltaX: number, deltaY: number) => void
     onViewportChanged?: (payload: {
       center: { x: number; y: number }
@@ -186,6 +182,7 @@ vi.mock('./render/MosaicScene', () => ({
       data-max-zoom={cameraPolicy?.maxZoom ?? -1}
       data-pan-sensitivity={cameraPolicy?.panSensitivity ?? -1}
       data-camera-pan={`${cameraPan?.x ?? 0},${cameraPan?.y ?? 0}`}
+      data-camera-zoom={cameraZoom ?? -1}
       data-world-bounds={worldBounds ? `${worldBounds.minX},${worldBounds.maxX},${worldBounds.minY},${worldBounds.maxY}` : 'unset'}
     >
       scene
@@ -262,8 +259,6 @@ describe('App canonical canvas behavior', () => {
     setCanonicalPatchLinkMock.mockReset()
     listSessionsMock.mockReset()
     useSocketConnectionMock.mockClear()
-    resolveCanvasDebugMock.mockReset()
-    resolveCanvasDebugMock.mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -1144,20 +1139,20 @@ describe('App canonical canvas behavior', () => {
         cursor: { patchId: 'patch-b', opSeq: 1, revision: 1, eventId: 'event-b' },
       })
     })
-    expect(screen.getByText('2 placed')).toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '2')
 
     act(() => onQuiltPatchSnapshot({
       quiltId: 'quilt-1', canonicalRoomId: 'room-a:aggregate', patchId: 'patch-a', payloadMode: 'aggregate', chunkIds: ['0:0'], tiles: [],
       aggregates: [{ chunkId: '0:0', aggregate: { tileCount: 1, byShape: { square: 1 }, byMaterial: { ceramic: 1 } } }],
       cursor: { patchId: 'patch-a', opSeq: 2, revision: 2, eventId: 'event-aggregate' },
     }))
-    expect(screen.getByText('2 placed')).toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '2')
 
     act(() => onQuiltPatchSnapshot({
       quiltId: 'quilt-1', canonicalRoomId: 'room-a:fine', patchId: 'patch-a', payloadMode: 'fine', chunkIds: ['0:0'], tiles: [],
       cursor: { patchId: 'patch-a', opSeq: 3, revision: 3, eventId: 'event-c' },
     }))
-    expect(screen.getByText('1 placed')).toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '1')
   })
 
   it('canvas shell does not produce horizontal overflow at 320px viewport', async () => {
@@ -1210,11 +1205,11 @@ describe('App canonical canvas behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Color #2f4557' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Palette color #2f4557' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Lagoon' }))
 
-    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
-    expect(screen.getByText('Color: #4e6d7c')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Lagoon' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Palette color #4e6d7c' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('status')).toHaveTextContent(
       'Palette changed to lagoon. #2f4557 unavailable; selected #4e6d7c.',
     )
@@ -1231,11 +1226,11 @@ describe('App canonical canvas behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Color #5f7588' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'terracotta' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Palette color #5f7588' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Terracotta' }))
 
-    expect(screen.getByText('Palette: terracotta')).toBeInTheDocument()
-    expect(screen.getByText('Color: #5f7588')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Terracotta' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Palette color #5f7588' })).toHaveAttribute('aria-checked', 'true')
     expect(screen.getByRole('status')).toHaveTextContent('')
   })
 
@@ -1611,9 +1606,8 @@ describe('App canonical canvas behavior', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
     fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle tessellation' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Palette color #d9efe6' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
     fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
 
@@ -1671,26 +1665,21 @@ describe('App canonical canvas behavior', () => {
     })
 
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Lagoon' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Palette color #d9efe6' }))
     fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle tessellation' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
     fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
 
     await waitFor(() => {
-      expect(screen.getByText('0 placed')).toBeInTheDocument()
+      expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '0')
     })
 
     expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: 'glass' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: 'lagoon' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('radio', { name: 'Color #d9efe6' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByText('Shape: triangle')).toBeInTheDocument()
-    expect(screen.getByText('Material: glass')).toBeInTheDocument()
-    expect(screen.getByText('Palette: lagoon')).toBeInTheDocument()
-    expect(screen.getByText('Color: #d9efe6')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Lagoon' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('radio', { name: 'Palette color #d9efe6' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText(/triangle\s*·\s*ceramic\s*·\s*Lagoon\s*·\s*#d9efe6/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Grid overlay' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('radio', { name: 'Triangle tessellation' })).toHaveAttribute('aria-checked', 'true')
   })
@@ -1728,7 +1717,7 @@ describe('App canonical canvas behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
 
     expect(placeAckCallback).toBeDefined()
-    expect(screen.getByText('1 placed')).toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '1')
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-ghost-visible', 'false')
   })
 
@@ -1810,36 +1799,4 @@ describe('App canonical canvas behavior', () => {
     expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('debug diagnostics are hidden by default in canvas mode', async () => {
-    listSessionsMock.mockResolvedValue(mockSessions)
-
-    render(<App />)
-
-    await enterCanonicalCanvas()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
-    })
-
-    expect(document.querySelector('.debug-overlay')).toBeNull()
-  })
-
-  it('shows debug diagnostics when debug mode is enabled and pointer is active', async () => {
-    resolveCanvasDebugMock.mockReturnValue(true)
-    listSessionsMock.mockResolvedValue(mockSessions)
-
-    render(<App />)
-
-    await enterCanonicalCanvas()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
-
-    await waitFor(() => {
-      expect(document.querySelector('.debug-overlay')).not.toBeNull()
-    })
-  })
 })

@@ -19,6 +19,10 @@ const shapeLabels: Record<TileShape, string> = {
   triangle: 'Triangle',
   rectangle: 'Rectangle',
   'l-shape': 'L-shape',
+  'large-square': 'Large square',
+  circle: 'Circle',
+  'right-triangle': 'Right triangle',
+  'large-right-triangle': 'Large right triangle',
 }
 
 const isGridPatternId = (
