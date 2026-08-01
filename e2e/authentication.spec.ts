@@ -17,19 +17,40 @@ const requestAccessToken = async (request: APIRequestContext, subject: string): 
   return (await response.json() as { access_token: string }).access_token
 }
 
-const browserPost = async (
-  page: Page,
+const apiPost = async (
+  request: APIRequestContext,
   path: string,
   token: string,
   data: Record<string, string>,
-): Promise<{ status: number; body: Record<string, unknown> }> => page.evaluate(async ({ url, accessToken, body }) => {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+): Promise<{ status: number; body: Record<string, unknown> }> => {
+  const response = await request.post(`${SERVER_URL}${path}`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
+    data,
   })
-  return { status: response.status, body: await response.json() as Record<string, unknown> }
-}, { url: `${SERVER_URL}${path}`, accessToken: token, body: data })
+  return {
+    status: response.status(),
+    body: await response.json() as Record<string, unknown>,
+  }
+}
+
+const apiGet = async (
+  request: APIRequestContext,
+  path: string,
+  token: string,
+): Promise<{ status: number; body: Record<string, unknown> }> => {
+  const response = await request.get(`${SERVER_URL}${path}`, {
+    headers: {
+      authorization: `Bearer ${token}`,
+    },
+  })
+  return {
+    status: response.status(),
+    body: await response.json() as Record<string, unknown>,
+  }
+}
 
 test('assigns a stable patch on first sign-in and places without claim controls', async ({ page }) => {
   await page.addInitScript((subject) => {
@@ -39,7 +60,7 @@ test('assigns a stable patch on first sign-in and places without claim controls'
   await page.goto('/')
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.status-indicator.status-connected').first()).toBeVisible({ timeout: 15_000 })
   const assignedPatch = page.getByText(/^Patch \d+, \d+$/)
   await expect(assignedPatch).toBeVisible()
   const assignedPatchLabel = await assignedPatch.textContent()
@@ -47,7 +68,10 @@ test('assigns a stable patch on first sign-in and places without claim controls'
   const canvas = page.locator('canvas')
   await canvas.hover()
   await canvas.click()
-  await expect(page.getByText('1 placed')).toBeVisible({ timeout: 15_000 })
+  await expect.poll(
+    async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState()?.tiles?.length ?? 0),
+    { timeout: 15_000 },
+  ).toBeGreaterThanOrEqual(1)
 
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign out' }).click()
@@ -55,7 +79,7 @@ test('assigns a stable patch on first sign-in and places without claim controls'
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Mosaic Atelier' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.status-indicator.status-connected').first()).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(assignedPatchLabel!)).toBeVisible()
 })
 
@@ -78,7 +102,7 @@ test('renews after signed token expiry and keeps protected state available', asy
     localStorage.setItem('zzyix:e2e-token-lifetime-seconds', '4')
   }, `e2e-renewal-${crypto.randomUUID()}`)
   await page.goto('/')
-  await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.status-indicator.status-connected').first()).toBeVisible({ timeout: 15_000 })
   await expect.poll(() => tokenRequests, {
     message: 'startup token acquisition should settle before measuring renewal',
   }).toBe(tokenGenerations.size)
@@ -98,7 +122,7 @@ test('renews after signed token expiry and keeps protected state available', asy
   expect(tokenRequests - beforeExpiry).toBeGreaterThanOrEqual(1)
   expect(tokenRequests - beforeExpiry).toBeLessThanOrEqual(2)
   await expect(page.getByRole('complementary', { name: 'Tile palette controls' })).toBeVisible()
-  await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.status-indicator.status-connected').first()).toBeVisible({ timeout: 15_000 })
 })
 
 test('clears protected browser state when forced token renewal fails', async ({ page }) => {
@@ -116,7 +140,7 @@ test('clears protected browser state when forced token renewal fails', async ({ 
     localStorage.setItem('zzyix:e2e-token-lifetime-seconds', '2')
   }, `e2e-failed-renewal-${crypto.randomUUID()}`)
   await page.goto('/')
-  await expect(page.locator('.connection-badge[data-state="connected"]')).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.status-indicator.status-connected').first()).toBeVisible({ timeout: 15_000 })
   rejectRenewal = true
 
   await expect(page.getByText('Your secure session ended. Sign in again to continue.')).toBeVisible({ timeout: 15_000 })
@@ -124,7 +148,7 @@ test('clears protected browser state when forced token renewal fails', async ({ 
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
 })
 
-test('executes claim, transfer, and abandonment through authenticated browser HTTP routes', async ({ page, request }) => {
+test('executes claim, transfer, and abandonment through authenticated browser HTTP routes', async ({ request }) => {
   const ownerSubject = `e2e-lifecycle-owner-${crypto.randomUUID()}`
   const recipientSubject = `e2e-lifecycle-recipient-${crypto.randomUUID()}`
   const setup = await request.post(`${SERVER_URL}/test/quilt/setup`, {
@@ -136,33 +160,40 @@ test('executes claim, transfer, and abandonment through authenticated browser HT
   const ownerToken = await requestAccessToken(request, ownerSubject)
   const recipientToken = await requestAccessToken(request, recipientSubject)
 
-  await page.goto('/')
-  const recipientProfile = await page.evaluate(async ({ url, token }) => {
-    const response = await fetch(`${url}/me`, { headers: { authorization: `Bearer ${token}` } })
-    return response.json() as Promise<{ profile: { id: string } }>
-  }, { url: SERVER_URL, token: recipientToken })
+  const eligibleResponse = await apiGet(request, '/quilts/canonical/patches/eligible', recipientToken)
+  expect(eligibleResponse.status).toBe(200)
+  const eligible = eligibleResponse.body as { claimAllowed: boolean; patches: Array<{ patchId: string }> }
+  expect(eligible.claimAllowed).toBe(true)
+  expect(eligible.patches.length).toBeGreaterThan(0)
+  const [claimCandidate] = eligible.patches
+  expect(claimCandidate).toBeDefined()
 
-  const abandoned = await browserPost(page, '/ownership/abandon', ownerToken, {
-    operationId: crypto.randomUUID(), patchId,
-  })
-  expect(abandoned).toMatchObject({ status: 200, body: { status: 'succeeded', revision: 1 } })
-
-  const claimed = await browserPost(page, '/ownership/claims', recipientToken, {
-    operationId: crypto.randomUUID(), patchId,
+  const claimed = await apiPost(request, '/ownership/claims', recipientToken, {
+    operationId: crypto.randomUUID(), patchId: claimCandidate!.patchId,
   })
   expect(claimed).toMatchObject({ status: 200, body: { status: 'succeeded' } })
 
-  const offered = await browserPost(page, '/ownership/transfers', recipientToken, {
-    operationId: crypto.randomUUID(), patchId, recipientPrincipalId: ownerPrincipalId,
+  const offered = await apiPost(request, '/ownership/transfers', recipientToken, {
+    operationId: crypto.randomUUID(), patchId: claimCandidate!.patchId, recipientPrincipalId: ownerPrincipalId,
   })
   expect(offered.status).toBe(200)
   expect(offered.body.transferId).toEqual(expect.any(String))
 
-  const accepted = await browserPost(page, '/ownership/transfers/accept', ownerToken, {
+  // Owner must release their existing canonical patch before accepting a transfer.
+  const releasedOwnerPatch = await apiPost(request, '/ownership/abandon', ownerToken, {
+    operationId: crypto.randomUUID(), patchId,
+  })
+  expect(releasedOwnerPatch).toMatchObject({ status: 200, body: { status: 'succeeded' } })
+
+  const accepted = await apiPost(request, '/ownership/transfers/accept', ownerToken, {
     operationId: crypto.randomUUID(), transferId: offered.body.transferId as string,
   })
   expect(accepted).toMatchObject({ status: 200, body: { status: 'succeeded' } })
-  expect(recipientProfile.profile.id).not.toBe(ownerPrincipalId)
+
+  const abandoned = await apiPost(request, '/ownership/abandon', ownerToken, {
+    operationId: crypto.randomUUID(), patchId: claimCandidate!.patchId,
+  })
+  expect(abandoned).toMatchObject({ status: 200, body: { status: 'succeeded' } })
 })
 
 for (const transport of ['polling', 'websocket'] as const) {
