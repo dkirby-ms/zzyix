@@ -16,7 +16,6 @@ const {
   setCanonicalPatchLinkMock,
   setStoredSessionIdMock,
   useSocketConnectionMock,
-  resolveCanvasDebugMock,
   authSessionState,
 } = vi.hoisted(() => ({
   clearCanonicalPatchLinkMock: vi.fn(),
@@ -28,7 +27,6 @@ const {
   setCanonicalPatchLinkMock: vi.fn(),
   setStoredSessionIdMock: vi.fn(),
   useSocketConnectionMock: vi.fn(() => ({ current: null })),
-  resolveCanvasDebugMock: vi.fn(() => false),
   authSessionState: {
     status: 'authenticated',
     principal: {
@@ -132,10 +130,6 @@ vi.mock('./auth/useAuthSession', () => ({
   useAuthSession: () => authSessionState,
 }))
 
-vi.mock('./config/debugFlags', () => ({
-  resolveCanvasDebug: resolveCanvasDebugMock,
-}))
-
 vi.mock('./render/MosaicScene', () => ({
   MosaicScene: ({
     remoteCursors,
@@ -148,6 +142,7 @@ vi.mock('./render/MosaicScene', () => ({
     onPointerUp,
     cameraPolicy,
     cameraPan,
+    cameraZoom,
     onCameraPan,
     onViewportChanged,
     onZoomTierChanged,
@@ -162,6 +157,7 @@ vi.mock('./render/MosaicScene', () => ({
     onPointerUp?: () => void
     cameraPolicy?: { minZoom: number; maxZoom: number; panSensitivity: number }
     cameraPan?: { x: number; y: number }
+    cameraZoom?: number
     onCameraPan?: (deltaX: number, deltaY: number) => void
     onViewportChanged?: (payload: {
       center: { x: number; y: number }
@@ -186,6 +182,7 @@ vi.mock('./render/MosaicScene', () => ({
       data-max-zoom={cameraPolicy?.maxZoom ?? -1}
       data-pan-sensitivity={cameraPolicy?.panSensitivity ?? -1}
       data-camera-pan={`${cameraPan?.x ?? 0},${cameraPan?.y ?? 0}`}
+      data-camera-zoom={cameraZoom ?? -1}
       data-world-bounds={worldBounds ? `${worldBounds.minX},${worldBounds.maxX},${worldBounds.minY},${worldBounds.maxY}` : 'unset'}
     >
       scene
@@ -262,8 +259,6 @@ describe('App canonical canvas behavior', () => {
     setCanonicalPatchLinkMock.mockReset()
     listSessionsMock.mockReset()
     useSocketConnectionMock.mockClear()
-    resolveCanvasDebugMock.mockReset()
-    resolveCanvasDebugMock.mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -1810,36 +1805,4 @@ describe('App canonical canvas behavior', () => {
     expect(screen.getByRole('radio', { name: 'Triangle' })).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('debug diagnostics are hidden by default in canvas mode', async () => {
-    listSessionsMock.mockResolvedValue(mockSessions)
-
-    render(<App />)
-
-    await enterCanonicalCanvas()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
-    })
-
-    expect(document.querySelector('.debug-overlay')).toBeNull()
-  })
-
-  it('shows debug diagnostics when debug mode is enabled and pointer is active', async () => {
-    resolveCanvasDebugMock.mockReturnValue(true)
-    listSessionsMock.mockResolvedValue(mockSessions)
-
-    render(<App />)
-
-    await enterCanonicalCanvas()
-
-    await waitFor(() => {
-      expect(screen.getByTestId('mosaic-scene')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Near' }))
-
-    await waitFor(() => {
-      expect(document.querySelector('.debug-overlay')).not.toBeNull()
-    })
-  })
 })

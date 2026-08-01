@@ -1,11 +1,28 @@
 import { rotate, vec2 } from './math2d'
 import type { Vec2 } from './math2d'
 
-export type TileShape = 'square' | 'triangle' | 'rectangle' | 'l-shape'
+export type TileShape =
+  | 'square'
+  | 'triangle'
+  | 'rectangle'
+  | 'l-shape'
+  | 'large-square'
+  | 'circle'
+  | 'right-triangle'
+  | 'large-right-triangle'
 export type MaterialVariant = 'ceramic' | 'glass' | 'stone'
 export type ConfidenceState = 'valid' | 'near-valid' | 'invalid'
 
-export const TILE_SHAPES: TileShape[] = ['square', 'triangle', 'rectangle', 'l-shape']
+export const TILE_SHAPES: TileShape[] = [
+  'square',
+  'triangle',
+  'rectangle',
+  'l-shape',
+  'large-square',
+  'circle',
+  'right-triangle',
+  'large-right-triangle',
+]
 
 export type Transform2D = {
   position: Vec2
@@ -51,6 +68,32 @@ const lOutline: Vec2[] = [
   vec2(-unit * 0.62, unit * 0.62),
 ]
 
+const largeSquareOutline: Vec2[] = [
+  vec2(-unit, -unit),
+  vec2(unit, -unit),
+  vec2(unit, unit),
+  vec2(-unit, unit),
+]
+
+const circleRadius = unit / Math.sqrt(Math.PI)
+const circleSegments = 24
+const circleOutline: Vec2[] = Array.from({ length: circleSegments }, (_, index) => {
+  const theta = (index / circleSegments) * Math.PI * 2
+  return vec2(Math.cos(theta) * circleRadius, Math.sin(theta) * circleRadius)
+})
+
+const rightTriangleOutline: Vec2[] = [
+  vec2(-unit / 3, -unit / 3),
+  vec2((2 * unit) / 3, -unit / 3),
+  vec2(-unit / 3, (2 * unit) / 3),
+]
+
+const largeRightTriangleOutline: Vec2[] = [
+  vec2((-2 * unit) / 3, (-2 * unit) / 3),
+  vec2((4 * unit) / 3, (-2 * unit) / 3),
+  vec2((-2 * unit) / 3, (4 * unit) / 3),
+]
+
 const defs: Record<TileShape, TileDefinition> = {
   square: {
     outline: squareOutline,
@@ -80,6 +123,22 @@ const defs: Record<TileShape, TileDefinition> = {
         vec2(-unit * 0.62, unit * 0.62),
       ],
     ],
+  },
+  'large-square': {
+    outline: largeSquareOutline,
+    convexParts: [largeSquareOutline],
+  },
+  circle: {
+    outline: circleOutline,
+    convexParts: [circleOutline],
+  },
+  'right-triangle': {
+    outline: rightTriangleOutline,
+    convexParts: [rightTriangleOutline],
+  },
+  'large-right-triangle': {
+    outline: largeRightTriangleOutline,
+    convexParts: [largeRightTriangleOutline],
   },
 }
 

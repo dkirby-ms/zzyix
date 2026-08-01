@@ -30,11 +30,9 @@ import {
   resolveCanonicalPatchNavigation,
   setCanonicalPatchLink,
 } from './network/session'
-import { resolveCanvasDebug } from './config/debugFlags'
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
 import type { AuthLossReason } from './network/authenticatedFetch'
-import { StatusIndicator } from './ui/StatusIndicator'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
   CanonicalPatchNavigation,
@@ -58,6 +56,7 @@ import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
 import { GridOverlayControls } from './ui/GridOverlayControls'
 import { AppHeader } from './ui/AppHeader'
+import { MinimapOverlay, type MinimapViewport } from './ui/MinimapOverlay'
 import { palettes } from './ui/palettes'
 import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
@@ -158,7 +157,6 @@ type ActiveTileUiState = {
 
 type ActiveTileUiAction =
   | { type: 'set-shape'; shape: TileShape }
-  | { type: 'set-material'; material: ActiveTile['material'] }
   | { type: 'set-color'; color: string }
   | { type: 'patch-active-tile'; patch: Partial<ActiveTile> }
   | { type: 'set-palette'; paletteName: PaletteName }
@@ -190,14 +188,6 @@ const activeTileUiReducer = (state: ActiveTileUiState, action: ActiveTileUiActio
           shape: action.shape,
         },
       }
-    case 'set-material':
-      return {
-        ...state,
-        activeTile: {
-          ...state.activeTile,
-          material: action.material,
-        },
-      }
     case 'set-color':
       return {
         ...state,
@@ -213,6 +203,7 @@ const activeTileUiReducer = (state: ActiveTileUiState, action: ActiveTileUiActio
         activeTile: {
           ...state.activeTile,
           ...action.patch,
+          material: 'ceramic',
           rotation: action.patch.rotation === undefined
             ? state.activeTile.rotation
             : normalizeAngle(action.patch.rotation),
@@ -380,6 +371,8 @@ function ProtectedApp() {
   const [ghostVisible, setGhostVisible] = useState(false)
   const [invalidPulse, setInvalidPulse] = useState(false)
   const [cameraPan, setCameraPan] = useState({ x: 0, y: 0 })
+  const [cameraZoomOverride, setCameraZoomOverride] = useState<number | undefined>(undefined)
+  const [cameraZoom, setCameraZoom] = useState(58)
   const [cameraPolicy] = useState({
     minZoom: 20,
     maxZoom: 140,
@@ -398,6 +391,7 @@ function ProtectedApp() {
   const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
   const [connectionEpoch, setConnectionEpoch] = useState(0)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
+  const [cameraViewport, setCameraViewport] = useState<MinimapViewport | null>(null)
   const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
   const activeTileRef = useRef(activeTileUiState.activeTile)
   const sequencedStateRef = useRef(sequencedState)
@@ -431,7 +425,6 @@ function ProtectedApp() {
   })
   const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const clientId = useMemo(() => ensureClientId(), [])
-  const canvasDebug = useMemo(() => resolveCanvasDebug(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
   const isQuiltV2 = quiltProtocol?.selectedProtocolVersion === 2 && quiltProtocol.topology !== undefined
@@ -515,6 +508,9 @@ function ProtectedApp() {
     setActiveChunkIds([])
     setCollaborators({})
     setWorldBounds(DEFAULT_WORLD_BOUNDS)
+    setCameraViewport(null)
+    setCameraZoomOverride(undefined)
+    setCameraZoom(58)
     setConnectionEpoch(0)
   }, [])
 
@@ -792,6 +788,16 @@ function ProtectedApp() {
     viewport: ViewportBounds
     zoom: number
   }): void => {
+    setCameraViewport({ center: payload.center, viewport: payload.viewport })
+    setCameraZoom(payload.zoom)
+    setCameraZoomOverride((previous) => {
+      if (previous === undefined) {
+        return previous
+      }
+
+      return Math.abs(previous - payload.zoom) <= 0.001 ? undefined : previous
+    })
+
     const previous = lastChunkViewportRef.current
 
     if (previous) {
@@ -1351,20 +1357,13 @@ function ProtectedApp() {
     <main className={invalidPulse ? 'app-shell invalid-pulse' : 'app-shell'}>
       <div className="backdrop-gradient" />
       <AppHeader
-        connectionState={connectionState.status}
+        connectionState={connectionState}
         collaboratorCount={activeCollaborators.length}
-        canUndo={mutationControlsEnabled && visibleTiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === clientId)}
-        onUndo={handleUndo}
         profileName={auth.principal?.profile.displayName ?? auth.principal?.profile.email}
         onLogout={() => void auth.logout()}
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
-          <div className="status-strip" data-state={ghost.confidence}>
-            <StatusIndicator connectionState={connectionState} />
-            <span>{ghost.confidence.replace('-', ' ')}</span>
-            <span>{visibleTiles.length} placed</span>
-          </div>
           {activeCollaborators.length > 0 && (
             <div className="collaborator-roster" aria-label="Active collaborators">
               {activeCollaborators.map((collaborator) => (
@@ -1389,11 +1388,11 @@ function ProtectedApp() {
                   type="button"
                   onClick={() => focusCanonicalPatch({
                     quiltId: canonicalDescriptor.quiltId,
-                    patchId: canonicalDescriptor.initialPatch.id,
-                    row: canonicalDescriptor.initialPatch.row,
-                    column: canonicalDescriptor.initialPatch.column,
-                    centerX: canonicalDescriptor.originX + (canonicalDescriptor.initialPatch.column + 0.5) * canonicalDescriptor.patchWidth,
-                    centerY: canonicalDescriptor.originY + (canonicalDescriptor.initialPatch.row + 0.5) * canonicalDescriptor.patchHeight,
+                    patchId: canonicalDescriptor.assignedPatch.id,
+                    row: canonicalDescriptor.assignedPatch.row,
+                    column: canonicalDescriptor.assignedPatch.column,
+                    centerX: canonicalDescriptor.originX + (canonicalDescriptor.assignedPatch.column + 0.5) * canonicalDescriptor.patchWidth,
+                    centerY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 0.5) * canonicalDescriptor.patchHeight,
                   })}
                 >
                   Root
@@ -1453,6 +1452,7 @@ function ProtectedApp() {
                   sceneMetricsRef.current = metrics
                 }}
                 cameraPan={cameraPan}
+                cameraZoom={cameraZoomOverride}
                 cameraPolicy={cameraPolicy}
                 onCameraPan={(deltaX, deltaY) => {
                   setCameraPan((prev) => ({
@@ -1471,38 +1471,37 @@ function ProtectedApp() {
                   zoomTierRef.current = nextTier
                   setZoomTier(nextTier)
                   clientTelemetryRef.current.tierTransitions += 1
-                  console.info('chunk_zoom_tier_transition', {
-                    from: previousTier,
-                    to: nextTier,
-                    zoom,
-                    totalTransitions: clientTelemetryRef.current.tierTransitions,
-                  })
                 }}
               />
             </Suspense>
           </CanvasErrorBoundary>
-          {canvasDebug && ghostVisible && (
-            <div className="debug-overlay">
-              <div className="debug-row">
-                <span className="debug-label">state</span>
-                <span className={`debug-value debug-state-${ghost.confidence}`}>{ghost.confidence}</span>
-              </div>
-              <div className="debug-row">
-                <span className="debug-label">reason</span>
-                <span className="debug-value">{ghost.debugReason}</span>
-              </div>
-              <div className="debug-row">
-                <span className="debug-label">pos</span>
-                <span className="debug-value">
-                  {ghost.target.position.x.toFixed(2)}, {ghost.target.position.y.toFixed(2)}
-                </span>
-              </div>
-              <div className="debug-row">
-                <span className="debug-label">tiles</span>
-                <span className="debug-value">{visibleTiles.length}</span>
-              </div>
-            </div>
-          )}
+          <MinimapOverlay
+            worldBounds={worldBounds}
+            viewport={cameraViewport}
+            tiles={visibleTiles.map((tile) => ({
+              id: tile.id,
+              shape: tile.shape,
+              color: tile.color,
+              position: tile.transform.position,
+              rotation: tile.transform.rotation,
+              mirrored: tile.transform.mirrored,
+            }))}
+            cameraZoom={cameraZoom}
+            zoomRange={{ min: cameraPolicy.minZoom, max: cameraPolicy.maxZoom }}
+            topology={isQuiltV2 && quiltProtocol?.topology ? {
+              patchRows: quiltProtocol.topology.patchRows,
+              patchColumns: quiltProtocol.topology.patchColumns,
+              topology: quiltProtocol.topology.topology,
+            } : undefined}
+            onPanTo={(center) => {
+              setCameraPan(center)
+            }}
+            onZoomTo={(zoom) => {
+              const clamped = Math.min(cameraPolicy.maxZoom, Math.max(cameraPolicy.minZoom, zoom))
+              setCameraZoom(clamped)
+              setCameraZoomOverride(clamped)
+            }}
+          />
         </section>
         {mutationControlsEnabled && (
           <TilePalette
@@ -1512,7 +1511,6 @@ function ProtectedApp() {
             paletteOpen={paletteOpen}
             onTogglePaletteOpen={() => dispatchActiveTileUi({ type: 'toggle-palette-open' })}
             onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
-            onMaterial={(material) => dispatchActiveTileUi({ type: 'set-material', material })}
             onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
             paletteFallbackAnnouncement={paletteFallbackAnnouncement}
           />

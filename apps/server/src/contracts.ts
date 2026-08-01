@@ -33,7 +33,15 @@ export const QUILT_PROTOCOL_VERSION = 2
 
 export type Vec2 = { x: number; y: number }
 
-export type TileShape = 'square' | 'triangle' | 'rectangle' | 'l-shape'
+export type TileShape =
+  | 'square'
+  | 'triangle'
+  | 'rectangle'
+  | 'l-shape'
+  | 'large-square'
+  | 'circle'
+  | 'right-triangle'
+  | 'large-right-triangle'
 
 export type MaterialVariant = 'ceramic' | 'glass' | 'stone'
 
