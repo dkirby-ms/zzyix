@@ -23,6 +23,10 @@ const paletteLabels: Record<PaletteName, string> = {
   lagoon: 'Lagoon',
   dusk: 'Dusk',
   quarry: 'Quarry',
+  forest: 'Forest',
+  aurora: 'Aurora',
+  ember: 'Ember',
+  frost: 'Frost',
 }
 
 const shapeLabels: Record<TileShape, string> = {
