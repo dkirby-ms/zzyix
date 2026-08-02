@@ -5,6 +5,12 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.3.1](https://github.com/dkirby-ms/zzyix/compare/v1.3.0...v1.3.1) (2026-08-02)
+
+### Bug Fixes
+
+* preserve quilt tiles across chunk-scoped snapshots ([7c529fa](https://github.com/dkirby-ms/zzyix/commit/7c529fae2d71158d86b82a10612d31d24fbb501b))
+
 ## [1.3.0](https://github.com/dkirby-ms/zzyix/compare/v1.2.0...v1.3.0) (2026-08-02)
 
 ### Features
