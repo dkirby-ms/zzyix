@@ -1,0 +1,2 @@
+ALTER TABLE "tiles" DROP CONSTRAINT "tiles_shape_check";--> statement-breakpoint
+ALTER TABLE "tiles" ADD CONSTRAINT "tiles_shape_check" CHECK ("tiles"."shape" in ('square', 'triangle', 'rectangle', 'l-shape', 'large-square', 'circle', 'right-triangle', 'large-right-triangle'));

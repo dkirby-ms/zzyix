@@ -57,6 +57,7 @@ describe('MosaicScene interaction plane', () => {
       <MosaicScene
         tiles={[]}
         clientId="client-1"
+        ownershipIdentity="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -101,6 +102,7 @@ describe('MosaicScene interaction plane', () => {
       <MosaicScene
         tiles={[]}
         clientId="client-1"
+        ownershipIdentity="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -146,6 +148,7 @@ describe('MosaicScene interaction plane', () => {
           { ...tile, id: 'remote-tile', placedBy: 'client-2' },
         ]}
         clientId="client-1"
+        ownershipIdentity="client-1"
         activeShape="square"
         ghost={{
           transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
@@ -167,5 +170,87 @@ describe('MosaicScene interaction plane', () => {
 
     expect(container.querySelector('[data-owner-boundary="client-2"]')).toBeInTheDocument()
     expect(container.querySelector('[data-owner-boundary="client-1"]')).not.toBeInTheDocument()
+  })
+
+  it('mounts settled tiles at their authoritative transform without replaying placement motion', () => {
+    const { container } = render(
+      <MosaicScene
+        tiles={[{
+          id: 'settled-tile',
+          shape: 'square',
+          color: '#fff',
+          material: 'ceramic',
+          transform: { position: { x: 2.5, y: -1.25 }, rotation: Math.PI / 2, mirrored: true },
+          createdAt: 1,
+        }]}
+        clientId="client-1"
+        ownershipIdentity="client-1"
+        activeShape="square"
+        ghost={{
+          transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
+          confidence: 'valid',
+          color: '#d4614f',
+          material: 'ceramic',
+          visible: false,
+        }}
+        remoteCursors={[]}
+        remoteSelections={[]}
+        onPointerMove={vi.fn()}
+        onPointerDown={vi.fn()}
+        onPointerUp={vi.fn()}
+        onRotateDrag={vi.fn()}
+        onCameraPan={vi.fn()}
+        cameraPan={{ x: 0, y: 0 }}
+      />,
+    )
+
+    const tileGroup = container.querySelector('[data-canonical-id="settled-tile"] > group')
+    expect(tileGroup).toHaveAttribute('position', '2.5,-1.25,0')
+    expect(tileGroup).toHaveAttribute('rotation', `0,0,${Math.PI / 2}`)
+    expect(tileGroup).toHaveAttribute('scale', '-1,1,1')
+  })
+
+  it('resets animation state when an optimistic tile becomes authoritative under the same id', () => {
+    const props = {
+      clientId: 'client-1',
+      ownershipIdentity: 'client-1',
+      activeShape: 'square' as const,
+      ghost: {
+        transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
+        confidence: 'valid' as const,
+        color: '#d4614f',
+        material: 'ceramic' as const,
+        visible: false,
+      },
+      remoteCursors: [],
+      remoteSelections: [],
+      onPointerMove: vi.fn(),
+      onPointerDown: vi.fn(),
+      onPointerUp: vi.fn(),
+      onRotateDrag: vi.fn(),
+      onCameraPan: vi.fn(),
+      cameraPan: { x: 0, y: 0 },
+    }
+    const optimisticTile = {
+      id: 'same-tile',
+      shape: 'square' as const,
+      color: '#fff',
+      material: 'ceramic' as const,
+      transform: { position: { x: 2, y: 3 }, rotation: 0, mirrored: false },
+      settleFrom: { position: { x: 1.5, y: 3 }, rotation: 0, mirrored: false },
+      createdAt: Date.now(),
+    }
+    const { container, rerender } = render(<MosaicScene {...props} tiles={[optimisticTile]} />)
+    const optimisticGroup = container.querySelector('[data-canonical-id="same-tile"]')
+
+    rerender(<MosaicScene {...props} tiles={[{
+      ...optimisticTile,
+      settleFrom: undefined,
+      createdAt: Date.now() + 5_000,
+    }]} />)
+
+    const settledGroup = container.querySelector('[data-canonical-id="same-tile"]')
+    expect(settledGroup).not.toBe(optimisticGroup)
+    expect(settledGroup?.querySelector('group')).toHaveAttribute('position', '2,3,0')
   })
 })

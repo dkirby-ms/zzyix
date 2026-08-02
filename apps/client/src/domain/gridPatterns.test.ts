@@ -32,13 +32,19 @@ describe('gridPatterns', () => {
   })
 
   it('filters patterns from the shapes referenced by their slots', () => {
-    expect(getConstructibleGridPatterns(new Set(TILE_SHAPES))).toHaveLength(3)
+    expect(getConstructibleGridPatterns(new Set(TILE_SHAPES))).toHaveLength(5)
     expect(getConstructibleGridPatterns(new Set(['square']))).toEqual([
       expect.objectContaining({ id: 'square-lattice' }),
     ])
     expect(getConstructibleGridPatterns(new Set(['square', 'rectangle']))).toEqual([
       expect.objectContaining({ id: 'square-lattice' }),
       expect.objectContaining({ id: 'running-bond' }),
+    ])
+    expect(getConstructibleGridPatterns(new Set(['large-square']))).toEqual([
+      expect.objectContaining({ id: 'large-square-lattice' }),
+    ])
+    expect(getConstructibleGridPatterns(new Set(['right-triangle']))).toEqual([
+      expect.objectContaining({ id: 'right-triangle-pinwheel' }),
     ])
   })
 

@@ -44,36 +44,14 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Check If client Changed
-        id: client_changed
+      - name: Establish Unified Release Baseline
         run: |
-          set -euo pipefail
-          chmod +x ./scripts/should-release-app.sh
-          ./scripts/should-release-app.sh client >> "$GITHUB_OUTPUT"
+          if ! git rev-parse --verify --quiet refs/tags/v1.2.0; then
+            git tag v1.2.0 'server-v1.2.0^{commit}'
+            git push origin refs/tags/v1.2.0
+          fi
 
-      - name: Release client
-        if: steps.client_changed.outputs.release == 'true'
+      - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release:client
-
-      - name: Skip client Release
-        if: steps.client_changed.outputs.release != 'true'
-        run: echo "No client-specific changes detected since the last client release tag."
-
-      - name: Check If server Changed
-        id: server_changed
-        run: |
-          set -euo pipefail
-          chmod +x ./scripts/should-release-app.sh
-          ./scripts/should-release-app.sh server >> "$GITHUB_OUTPUT"
-
-      - name: Release server
-        if: steps.server_changed.outputs.release == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release:server
-
-      - name: Skip server Release
-        if: steps.server_changed.outputs.release != 'true'
-        run: echo "No server-specific changes detected since the last server release tag."
+        run: npm run release

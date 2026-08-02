@@ -23,6 +23,10 @@ const paletteLabels: Record<PaletteName, string> = {
   lagoon: 'Lagoon',
   dusk: 'Dusk',
   quarry: 'Quarry',
+  forest: 'Forest',
+  aurora: 'Aurora',
+  ember: 'Ember',
+  frost: 'Frost',
 }
 
 const shapeLabels: Record<TileShape, string> = {
@@ -259,6 +263,16 @@ export const TilePalette = ({
                   placeholder="#5f7588 or rgb(95 117 136)"
                   spellCheck={false}
                   autoComplete="off"
+                />
+                <input
+                  type="color"
+                  value={customColorValue.startsWith('#') ? customColorValue : activeTile.color}
+                  onChange={(event) => {
+                    setCustomColorValue(event.target.value)
+                    setCustomColorError('')
+                    onColor(event.target.value)
+                  }}
+                  title="Color picker"
                 />
                 <button type="button" onClick={applyCustomColor}>
                   Apply

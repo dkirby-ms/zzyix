@@ -45,9 +45,7 @@
     "test:e2e:preflight": "node ./scripts/verify-playwright-linux-deps.mjs",
     "test:watch:client": "npm run test:watch --workspace=apps/client",
     "test:watch:server": "npm run test:watch --workspace=apps/server",
-    "release": "npm run release:client && npm run release:server",
-    "release:client": "semantic-release --extends ./.releaserc.client.cjs",
-    "release:server": "semantic-release --extends ./.releaserc.server.cjs"
+    "release": "semantic-release --extends ./.releaserc.cjs"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",

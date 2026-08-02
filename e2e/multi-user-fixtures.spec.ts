@@ -302,3 +302,19 @@ test('out-of-order revision rejection allows clean retry and convergence', async
 
   await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA, placedByAAgain])
 })
+
+test('new tile shapes can be placed and persist through the full stack', async ({ createMultiUserSession }) => {
+  const session = await createMultiUserSession({ userCount: 1 })
+  const [user] = session.users
+
+  await user.waitForConnection('connected')
+
+  const newShapes = ['large-square', 'circle', 'right-triangle', 'large-right-triangle'] as const
+
+  for (const [index, shape] of newShapes.entries()) {
+    await user.setActiveTile({ shape, color: '#5a8fd4', material: 'ceramic' })
+    const tile = await user.placeTile({ x: 10 + index * 5, y: 10 })
+    expect(tile.shape).toBe(shape)
+  }
+})
+})

@@ -470,21 +470,21 @@
 .palette-preset-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: 0.42rem;
 }
 
 .palette-preset-card {
-  min-height: 3.05rem;
-  padding: 0.42rem 0.5rem;
-  border-radius: 14px;
+  min-height: 2.55rem;
+  padding: 0.35rem 0.42rem;
+  border-radius: 12px;
   display: grid;
-  gap: 0.26rem;
+  gap: 0.2rem;
   justify-items: stretch;
   align-content: center;
 }
 
 .palette-preset-card-label {
-  font-size: 0.74rem;
+  font-size: 0.7rem;
   line-height: 1;
   font-weight: 600;
   text-align: left;
@@ -498,7 +498,7 @@
 
 .palette-preset-card-swatch {
   display: block;
-  height: 0.34rem;
+  height: 0.28rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.38);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
@@ -697,9 +697,7 @@ button:focus-visible,
 
 .tile-palette-swatch[data-state='on'] {
   border-color: rgba(41, 27, 19, 0.72);
-  box-shadow:
-    0 0 0 2px var(--focus-ring-color),
-    inset 0 0 0 2px rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 0 2px var(--focus-ring-color);
 }
 
 .tile-palette-swatch span {
@@ -774,23 +772,33 @@ button:focus-visible,
 }
 
 .palette-custom-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   gap: 0.5rem;
   align-items: center;
   min-width: 0;
 }
 
-.palette-custom-input-row input {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
+.palette-custom-input-row input[type='color'] {
+  width: 3rem;
+  height: 3rem;
+  min-width: 3rem;
+  flex-shrink: 0;
+  padding: 0.3rem;
+  cursor: pointer;
   border: 1px solid rgba(66, 47, 37, 0.2);
   border-radius: 12px;
-  padding: 0.58rem 0.7rem;
+}
+
+.palette-custom-input-row input[type='text'] {
+  width: 5.5rem;
+  flex-shrink: 0;
+  border: 1px solid rgba(66, 47, 37, 0.2);
+  border-radius: 12px;
+  padding: 0.48rem 0.6rem;
   background: rgba(255, 255, 255, 0.82);
   color: inherit;
   font: inherit;
+  font-size: 0.85rem;
 }
 
 .palette-custom-input-row input:focus-visible {
@@ -799,7 +807,7 @@ button:focus-visible,
 }
 
 .palette-custom-input-row button {
-  min-width: 0;
+  display: none;
 }
 
 .palette-custom-input-help,

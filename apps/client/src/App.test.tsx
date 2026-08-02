@@ -139,6 +139,7 @@ vi.mock('./render/MosaicScene', () => ({
     gridOverlay,
     worldBounds,
     onPointerMove,
+    onPointerDown,
     onPointerUp,
     cameraPolicy,
     cameraPan,
@@ -154,6 +155,7 @@ vi.mock('./render/MosaicScene', () => ({
     gridOverlay?: { pattern: { id: string }; activeSlotId?: string }
     worldBounds?: { minX: number; maxX: number; minY: number; maxY: number }
     onPointerMove?: (x: number, y: number) => void
+    onPointerDown?: (x: number, y: number) => void
     onPointerUp?: () => void
     cameraPolicy?: { minZoom: number; maxZoom: number; panSensitivity: number }
     cameraPan?: { x: number; y: number }
@@ -198,6 +200,12 @@ vi.mock('./render/MosaicScene', () => ({
       <button type="button" onClick={() => onPointerUp?.()}>
         Place Tile
       </button>
+      <button type="button" onClick={() => {
+        onPointerDown?.(5, 5)
+        onPointerUp?.()
+      }}>
+        Quick Place Far
+      </button>
       <button type="button" onClick={() => onCameraPan?.(10, -5)}>
         Pan Camera
       </button>
@@ -216,6 +224,24 @@ vi.mock('./render/MosaicScene', () => ({
       >
         Emit Viewport
       </button>
+      {[1, 2, 3].map((step) => (
+        <button
+          key={step}
+          type="button"
+          onClick={() => onViewportChanged?.({
+            center: { x: step * RUNTIME_CHUNK_WORLD_SIZE, y: 0 },
+            viewport: {
+              minX: (step - 1) * RUNTIME_CHUNK_WORLD_SIZE,
+              maxX: step * RUNTIME_CHUNK_WORLD_SIZE,
+              minY: -RUNTIME_CHUNK_WORLD_SIZE,
+              maxY: 0,
+            },
+            zoom: 60,
+          })}
+        >
+          Emit Viewport {step}
+        </button>
+      ))}
       <button type="button" onClick={() => onZoomTierChanged?.(30)}>
         Zoom Aggregate
       </button>
@@ -1056,6 +1082,55 @@ describe('App canonical canvas behavior', () => {
     expect(enabledSocketCall[16]).toBe(true)
   })
 
+  it('coalesces rapid viewport changes without resubscribing after snapshots', async () => {
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'subscribe_quilt_area') callback?.({ outcomes: [], acceptedCursors: {} })
+    })
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[3] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock, on: vi.fn(), off: vi.fn(), connected: true } }
+      if (actionRef) actionRef.current = socketRef.current
+      return socketRef as any
+    })
+
+    render(<App />)
+    await enterCanonicalCanvas()
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onQuiltProtocol = socketCall[6] as (payload: any) => void
+    const onQuiltPatchSnapshot = socketCall[7] as (payload: any) => void
+
+    vi.useFakeTimers()
+    act(() => onQuiltProtocol({
+      selectedProtocolVersion: 2,
+      v1CompatibilityEnabled: false,
+      mutationEnabled: false,
+      topology: {
+        quiltId: 'quilt-1', topology: 'toroidal', patchRows: 1, patchColumns: 4,
+        patchWidth: RUNTIME_CHUNK_WORLD_SIZE, patchHeight: RUNTIME_CHUNK_WORLD_SIZE,
+      },
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 3' }))
+    act(() => vi.advanceTimersByTime(119))
+    expect(emitMock).not.toHaveBeenCalledWith('subscribe_quilt_area', expect.anything(), expect.anything())
+    act(() => vi.advanceTimersByTime(1))
+
+    const subscriptions = () => emitMock.mock.calls.filter((call) => call[0] === 'subscribe_quilt_area')
+    expect(subscriptions()).toHaveLength(1)
+    expect(subscriptions()[0]?.[1]).toEqual(expect.objectContaining({
+      rooms: expect.arrayContaining([expect.objectContaining({ column: 3 })]),
+    }))
+
+    act(() => onQuiltPatchSnapshot({
+      quiltId: 'quilt-1', canonicalRoomId: 'room-c:fine', patchId: 'patch-c', payloadMode: 'fine', chunkIds: ['3:0'], tiles: [],
+      cursor: { patchId: 'patch-c', opSeq: 1, revision: 1, eventId: 'event-c' },
+    }))
+    act(() => vi.advanceTimersByTime(500))
+    expect(subscriptions()).toHaveLength(1)
+  })
+
   it('subscribes canonical v2 AOI rooms and replaces only the recovered patch', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
     const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
@@ -1719,6 +1794,39 @@ describe('App canonical canvas behavior', () => {
     expect(placeAckCallback).toBeDefined()
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '1')
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-ghost-visible', 'false')
+  })
+
+  it('places from the latest pointer-down state before React renders it', async () => {
+    let placeAckCallback: ((ack: any) => void) | undefined
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'quilt_place_tile') placeAckCallback = callback
+    })
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[3] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock, on: vi.fn(), off: vi.fn(), connected: true } }
+      if (actionRef) actionRef.current = socketRef.current
+      return socketRef as any
+    })
+
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onQuiltPatchState = socketCall[7] as (payload: unknown) => void
+    act(() => onQuiltPatchState({
+      quiltId: canonicalDescriptor.quiltId,
+      canonicalRoomId: `quilt:${canonicalDescriptor.quiltId}:patch:0:0:fine`,
+      patchId: canonicalDescriptor.assignedPatch.id,
+      payloadMode: 'fine',
+      chunkIds: ['0:0'],
+      tiles: [],
+      cursor: { patchId: canonicalDescriptor.assignedPatch.id, opSeq: 1, revision: 1, eventId: 'event-1' },
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quick Place Far' }))
+
+    expect(placeAckCallback).toBeDefined()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '1')
   })
 
   it.skip('persists optimistic placement until delayed placement ack settles', async () => {
