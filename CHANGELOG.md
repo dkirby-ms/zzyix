@@ -5,6 +5,12 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.3.2](https://github.com/dkirby-ms/zzyix/compare/v1.3.1...v1.3.2) (2026-08-02)
+
+### Bug Fixes
+
+* **canvas:** expose quilt-wide occupancy in minimap ([20959a7](https://github.com/dkirby-ms/zzyix/commit/20959a76cc0f90531c7c2cf9a20dc90a3c2d8f68))
+
 ## [1.3.1](https://github.com/dkirby-ms/zzyix/compare/v1.3.0...v1.3.1) (2026-08-02)
 
 ### Bug Fixes
