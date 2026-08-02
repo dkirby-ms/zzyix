@@ -6,6 +6,7 @@ import { Server as SocketServer } from 'socket.io'
 import { io as createSocketClient, type Socket as SocketClient } from 'socket.io-client'
 import {
   buildChunkAggregate,
+  isPlaceTilePayload,
   isQuiltClientRuntimeMetrics,
   isQuiltPlaceTileRequest,
   isQuiltRemoveTileRequest,
@@ -656,6 +657,24 @@ describe('protocol-v2 authorization boundary', () => {
     })).toBe(false)
   })
 
+  it('accepts all valid tile shapes and rejects unknown shapes', () => {
+    const baseTile = {
+      tileId: '40000000-0000-4000-8000-000000000001',
+      color: '#abc',
+      material: 'ceramic',
+      transform: { position: { x: 0, y: 0 }, rotation: 0 },
+    }
+
+    const validShapes = ['square', 'triangle', 'rectangle', 'l-shape', 'large-square', 'circle', 'right-triangle', 'large-right-triangle']
+    for (const shape of validShapes) {
+      expect(isPlaceTilePayload({ ...baseTile, shape }), `shape ${shape} should be accepted`).toBe(true)
+    }
+
+    expect(isPlaceTilePayload({ ...baseTile, shape: 'hexagon' })).toBe(false)
+    expect(isPlaceTilePayload({ ...baseTile, shape: '' })).toBe(false)
+    expect(isPlaceTilePayload({ ...baseTile, shape: undefined })).toBe(false)
+  })
+
   it('fails the monolithic legacy protocol closed unless every exposed patch surface is visible', () => {
     const baseContext = {
       topology: {
@@ -810,6 +829,31 @@ describe('protocol-v2 scoped recovery delivery', () => {
       tileCount: 2,
       byShape: { square: 1, triangle: 1 },
       byMaterial: { ceramic: 1, glass: 1 },
+    })
+  })
+
+  it('counts newer shapes including circle in buildChunkAggregate', () => {
+    const tile = (shape: string) => ({
+      id: crypto.randomUUID(),
+      shape: shape as 'circle',
+      color: '#abc',
+      material: 'ceramic' as const,
+      transform: { position: vec2(0, 0), rotation: 0 },
+      createdAt: 1,
+    })
+
+    const aggregate = buildChunkAggregate([
+      tile('circle'),
+      tile('large-square'),
+      tile('right-triangle'),
+      tile('large-right-triangle'),
+      tile('circle'),
+    ])
+
+    expect(aggregate).toEqual({
+      tileCount: 5,
+      byShape: { circle: 2, 'large-square': 1, 'right-triangle': 1, 'large-right-triangle': 1 },
+      byMaterial: { ceramic: 5 },
     })
   })
 })

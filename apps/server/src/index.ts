@@ -92,9 +92,10 @@ import {
   rotateCanonicalLineage,
 } from './migration/canonicalAttempts.js'
 import { parseCanonicalTelemetryEvent } from './operations/canonicalRetirementReportCli.js'
+import { tileShapeValues, materialVariantValues } from './db/types.js'
 
-const TILE_SHAPES = new Set<PlaceTilePayload['shape']>(['square', 'triangle', 'rectangle', 'l-shape', 'large-square', 'circle', 'right-triangle', 'large-right-triangle'])
-const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(['ceramic', 'glass', 'stone'])
+const TILE_SHAPES = new Set<PlaceTilePayload['shape']>(tileShapeValues)
+const MATERIAL_VARIANTS = new Set<PlaceTilePayload['material']>(materialVariantValues)
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DEFAULT_CORS_ORIGIN = 'http://localhost:5173'
