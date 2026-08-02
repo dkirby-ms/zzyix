@@ -22,11 +22,13 @@ The server query uses the `aggregateData` authorization surface and distinct til
 
 The initial shared-entry approach was rejected during review because placement authorization is ownership-scoped. Retaining assigned-patch entry avoids a write regression.
 
+A follow-up review found that incremental placement reused snapshot replacement semantics, clearing existing chunk membership until the next viewport snapshot. Incremental events now append only the placed tile, with cache-level and App-level regression coverage.
+
 ## Validation
 
 * `npm run lint`: passed with two unrelated existing warnings
 * `npm run build`: passed
-* `npm run test:client`: 175 passed, 16 skipped
+* `npm run test:client`: 177 passed, 16 skipped
 * `npm run test:server`: 220 passed, 1 skipped
 
 ## Status

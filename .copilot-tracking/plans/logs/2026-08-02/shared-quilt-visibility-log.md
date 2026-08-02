@@ -10,6 +10,8 @@ Assigned-patch entry remains necessary because placement requires ownership of e
 
 The initial shared-entry approach was reverted after review found that non-owners could not place in the shared initial patch.
 
+The placement follow-up corrected incremental cache updates that cleared settled chunk memberships. Viewport movement had hidden the defect by loading a fresh authoritative snapshot.
+
 ## Follow-on work
 
 Consider replacing polling with a quilt-level summary invalidation event if occupancy request volume becomes material.
