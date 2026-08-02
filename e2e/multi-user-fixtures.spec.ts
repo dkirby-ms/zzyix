@@ -249,7 +249,7 @@ test('stale revision rejection triggers resync and successful retry convergence'
   expect(placedByAAgain.placedBy).toBe(ownerA)
 
   await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedByA, placedByAAgain])
-})
+});
 
 test('out-of-order revision rejection allows clean retry and convergence', async ({ createMultiUserSession }) => {
   const session = await createMultiUserSession({ userCount: 2 })
@@ -331,4 +331,4 @@ test('new tile shapes can be placed and persist through the full stack', async (
     const tile = await user.placeTile({ x: 10 + index * 5, y: 10 })
     expect(tile.shape).toBe(shape)
   }
-})
+});
