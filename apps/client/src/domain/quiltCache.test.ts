@@ -22,6 +22,11 @@ const tile = (id: string): TileInstance => ({
   createdAt: 1,
 })
 
+const positionedTile = (id: string, x: number, y: number): TileInstance => ({
+  ...tile(id),
+  transform: { position: { x, y }, rotation: 0 },
+})
+
 const cursor = (patchId: string, opSeq: number) => ({ patchId, opSeq, revision: opSeq })
 
 describe('quiltCache', () => {
@@ -86,6 +91,40 @@ describe('quiltCache', () => {
     expect(state.patches.active.chunkIds).toEqual(['2:3'])
     expect(Object.keys(evicted.patches)).toEqual(['active'])
     expect(selectQuiltTiles(evicted).map(({ id }) => id)).toEqual(['active-tile'])
+  })
+
+  it('retains previously loaded chunks for the same patch while replacing refreshed chunk scope', () => {
+    let state = mergeQuiltPatchSnapshot(createQuiltCache(), {
+      patchId: 'patch-a',
+      roomId: 'room-a',
+      chunkIds: ['0:0'],
+      tiles: [positionedTile('chunk-a', 1, 1)],
+      cursor: cursor('patch-a', 1),
+      accessedAt: 1,
+    })
+    state = mergeQuiltPatchSnapshot(state, {
+      patchId: 'patch-a',
+      roomId: 'room-a',
+      chunkIds: ['1:0'],
+      tiles: [positionedTile('chunk-b', 9, 1)],
+      cursor: cursor('patch-a', 2),
+      accessedAt: 2,
+    })
+
+    expect(selectQuiltTiles(state).map(({ id }) => id).sort()).toEqual(['chunk-a', 'chunk-b'])
+    expect(state.patches['patch-a'].chunkIds.sort()).toEqual(['0:0', '1:0'])
+
+    state = mergeQuiltPatchSnapshot(state, {
+      patchId: 'patch-a',
+      roomId: 'room-a',
+      chunkIds: ['0:0'],
+      tiles: [],
+      cursor: cursor('patch-a', 3),
+      accessedAt: 3,
+    })
+
+    expect(selectQuiltTiles(state).map(({ id }) => id)).toEqual(['chunk-b'])
+    expect(state.patches['patch-a'].chunkIds.sort()).toEqual(['0:0', '1:0'])
   })
 
   it('retains optimistic and undoable entities outside the active area', () => {
