@@ -27,7 +27,6 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-      workflows: write
 
     steps:
       - name: Check Out
@@ -35,6 +34,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
+          token: ${{ secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Set Up Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
@@ -54,5 +54,5 @@ jobs:
 
       - name: Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN != '' && secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: npm run release
