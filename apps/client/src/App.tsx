@@ -873,25 +873,19 @@ function ProtectedApp() {
     }))
 
     let cancelled = false
-    let retryTimeoutId: number | null = null
-    const request = {
-      quiltId: topology.quiltId,
-      rooms,
-      cursors: quiltCursorsRef.current,
-    }
     const emitSubscription = (): void => {
-      socket.emit('subscribe_quilt_area', request, (ack: SubscribeQuiltAreaAck) => {
+      socket.emit('subscribe_quilt_area', {
+        quiltId: topology.quiltId,
+        rooms,
+        cursors: quiltCursorsRef.current,
+      }, (ack: SubscribeQuiltAreaAck) => {
         if (cancelled) return
         quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
         const shouldRetry = ack.outcomes.some(
           (outcome) => outcome.status === 'invalid' && outcome.reason === 'SUBSCRIPTION_IN_PROGRESS',
         )
         if (!shouldRetry) return
-        if (retryTimeoutId !== null) window.clearTimeout(retryTimeoutId)
-        retryTimeoutId = window.setTimeout(() => {
-          if (cancelled) return
-          emitSubscription()
-        }, CHUNK_SUBSCRIPTION_DEBOUNCE_MS)
+        setQuiltSubscriptionEpoch((previous) => previous + 1)
       })
     }
 
@@ -902,7 +896,6 @@ function ProtectedApp() {
     return () => {
       cancelled = true
       window.clearTimeout(timeoutId)
-      if (retryTimeoutId !== null) window.clearTimeout(retryTimeoutId)
     }
   }, [activeChunkIds, connectionEpoch, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
 
