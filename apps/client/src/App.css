@@ -1127,6 +1127,12 @@ button:focus-visible,
   opacity: 0.8;
 }
 
+.minimap-occupancy {
+  fill: #2f7677;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 0.2;
+}
+
 .minimap-viewport {
   position: absolute;
   border: 2px solid rgba(24, 103, 115, 0.95);

@@ -52,6 +52,27 @@ describe('MinimapOverlay', () => {
     expect(onPanTo).toHaveBeenCalledWith({ x: 50, y: 50 })
   })
 
+  it('renders quilt-wide occupancy separately from cached tile geometry', () => {
+    render(
+      <MinimapOverlay
+        worldBounds={{ minX: 0, maxX: 32, minY: 0, maxY: 32 }}
+        viewport={null}
+        occupancy={[
+          { chunkId: '0:0', tileCount: 2 },
+          { chunkId: '3:3', tileCount: 8 },
+        ]}
+        chunkWorldSize={8}
+        tiles={[]}
+        onPanTo={vi.fn()}
+      />,
+    )
+
+    const preview = screen.getByLabelText('Whole quilt preview')
+    expect(preview.querySelectorAll('rect.minimap-occupancy')).toHaveLength(2)
+    expect(preview.querySelector('[data-tile-count="8"]')).toHaveAttribute('x', '75')
+    expect(preview.querySelectorAll('path.minimap-tile')).toHaveLength(0)
+  })
+
   it('drags the viewport frame to pan quickly', () => {
     const onPanTo = vi.fn()
 

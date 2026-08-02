@@ -26,6 +26,7 @@ import { derivePlacementBounds } from './domain/placementSolver'
 import {
   clearCanonicalPatchLink,
   discoverCanonicalWorld,
+  fetchQuiltOccupancy,
   getCanonicalPatchLink,
   resolveCanonicalPatchNavigation,
   setCanonicalPatchLink,
@@ -42,6 +43,7 @@ import type {
   QuiltPatchCursor,
   QuiltPatchEventPayload,
   QuiltPatchResyncRequiredPayload,
+  QuiltOccupancyChunk,
   QuiltProtocolHandshake,
   QuiltPlaceTileAck,
   QuiltPlaceTileRequest,
@@ -95,6 +97,7 @@ const CHUNK_MOVEMENT_HYSTERESIS_RATIO = 0.25
 const CHUNK_ZOOM_HYSTERESIS = 0.5
 const CHUNK_SUBSCRIPTION_DEBOUNCE_MS = 120
 const QUILT_CACHE_PATCH_BUDGET = 64
+const QUILT_OCCUPANCY_REFRESH_MS = 10_000
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
 
@@ -389,6 +392,7 @@ function ProtectedApp() {
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
   const [quiltProtocol, setQuiltProtocol] = useState<QuiltProtocolHandshake | null>(null)
   const [quiltCache, setQuiltCache] = useState<QuiltCacheState>(createQuiltCache)
+  const [quiltOccupancy, setQuiltOccupancy] = useState<QuiltOccupancyChunk[]>([])
   const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
   const [connectionEpoch, setConnectionEpoch] = useState(0)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
@@ -503,6 +507,7 @@ function ProtectedApp() {
     setFocusedCanonicalPatch(null)
     setQuiltProtocol(null)
     setQuiltCache(createQuiltCache())
+    setQuiltOccupancy([])
     setSequencedState(createInitialSequencedTilesState())
     quiltCursorsRef.current = {}
     subscribedChunkIdsRef.current = new Set()
@@ -540,6 +545,33 @@ function ProtectedApp() {
     void enterCanonicalWorld()
     return () => { cancelled = true }
   }, [auth.apiOrigin, auth.authenticatedFetch, clearProtectedWorldState])
+
+  useEffect(() => {
+    if (!canonicalDescriptor) return
+
+    let cancelled = false
+    const refreshOccupancy = async (): Promise<void> => {
+      try {
+        const occupancy = await fetchQuiltOccupancy(
+          auth.authenticatedFetch,
+          auth.apiOrigin,
+          canonicalDescriptor.quiltId,
+        )
+        if (!cancelled && occupancy.quiltId === canonicalDescriptor.quiltId) {
+          setQuiltOccupancy(occupancy.chunks)
+        }
+      } catch {
+        // Keep the last successful quilt summary through transient refresh failures.
+      }
+    }
+
+    void refreshOccupancy()
+    const intervalId = window.setInterval(() => void refreshOccupancy(), QUILT_OCCUPANCY_REFRESH_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [auth.apiOrigin, auth.authenticatedFetch, canonicalDescriptor])
 
   const focusCanonicalPatch = useCallback((navigation: CanonicalPatchNavigation): void => {
     setFocusedCanonicalPatch(navigation)
@@ -1485,6 +1517,8 @@ function ProtectedApp() {
           <MinimapOverlay
             worldBounds={worldBounds}
             viewport={cameraViewport}
+            occupancy={quiltOccupancy}
+            chunkWorldSize={CHUNK_WORLD_SIZE}
             tiles={visibleTiles.map((tile) => ({
               id: tile.id,
               shape: tile.shape,

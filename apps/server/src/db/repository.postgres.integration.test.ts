@@ -9,7 +9,7 @@ import {
   principals,
   quilts,
 } from './schema.js'
-import { persistQuiltTilePlacement, persistQuiltTileRemoval } from './repository.js'
+import { listQuiltOccupancy, persistQuiltTilePlacement, persistQuiltTileRemoval } from './repository.js'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
 
 const CANVAS_ID = '10000000-0000-4000-8000-000000000001'
@@ -97,6 +97,33 @@ describe('patch-scoped PostgreSQL placement', () => {
     )
     await queryWithConnection(database, 'TRUNCATE patch_memberships')
     await queryWithConnection(database, 'UPDATE patches SET revision = 0, owner_principal_id = $1', [PRINCIPAL_ID])
+    await queryWithConnection(database, "UPDATE patch_visibility_policies SET aggregate_data = 'authenticated'")
+  })
+
+  it('summarizes authorized chunk occupancy without exposing hidden non-member patches', async () => {
+    const tileId = '40000000-0000-4000-8000-000000000010'
+    const result = await placement(tileId, randomUUID(), 5, revisions(0, [PATCH_IDS[0]]))
+    expect(result.committed).toBe(true)
+
+    await database.db.update(patchVisibilityPolicies)
+      .set({ aggregateData: 'hidden' })
+      .where(eq(patchVisibilityPolicies.patchId, PATCH_IDS[0]))
+
+    await expect(listQuiltOccupancy(QUILT_ID, MEMBER_PRINCIPAL_ID)).resolves.toEqual({
+      quiltId: QUILT_ID,
+      chunks: [],
+    })
+
+    await database.db.insert(patchMemberships).values({
+      patchId: PATCH_IDS[0],
+      principalId: MEMBER_PRINCIPAL_ID,
+      role: 'member',
+    })
+
+    await expect(listQuiltOccupancy(QUILT_ID, MEMBER_PRINCIPAL_ID)).resolves.toEqual({
+      quiltId: QUILT_ID,
+      chunks: [{ chunkId: '0:0', tileCount: 1 }],
+    })
   })
 
   it('allows exactly one conflicting placement across the toroidal seam', async () => {

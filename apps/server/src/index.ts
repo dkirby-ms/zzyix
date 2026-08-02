@@ -55,6 +55,7 @@ import {
   provisionCanonicalWorld,
   activateCanonicalWorld,
   listEligibleCanonicalPatches,
+  listQuiltOccupancy,
   resolveCanonicalPatchNavigation,
   acquireQuiltPresenceLease,
   renewQuiltPresenceLease,
@@ -1041,6 +1042,23 @@ app.get('/quilts/canonical/patches/eligible', authenticatedReadRateLimiter, requ
     return
   }
   res.status(200).json(result)
+})
+
+app.get('/quilts/:quiltId/occupancy', authenticatedReadRateLimiter, requireHttpPrincipal, async (req, res) => {
+  const { quiltId } = req.params
+  const requestId = res.getHeader('x-request-id')?.toString() ?? crypto.randomUUID()
+  if (typeof quiltId !== 'string' || !UUID_PATTERN.test(quiltId)) {
+    sendResourceNotFound(res, requestId)
+    return
+  }
+
+  const occupancy = await listQuiltOccupancy(quiltId, getPrincipalContext(req).principalId)
+  if (!occupancy) {
+    sendResourceNotFound(res, requestId)
+    return
+  }
+
+  res.status(200).json(occupancy)
 })
 
 app.post('/quilts/canonical/telemetry', authenticatedMutationRateLimiter, requireHttpPrincipal, async (req, res) => {

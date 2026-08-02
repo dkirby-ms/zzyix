@@ -2,6 +2,7 @@ import type {
   CanonicalPatchNavigation,
   CanonicalWorldEntryDescriptor,
   OwnershipCommandResponse,
+  QuiltOccupancyResponse,
 } from '../../../server/src/contracts'
 
 const CLIENT_STORAGE_KEY = 'zzyix_client_id'
@@ -63,6 +64,19 @@ export const resolveCanonicalPatchNavigation = async (
   )
   if (!response.ok) throw new Error(`Patch navigation is unavailable (${response.status})`)
   return response.json() as Promise<CanonicalPatchNavigation>
+}
+
+export const fetchQuiltOccupancy = async (
+  authenticatedFetch: typeof fetch,
+  apiOrigin: string,
+  quiltId: string,
+): Promise<QuiltOccupancyResponse> => {
+  const response = await authenticatedFetch(
+    `${apiOrigin}/quilts/${encodeURIComponent(quiltId)}/occupancy`,
+    { method: 'GET' },
+  )
+  if (!response.ok) throw new Error(`Quilt occupancy is unavailable (${response.status})`)
+  return response.json() as Promise<QuiltOccupancyResponse>
 }
 
 export const getCanonicalPatchLink = (): { quiltId: string; patchId: string } | null => {

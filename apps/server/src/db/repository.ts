@@ -7,6 +7,7 @@ import type {
   CanonicalWorldDescriptor,
   ClientPresence,
   EligibleCanonicalPatchesResponse,
+  QuiltOccupancyResponse,
   TileInstance,
 } from '../contracts.js'
 import type { LegacySession as Session, LegacySessionCanvasConfig as SessionCanvasConfig } from '../domain/legacySession.js'
@@ -3129,6 +3130,80 @@ export const resolveCanonicalPatchNavigation = async (
     .where(and(eq(patches.id, patchId), eq(patches.quiltId, quiltId)))
     .limit(1)
   return patch ? toCanonicalPatchNavigation(descriptor, patch) : null
+}
+
+export const listQuiltOccupancy = async (
+  quiltId: string,
+  principalId: string,
+): Promise<QuiltOccupancyResponse | null> => {
+  const { db } = getDatabaseBundle()
+  const patchRows = await db
+    .select({
+      id: patches.id,
+      state: patches.state,
+      ownerPrincipalId: patches.ownerPrincipalId,
+      memberPrincipalId: patchMemberships.principalId,
+      existence: patchVisibilityPolicies.existence,
+      fineData: patchVisibilityPolicies.fineData,
+      aggregateData: patchVisibilityPolicies.aggregateData,
+      presence: patchVisibilityPolicies.presence,
+      search: patchVisibilityPolicies.search,
+      durableEvents: patchVisibilityPolicies.durableEvents,
+      claimEnabled: patchVisibilityPolicies.claimEnabled,
+      policyVersion: patchVisibilityPolicies.policyVersion,
+    })
+    .from(patches)
+    .leftJoin(patchVisibilityPolicies, eq(patchVisibilityPolicies.patchId, patches.id))
+    .leftJoin(
+      patchMemberships,
+      and(eq(patchMemberships.patchId, patches.id), eq(patchMemberships.principalId, principalId)),
+    )
+    .where(eq(patches.quiltId, quiltId))
+
+  if (patchRows.length === 0) return null
+
+  const authorizedPatchIds = patchRows.flatMap((row) => {
+    const policy = {
+      existence: row.existence,
+      fineData: row.fineData,
+      aggregateData: row.aggregateData,
+      presence: row.presence,
+      search: row.search,
+      durableEvents: row.durableEvents,
+      claimEnabled: row.claimEnabled,
+      policyVersion: row.policyVersion,
+    }
+    const authorized = canAccessPatchSurface('aggregateData', {
+      state: row.state as QuiltDeliveryContext['patches'][number]['state'],
+      policy: isPersistedVisibilityPolicy(policy) ? policy : null,
+      subject: {
+        authenticated: true,
+        isMember: row.ownerPrincipalId === principalId || row.memberPrincipalId === principalId,
+      },
+    })
+    return authorized ? [row.id] : []
+  })
+
+  if (authorizedPatchIds.length === 0) return { quiltId, chunks: [] }
+
+  const occupiedChunks = await db
+    .select({
+      chunkX: tileSpatialRefs.chunkX,
+      chunkY: tileSpatialRefs.chunkY,
+      tileCount: countDistinct(tileSpatialRefs.tileId),
+    })
+    .from(tileSpatialRefs)
+    .where(inArray(tileSpatialRefs.patchId, authorizedPatchIds))
+    .groupBy(tileSpatialRefs.chunkX, tileSpatialRefs.chunkY)
+    .orderBy(asc(tileSpatialRefs.chunkY), asc(tileSpatialRefs.chunkX))
+
+  return {
+    quiltId,
+    chunks: occupiedChunks.map((chunk) => ({
+      chunkId: `${chunk.chunkX}:${chunk.chunkY}`,
+      tileCount: chunk.tileCount,
+    })),
+  }
 }
 
 export const getCanonicalWorldStatus = async (): Promise<CanonicalWorldOperatorResult> => {

@@ -15,10 +15,17 @@ type MinimapTile = {
   mirrored?: boolean
 }
 
+type MinimapOccupancyChunk = {
+  chunkId: `${number}:${number}`
+  tileCount: number
+}
+
 type MinimapOverlayProps = {
   worldBounds: { minX: number; maxX: number; minY: number; maxY: number }
   viewport: MinimapViewport | null
   tiles?: MinimapTile[]
+  occupancy?: MinimapOccupancyChunk[]
+  chunkWorldSize?: number
   onPanTo: (center: { x: number; y: number }) => void
   cameraZoom?: number
   zoomRange?: { min: number; max: number }
@@ -82,6 +89,8 @@ export const MinimapOverlay = ({
   worldBounds,
   viewport,
   tiles,
+  occupancy,
+  chunkWorldSize,
   onPanTo,
   cameraZoom,
   zoomRange,
@@ -148,6 +157,36 @@ export const MinimapOverlay = ({
     return normalized
   }, [disabled, height, isToroidal, tiles, width, worldBounds.maxX, worldBounds.maxY, worldBounds.minX, worldBounds.minY])
 
+  const occupancyCells = useMemo(() => {
+    if (!occupancy || occupancy.length === 0 || !chunkWorldSize || chunkWorldSize <= 0 || disabled) {
+      return []
+    }
+
+    const maxTileCount = Math.max(...occupancy.map((chunk) => chunk.tileCount), 1)
+    return occupancy.flatMap((chunk) => {
+      const [rawX, rawY] = chunk.chunkId.split(':')
+      const worldX = Number(rawX) * chunkWorldSize
+      const worldY = Number(rawY) * chunkWorldSize
+      if (![worldX, worldY, chunk.tileCount].every(Number.isFinite) || chunk.tileCount <= 0) return []
+
+      const left = clamp01((worldX - worldBounds.minX) / width) * 100
+      const right = clamp01((worldX + chunkWorldSize - worldBounds.minX) / width) * 100
+      const bottom = clamp01((worldY - worldBounds.minY) / height) * 100
+      const top = clamp01((worldY + chunkWorldSize - worldBounds.minY) / height) * 100
+      if (right <= left || top <= bottom) return []
+
+      return [{
+        id: chunk.chunkId,
+        x: left,
+        y: 100 - top,
+        width: right - left,
+        height: top - bottom,
+        opacity: 0.22 + 0.58 * Math.sqrt(chunk.tileCount / maxTileCount),
+        tileCount: chunk.tileCount,
+      }]
+    })
+  }, [chunkWorldSize, disabled, height, occupancy, width, worldBounds.minX, worldBounds.minY])
+
   const viewportFrame = useMemo(() => {
     if (!normalizedViewport || disabled) {
       return null
@@ -164,7 +203,7 @@ export const MinimapOverlay = ({
       top: (1 - maxY) * 100,
       height: Math.max((maxY - minY) * 100, 3),
     }
-  }, [disabled, height, normalizedViewport, width, worldBounds.maxX, worldBounds.minX, worldBounds.minY])
+  }, [disabled, height, normalizedViewport, width, worldBounds.minX, worldBounds.minY])
 
   const pointerToWorld = useCallback((event: PointerEvent | ReactPointerEvent): { x: number; y: number } | null => {
     const container = containerRef.current
@@ -299,6 +338,18 @@ export const MinimapOverlay = ({
             <button type="button" onClick={handleZoomIn} disabled={zoomInDisabled} aria-label="Zoom in">+</button>
           </div>
           <svg className="minimap-quilt-render" viewBox="0 0 100 100" aria-label="Whole quilt preview" preserveAspectRatio="none">
+            {occupancyCells.map((cell) => (
+              <rect
+                key={cell.id}
+                x={cell.x}
+                y={cell.y}
+                width={cell.width}
+                height={cell.height}
+                opacity={cell.opacity}
+                data-tile-count={cell.tileCount}
+                className="minimap-occupancy"
+              />
+            ))}
             {minimapTiles.map((tile) => {
               const x = tile.x * 100
               const y = (1 - tile.y) * 100

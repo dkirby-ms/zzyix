@@ -217,6 +217,16 @@ export type EligibleCanonicalPatchesResponse = {
   patches: CanonicalPatchNavigation[]
 }
 
+export type QuiltOccupancyChunk = {
+  chunkId: ChunkId
+  tileCount: number
+}
+
+export type QuiltOccupancyResponse = {
+  quiltId: string
+  chunks: QuiltOccupancyChunk[]
+}
+
 export type OwnershipOperationRequest = {
   operationId: string
 }

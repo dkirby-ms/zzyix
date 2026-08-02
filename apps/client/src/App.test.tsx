@@ -9,6 +9,7 @@ import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 const {
   clearCanonicalPatchLinkMock,
   discoverCanonicalWorldMock,
+  fetchQuiltOccupancyMock,
   getStoredSessionIdMock,
   getCanonicalPatchLinkMock,
   listSessionsMock,
@@ -20,6 +21,7 @@ const {
 } = vi.hoisted(() => ({
   clearCanonicalPatchLinkMock: vi.fn(),
   discoverCanonicalWorldMock: vi.fn(),
+  fetchQuiltOccupancyMock: vi.fn(),
   getStoredSessionIdMock: vi.fn(),
   getCanonicalPatchLinkMock: vi.fn(),
   listSessionsMock: vi.fn<() => Promise<SessionSummary[]>>(),
@@ -115,6 +117,7 @@ vi.mock('./network/session', () => ({
   ensureClientId: vi.fn(() => 'client-1'),
   listSessions: listSessionsMock,
   discoverCanonicalWorld: discoverCanonicalWorldMock,
+  fetchQuiltOccupancy: fetchQuiltOccupancyMock,
   getCanonicalPatchLink: getCanonicalPatchLinkMock,
   getStoredSessionId: getStoredSessionIdMock,
   setStoredSessionId: setStoredSessionIdMock,
@@ -279,6 +282,8 @@ describe('App canonical canvas behavior', () => {
     setStoredSessionIdMock.mockReset()
     discoverCanonicalWorldMock.mockReset()
     discoverCanonicalWorldMock.mockResolvedValue(canonicalDescriptor)
+    fetchQuiltOccupancyMock.mockReset()
+    fetchQuiltOccupancyMock.mockResolvedValue({ quiltId: canonicalDescriptor.quiltId, chunks: [] })
     getCanonicalPatchLinkMock.mockReset()
     getCanonicalPatchLinkMock.mockReturnValue(null)
     resolveCanonicalPatchNavigationMock.mockReset()
@@ -366,6 +371,26 @@ describe('App canonical canvas behavior', () => {
     expect(setCanonicalPatchLinkMock).toHaveBeenCalledWith(expect.objectContaining({ patchId: 'patch-assigned' }))
     expect(screen.queryByText('Choose a Canvas')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '← Back' })).not.toBeInTheDocument()
+  })
+
+  it('renders quilt occupancy that is not present in the fine tile cache', async () => {
+    fetchQuiltOccupancyMock.mockResolvedValue({
+      quiltId: canonicalDescriptor.quiltId,
+      chunks: [{ chunkId: '0:0', tileCount: 7 }],
+    })
+
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    await waitFor(() => expect(fetchQuiltOccupancyMock).toHaveBeenCalledWith(
+      authSessionState.authenticatedFetch,
+      authSessionState.apiOrigin,
+      canonicalDescriptor.quiltId,
+    ))
+    await waitFor(() => expect(
+      screen.getByLabelText('Whole quilt preview').querySelector('[data-tile-count="7"]'),
+    ).toBeInTheDocument())
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '0')
   })
 
   it('resolves a durable patch link without rendering manual claim controls', async () => {
