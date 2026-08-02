@@ -98,6 +98,8 @@ const DEFAULT_WORLD_BOUNDS = {
   maxY: 3.4,
 }
 
+const TILE_SETTLE_DURATION_SECONDS = 0.34
+
 const confidenceColor = (base: string, confidence: ConfidenceState): string => {
   if (confidence === 'valid') return base
   if (confidence === 'near-valid') return '#e4bf67'
@@ -125,21 +127,34 @@ const createExtrudeGeometry = (shape: TileShape): ExtrudeGeometry => {
 
 const TileMesh = ({ tile, ownershipIdentity }: { tile: TileInstance; ownershipIdentity: string }) => {
   const groupRef = useRef<Group>(null)
-  const animationDone = useRef(false)
+  const animationAgeSeconds = (Date.now() - tile.createdAt) / 1000
+  const shouldAnimate = tile.settleFrom !== undefined
+    && animationAgeSeconds >= 0
+    && animationAgeSeconds < TILE_SETTLE_DURATION_SECONDS
+  const animationDone = useRef(!shouldAnimate)
   const material = useCraftMaterial(tile.color, tile.material)
   const ownerColor = tile.placedBy && tile.placedBy !== ownershipIdentity
     ? getCollaboratorColor(tile.placedBy)
     : undefined
 
   const geometry = useMemo(() => createExtrudeGeometry(tile.shape), [tile.shape])
+  const initialTransform = shouldAnimate && tile.settleFrom ? tile.settleFrom : tile.transform
+  const initialMirror = tile.transform.mirrored ? -1 : 1
 
   useFrame(() => {
     const group = groupRef.current
     if (!group || animationDone.current) return
+    if (!tile.settleFrom) {
+      animationDone.current = true
+      return
+    }
 
     const elapsed = (Date.now() - tile.createdAt) / 1000
-    const duration = 0.34
-    const t = MathUtils.clamp(elapsed / duration, 0, 1)
+    if (elapsed < 0) {
+      animationDone.current = true
+      return
+    }
+    const t = MathUtils.clamp(elapsed / TILE_SETTLE_DURATION_SECONDS, 0, 1)
     const eased = easeOutCubic(t)
     const from = tile.settleFrom ?? tile.transform
 
@@ -164,7 +179,12 @@ const TileMesh = ({ tile, ownershipIdentity }: { tile: TileInstance; ownershipId
   })
 
   return (
-    <group ref={groupRef}>
+    <group
+      ref={groupRef}
+      position={[initialTransform.position.x, initialTransform.position.y, 0]}
+      rotation={[0, 0, initialTransform.rotation]}
+      scale={[initialMirror, 1, 1]}
+    >
       <mesh castShadow receiveShadow geometry={geometry} material={material} />
       {ownerColor && (
         <mesh geometry={geometry} scale={[1.035, 1.035, 1.035]} data-owner-boundary={tile.placedBy}>
@@ -493,7 +513,11 @@ const SceneContents = ({
           />
         )}
         {tileImages.map((image) => (
-          <group key={image.key} position={[image.position.x - image.tile.transform.position.x, image.position.y - image.tile.transform.position.y, 0]} data-canonical-id={image.canonicalId}>
+          <group
+            key={`${image.key}:${image.tile.settleFrom ? 'settling' : 'settled'}`}
+            position={[image.position.x - image.tile.transform.position.x, image.position.y - image.tile.transform.position.y, 0]}
+            data-canonical-id={image.canonicalId}
+          >
             <TileMesh tile={image.tile} ownershipIdentity={ownershipIdentity} />
           </group>
         ))}
