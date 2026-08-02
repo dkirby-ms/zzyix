@@ -24,6 +24,7 @@ export type CanvasTileSnapshot = {
 
 export type CanvasStateSnapshot = {
   clientId: string
+  ownershipIdentity: string
   sessionId: string | null
   mode: CanvasMode
   connectionStatus: CanvasConnectionStatus
@@ -267,7 +268,7 @@ const createCanvasUser = (
   placeTile: async (position) => {
     const before = await readCanvasState(page)
     const beforeTileIds = new Set(before.tiles.map((tile) => tile.id))
-    const placingClientId = before.clientId
+    const placingOwnershipIdentity = before.ownershipIdentity
     const placingTileState = before.activeTile
 
     await callCanvasApi(page, 'placeTileAt', position)
@@ -277,7 +278,7 @@ const createCanvasUser = (
       (nextState) => nextState.tiles.some((tile) =>
         !beforeTileIds.has(tile.id)
         && SERVER_TILE_ID_PATTERN.test(tile.id)
-        && tile.placedBy === placingClientId
+        && tile.placedBy === placingOwnershipIdentity
         && tile.shape === placingTileState.shape
         && tile.color === placingTileState.color
         && tile.material === placingTileState.material
@@ -288,7 +289,7 @@ const createCanvasUser = (
     const placedTile = state.tiles.find((tile) =>
       !beforeTileIds.has(tile.id)
       && SERVER_TILE_ID_PATTERN.test(tile.id)
-      && tile.placedBy === placingClientId
+      && tile.placedBy === placingOwnershipIdentity
       && tile.shape === placingTileState.shape
       && tile.color === placingTileState.color
       && tile.material === placingTileState.material

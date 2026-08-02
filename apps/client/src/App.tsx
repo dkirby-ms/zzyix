@@ -207,7 +207,7 @@ const activeTileUiReducer = (state: ActiveTileUiState, action: ActiveTileUiActio
         activeTile: {
           ...state.activeTile,
           ...action.patch,
-          material: 'ceramic',
+          material: action.patch.material ?? state.activeTile.material,
           rotation: action.patch.rotation === undefined
             ? state.activeTile.rotation
             : normalizeAngle(action.patch.rotation),
@@ -1174,6 +1174,7 @@ function ProtectedApp() {
   useEffect(() => registerCanvasTestApi({
     getState: () => ({
       clientId,
+      ownershipIdentity,
       sessionId,
       mode,
       connectionStatus: connectionState.status,
@@ -1369,6 +1370,7 @@ function ProtectedApp() {
     gridOverlayEnabled,
     isQuiltV2,
     mode,
+    ownershipIdentity,
     placeFromState,
     resolveGhostFromPointer,
     sequencedState.revision,
