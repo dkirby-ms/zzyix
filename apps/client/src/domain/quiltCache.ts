@@ -1,5 +1,7 @@
-import type { QuiltPatchCursor, QuiltPatchRevisionMap } from '../../../server/src/contracts'
+import { RUNTIME_CHUNK_WORLD_SIZE, type QuiltPatchCursor, type QuiltPatchRevisionMap } from '../../../server/src/contracts'
+import { toChunkId, worldToChunkCoords } from './math2d'
 import type { TileInstance } from './placementSolver'
+import { getTileDefinition, transformPolygon } from './tileGeometry'
 
 export type QuiltCachePinReason = 'optimistic' | 'undo' | 'selection'
 
@@ -15,6 +17,7 @@ export type QuiltCachePatch = {
   roomId: string
   chunkIds: string[]
   tileIds: string[]
+  chunkTileIds: Record<string, string[]>
   cursor: QuiltPatchCursor
   lastAccessed: number
 }
@@ -38,6 +41,66 @@ export const createQuiltCache = (): QuiltCacheState => ({
 })
 
 const unique = <T>(values: T[]): T[] => Array.from(new Set(values))
+
+const deriveTileChunkIds = (
+  tile: TileInstance,
+  scopedChunkIds?: string[],
+): string[] => {
+  const outline = transformPolygon(getTileDefinition(tile.shape).outline, tile.transform)
+  const minX = Math.min(...outline.map((point) => point.x))
+  const maxX = Math.max(...outline.map((point) => point.x))
+  const minY = Math.min(...outline.map((point) => point.y))
+  const maxY = Math.max(...outline.map((point) => point.y))
+  const chunkIds = new Set<string>()
+
+  for (let chunkX = Math.floor(minX / RUNTIME_CHUNK_WORLD_SIZE); chunkX <= Math.floor(maxX / RUNTIME_CHUNK_WORLD_SIZE); chunkX += 1) {
+    for (let chunkY = Math.floor(minY / RUNTIME_CHUNK_WORLD_SIZE); chunkY <= Math.floor(maxY / RUNTIME_CHUNK_WORLD_SIZE); chunkY += 1) {
+      chunkIds.add(toChunkId(chunkX, chunkY))
+    }
+  }
+
+  if (!scopedChunkIds || scopedChunkIds.length === 0) {
+    return Array.from(chunkIds)
+  }
+
+  const scoped = new Set(scopedChunkIds)
+  const filtered = Array.from(chunkIds).filter((chunkId) => scoped.has(chunkId))
+  if (filtered.length > 0) {
+    return filtered
+  }
+
+  const anchor = worldToChunkCoords(
+    tile.transform.position.x,
+    tile.transform.position.y,
+    RUNTIME_CHUNK_WORLD_SIZE,
+  )
+  const anchorChunkId = toChunkId(anchor.chunkX, anchor.chunkY)
+  if (scoped.has(anchorChunkId)) {
+    return [anchorChunkId]
+  }
+
+  return scopedChunkIds.length === 1 ? scopedChunkIds : []
+}
+
+const buildChunkTileIds = (
+  tiles: TileInstance[],
+  chunkIds: string[],
+  existing: Record<string, string[]> = {},
+): Record<string, string[]> => {
+  const next = { ...existing }
+  chunkIds.forEach((chunkId) => {
+    next[chunkId] = []
+  })
+  tiles.forEach((tile) => {
+    deriveTileChunkIds(tile, chunkIds).forEach((chunkId) => {
+      next[chunkId] = unique([...(next[chunkId] ?? []), tile.id])
+    })
+  })
+  return next
+}
+
+const buildPatchTileIds = (chunkTileIds: Record<string, string[]>): string[] =>
+  unique(Object.values(chunkTileIds).flat())
 
 const rebuildTiles = (state: QuiltCacheState): Record<string, TileInstance> => {
   const retainedIds = new Set(Object.values(state.patches).flatMap((patch) => patch.tileIds))
@@ -68,6 +131,17 @@ export const mergeQuiltPatchSnapshot = (
     tiles[tile.id] = tile
   })
 
+  const scopedChunkIds = unique(input.chunkIds ?? [])
+  const chunkTileIds = scopedChunkIds.length === 0
+    ? {}
+    : buildChunkTileIds(input.tiles, scopedChunkIds, currentPatch?.chunkTileIds)
+  const patchChunkIds = scopedChunkIds.length === 0
+    ? unique(input.chunkIds ?? [])
+    : unique([...Object.keys(currentPatch?.chunkTileIds ?? {}), ...Object.keys(chunkTileIds)])
+  const patchTileIds = scopedChunkIds.length === 0
+    ? unique(input.tiles.map((tile) => tile.id))
+    : buildPatchTileIds(chunkTileIds)
+
   const next: QuiltCacheState = {
     ...state,
     tiles,
@@ -76,8 +150,9 @@ export const mergeQuiltPatchSnapshot = (
       [input.patchId]: {
         patchId: input.patchId,
         roomId: input.roomId,
-        chunkIds: unique(input.chunkIds ?? []),
-        tileIds: unique(input.tiles.map((tile) => tile.id)),
+        chunkIds: patchChunkIds,
+        tileIds: patchTileIds,
+        chunkTileIds,
         cursor: input.cursor,
         lastAccessed: input.accessedAt ?? Date.now(),
       },
@@ -104,7 +179,12 @@ export const applyQuiltPatchPlacement = (
       ...state.patches,
       [patchId]: {
         ...patch,
-        tileIds: unique([...patch.tileIds, tile.id]),
+        tileIds: patch.chunkIds.length === 0
+          ? unique([...patch.tileIds, tile.id])
+          : buildPatchTileIds(buildChunkTileIds([tile], patch.chunkIds, patch.chunkTileIds)),
+        chunkTileIds: patch.chunkIds.length === 0
+          ? patch.chunkTileIds
+          : buildChunkTileIds([tile], patch.chunkIds, patch.chunkTileIds),
         cursor,
         lastAccessed: Date.now(),
       },
@@ -129,7 +209,22 @@ export const applyQuiltPatchRemoval = (
       ...state.patches,
       [patchId]: {
         ...patch,
-        tileIds: patch.tileIds.filter((id) => id !== tileId),
+        tileIds: patch.chunkIds.length === 0
+          ? patch.tileIds.filter((id) => id !== tileId)
+          : buildPatchTileIds(Object.fromEntries(
+              Object.entries(patch.chunkTileIds).map(([chunkId, tileIds]) => [
+                chunkId,
+                tileIds.filter((id) => id !== tileId),
+              ]),
+            )),
+        chunkTileIds: patch.chunkIds.length === 0
+          ? patch.chunkTileIds
+          : Object.fromEntries(
+              Object.entries(patch.chunkTileIds).map(([chunkId, tileIds]) => [
+                chunkId,
+                tileIds.filter((id) => id !== tileId),
+              ]),
+            ),
         cursor,
         lastAccessed: Date.now(),
       },
