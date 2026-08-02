@@ -738,6 +738,13 @@ function ProtectedApp() {
     })
   }, [activeChunkIds, isQuiltV2])
 
+  useEffect(() => {
+    const retainedRoomIds = new Set(Object.values(quiltCache.patches).map((patch) => patch.roomId))
+    quiltCursorsRef.current = Object.fromEntries(
+      Object.entries(quiltCursorsRef.current).filter(([roomId]) => retainedRoomIds.has(roomId)),
+    )
+  }, [quiltCache.patches])
+
   const emitPointerMove = useCallback((position: { x: number; y: number }): void => {
     void position
   }, [])
