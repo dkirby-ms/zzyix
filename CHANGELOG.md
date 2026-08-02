@@ -5,6 +5,27 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.3.0](https://github.com/dkirby-ms/zzyix/compare/v1.2.0...v1.3.0) (2026-08-02)
+
+### Features
+
+* add large-square, circle, right-triangle, large-right-triangle to placement pipeline ([5651dfa](https://github.com/dkirby-ms/zzyix/commit/5651dfafe0115e5328617e00220715dd910e1a13))
+* add support for large-square, circle, right-triangle, and large-right-triangle tile shapes ([9d672ac](https://github.com/dkirby-ms/zzyix/commit/9d672ac426a96b726eb3dafbbd8547955dc812dd))
+
+### Bug Fixes
+
+* allow all tile shapes in server placement validation ([4b31825](https://github.com/dkirby-ms/zzyix/commit/4b31825352115f12c9642f5ab1597f81b1c59905))
+* circles not placing correctly ([836f98c](https://github.com/dkirby-ms/zzyix/commit/836f98c0f49e2c3b8ffae186eb94a3f9f373c4d0))
+* **client:** reset animation after tile acknowledgement ([039a21b](https://github.com/dkirby-ms/zzyix/commit/039a21b959de21289b352efe78b6e56fa2cad656))
+* **client:** use current pointer state for tile placement ([d65fb72](https://github.com/dkirby-ms/zzyix/commit/d65fb724b7d87c6fa1c4eb5764771f6235c40f59))
+* **realtime:** prevent viewport subscription overload ([c21e496](https://github.com/dkirby-ms/zzyix/commit/c21e49633fd66bb4ca0ee298541d7b4beb4f4d90))
+* **workflows:** unify changelog release history ([5b2d41a](https://github.com/dkirby-ms/zzyix/commit/5b2d41a40bcfb023457e2440140bbd1d247a5260))
+
+### Miscellaneous Chores
+
+* fix release workflow permissions ([77592c3](https://github.com/dkirby-ms/zzyix/commit/77592c3829d290866bdc99da63533050fa61c1ad))
+* release bugs ([66af2e9](https://github.com/dkirby-ms/zzyix/commit/66af2e96a3efe0c1ab1fc7bad444ff88b7eb2df3))
+
 Client and server changes are released together. Releases before the unified workflow retain
 links to their original component tags.
 
