@@ -44,6 +44,13 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Establish Unified Release Baseline
+        run: |
+          if ! git rev-parse --verify --quiet refs/tags/v1.2.0; then
+            git tag v1.2.0 'server-v1.2.0^{commit}'
+            git push origin refs/tags/v1.2.0
+          fi
+
       - name: Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

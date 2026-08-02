@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 import test from 'node:test'
@@ -18,6 +18,7 @@ const dockerfilePath = new URL('../apps/client/Dockerfile', import.meta.url)
 const nginxPath = new URL('../apps/client/nginx.conf', import.meta.url)
 const migrationScriptPath = new URL('./verify-quilt-migration.sh', import.meta.url)
 const purgeScriptPath = new URL('./database-purge.sh', import.meta.url)
+const repositoryPath = new URL('..', import.meta.url)
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
 const releaseConfig = require('../.releaserc.cjs')
@@ -103,11 +104,19 @@ test('CI requires authenticated multi-replica E2E', async () => {
 
 test('release workflow produces one repository changelog', async () => {
   const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+  const changelog = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
+  const changelogFiles = (await readdir(repositoryPath)).filter((file) => /^CHANGELOG(?:\..+)?\.md$/.test(file))
   const releaseNotesPlugin = extractPluginConfig(releaseConfig, '@semantic-release/release-notes-generator')
   const changelogPlugin = extractPluginConfig(releaseConfig, '@semantic-release/changelog')
   const gitPlugin = extractPluginConfig(releaseConfig, '@semantic-release/git')
 
   assert.equal(releaseConfig.tagFormat, 'v${version}')
+  assert.deepEqual(changelogFiles, ['CHANGELOG.md'])
+  assert.match(changelog, /releases\/tag\/client-v1\.0\.0/)
+  assert.match(changelog, /releases\/tag\/server-v1\.2\.0/)
+  assert.match(workflow, /if ! git rev-parse --verify --quiet refs\/tags\/v1\.2\.0/)
+  assert.match(workflow, /git tag v1\.2\.0 'server-v1\.2\.0\^\{commit\}'/)
+  assert.match(workflow, /git push origin refs\/tags\/v1\.2\.0/)
   assert.equal(changelogPlugin?.changelogFile, 'CHANGELOG.md')
   assert.deepEqual(gitPlugin?.assets, ['CHANGELOG.md'])
   assert.match(workflow, /run: npm run release/)
