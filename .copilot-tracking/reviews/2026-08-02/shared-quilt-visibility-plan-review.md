@@ -22,12 +22,20 @@ The server query uses the `aggregateData` authorization surface and distinct til
 
 The initial shared-entry approach was rejected during review because placement authorization is ownership-scoped. Retaining assigned-patch entry avoids a write regression.
 
+A follow-up review found that incremental placement reused snapshot replacement semantics, clearing existing chunk membership until the next viewport snapshot. Incremental events now append only the placed tile, with cache-level and App-level regression coverage.
+
+Continuation added a passing real-browser regression for two sequential placements across owner and collaborator without viewport movement. Incremental removal coverage confirms unrelated tiles in the same and neighboring chunks remain cached.
+
+The final fixture review confirms active tile patches retain requested materials, canonical placement assertions use principal-scoped ownership identity, and all shape coverage follows the multi-user factory contract. Adding `ownershipIdentity` to the test API effect dependencies also prevents stale bridge snapshots during identity initialization.
+
 ## Validation
 
-* `npm run lint`: passed with two unrelated existing warnings
+* `npm run lint:client`: passed without warnings
 * `npm run build`: passed
-* `npm run test:client`: 175 passed, 16 skipped
+* `npm run test:client`: 178 passed, 16 skipped
 * `npm run test:server`: 220 passed, 1 skipped
+* Focused sequential-placement Playwright test: passed
+* Complete multi-user Playwright spec: 7 passed
 
 ## Status
 

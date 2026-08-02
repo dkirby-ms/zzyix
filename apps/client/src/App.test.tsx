@@ -1821,6 +1821,62 @@ describe('App canonical canvas behavior', () => {
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-ghost-visible', 'false')
   })
 
+  it('preserves settled tiles when a quilt placement acknowledgement is applied', async () => {
+    let placePayload: any
+    let placeAckCallback: ((ack: any) => void) | undefined
+    const emitMock = vi.fn((event: string, payload: unknown, callback?: (ack: any) => void) => {
+      if (event === 'quilt_place_tile') {
+        placePayload = payload
+        placeAckCallback = callback
+      }
+    })
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[3] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock, on: vi.fn(), off: vi.fn(), connected: true } }
+      if (actionRef) actionRef.current = socketRef.current
+      return socketRef as any
+    })
+
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onQuiltPatchState = socketCall[7] as (payload: unknown) => void
+    act(() => onQuiltPatchState({
+      quiltId: canonicalDescriptor.quiltId,
+      canonicalRoomId: `quilt:${canonicalDescriptor.quiltId}:patch:0:0:fine`,
+      patchId: canonicalDescriptor.assignedPatch.id,
+      payloadMode: 'fine',
+      chunkIds: ['0:0'],
+      tiles: [
+        {
+          id: '11111111-1111-4111-8111-111111111111', shape: 'square', color: '#111', material: 'ceramic',
+          transform: { position: { x: 1, y: 1 }, rotation: 0 }, createdAt: 1,
+        },
+        {
+          id: '22222222-2222-4222-8222-222222222222', shape: 'square', color: '#222', material: 'stone',
+          transform: { position: { x: 3, y: 1 }, rotation: 0 }, createdAt: 2,
+        },
+      ],
+      cursor: { patchId: canonicalDescriptor.assignedPatch.id, opSeq: 1, revision: 1, eventId: 'event-1' },
+    }))
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '2')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Quick Place Far' }))
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '3')
+
+    act(() => placeAckCallback?.({
+      status: 'accepted',
+      operationId: placePayload.operationId,
+      eventIds: { [canonicalDescriptor.assignedPatch.id]: 'event-2' },
+      patchRevisions: { [canonicalDescriptor.assignedPatch.id]: 2 },
+      idempotent: false,
+      tile: { ...placePayload.tile, id: placePayload.tile.tileId, createdAt: 3 },
+    }))
+
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '3')
+  })
+
   it('places from the latest pointer-down state before React renders it', async () => {
     let placeAckCallback: ((ack: any) => void) | undefined
     const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {

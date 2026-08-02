@@ -10,6 +10,10 @@
 
 Added an aggregate-authorized quilt occupancy read model and rendered it independently of the fine-detail client cache. Users can identify and navigate to other occupied quilt regions without a patch URL while retaining their owned patch as the writable entry point.
 
+Fixed incremental placement events so they append the new tile to cached chunk membership instead of replacing every cached chunk with that one tile. Existing tiles now remain visible after placement without requiring viewport movement to reload them.
+
+Repaired the browser test bridge and fixtures so requested materials remain active, placement attribution uses canonical ownership identity, and shape persistence follows the fixture's two-user contract.
+
 ## Added
 
 * Quilt occupancy contracts and authenticated endpoint
@@ -17,12 +21,21 @@ Added an aggregate-authorized quilt occupancy read model and rendered it indepen
 * Periodic protected client occupancy refresh
 * Whole-quilt minimap occupancy cells
 * Client and PostgreSQL regression coverage
+* Cache-level and App-level settled-tile placement regressions
+* Real-browser sequential-placement retention coverage for owner and collaborator
+* Cache-level incremental-removal retention coverage
+* Principal-scoped ownership identity in canvas test snapshots
 
 ## Modified
 
 * `apps/client/src/App.css`
 * `apps/client/src/App.test.tsx`
 * `apps/client/src/App.tsx`
+* `apps/client/src/test/canvasTestApi.ts`
+* `apps/client/src/domain/quiltCache.test.ts`
+* `apps/client/src/domain/quiltCache.ts`
+* `e2e/multi-user-fixtures.spec.ts`
+* `e2e/support/multiUser.ts`
 * `apps/client/src/network/session.ts`
 * `apps/client/src/ui/MinimapOverlay.test.tsx`
 * `apps/client/src/ui/MinimapOverlay.tsx`
@@ -33,9 +46,11 @@ Added an aggregate-authorized quilt occupancy read model and rendered it indepen
 
 ## Validation
 
-* Client lint passed with one pre-existing hook dependency warning in `App.tsx`
+* Client lint passed without warnings
 * Server lint passed with one pre-existing unused import warning
 * Client and server builds passed
-* Client tests: 175 passed, 16 skipped
+* Client tests: 178 passed, 16 skipped
+* Focused sequential-placement E2E: 1 passed
+* Full multi-user E2E: 7 passed
 * Server tests: 220 passed, 1 skipped
 * Ports 3001 and 5173 were free at completion

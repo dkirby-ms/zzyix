@@ -23,6 +23,7 @@ export type CanvasTestTileSnapshot = {
 
 export type CanvasTestStateSnapshot = {
   clientId: string
+  ownershipIdentity: string
   sessionId: string | null
   mode: CanvasTestMode
   connectionStatus: ConnectionStatus

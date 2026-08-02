@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   createQuiltCache,
+  applyQuiltPatchPlacement,
+  applyQuiltPatchRemoval,
   clearQuiltOptimisticTile,
   clearQuiltUndoMetadata,
   evictQuiltCache,
@@ -125,6 +127,61 @@ describe('quiltCache', () => {
 
     expect(selectQuiltTiles(state).map(({ id }) => id)).toEqual(['chunk-b'])
     expect(state.patches['patch-a'].chunkIds.sort()).toEqual(['0:0', '1:0'])
+  })
+
+  it('preserves settled chunk tiles when applying an incremental placement', () => {
+    const existingA = positionedTile('existing-a', 1, 1)
+    const existingB = positionedTile('existing-b', 9, 1)
+    let state = mergeQuiltPatchSnapshot(createQuiltCache(), {
+      patchId: 'patch-a',
+      roomId: 'room-a',
+      chunkIds: ['0:0', '1:0'],
+      tiles: [existingA, existingB],
+      cursor: cursor('patch-a', 1),
+      accessedAt: 1,
+    })
+
+    state = applyQuiltPatchPlacement(
+      state,
+      'patch-a',
+      positionedTile('new-tile', 2, 2),
+      cursor('patch-a', 2),
+    )
+
+    expect(selectQuiltTiles(state).map(({ id }) => id).sort()).toEqual([
+      'existing-a',
+      'existing-b',
+      'new-tile',
+    ])
+    expect(state.patches['patch-a'].chunkTileIds).toEqual({
+      '0:0': ['existing-a', 'new-tile'],
+      '1:0': ['existing-b'],
+    })
+  })
+
+  it('preserves unrelated settled tiles when applying an incremental removal', () => {
+    const removed = positionedTile('removed', 1, 1)
+    const retainedSameChunk = positionedTile('retained-same-chunk', 2, 2)
+    const retainedOtherChunk = positionedTile('retained-other-chunk', 9, 1)
+    let state = mergeQuiltPatchSnapshot(createQuiltCache(), {
+      patchId: 'patch-a',
+      roomId: 'room-a',
+      chunkIds: ['0:0', '1:0'],
+      tiles: [removed, retainedSameChunk, retainedOtherChunk],
+      cursor: cursor('patch-a', 1),
+      accessedAt: 1,
+    })
+
+    state = applyQuiltPatchRemoval(state, 'patch-a', removed.id, cursor('patch-a', 2))
+
+    expect(selectQuiltTiles(state).map(({ id }) => id).sort()).toEqual([
+      'retained-other-chunk',
+      'retained-same-chunk',
+    ])
+    expect(state.patches['patch-a'].chunkTileIds).toEqual({
+      '0:0': ['retained-same-chunk'],
+      '1:0': ['retained-other-chunk'],
+    })
   })
 
   it('retains optimistic and undoable entities outside the active area', () => {

@@ -102,6 +102,18 @@ const buildChunkTileIds = (
 const buildPatchTileIds = (chunkTileIds: Record<string, string[]>): string[] =>
   unique(Object.values(chunkTileIds).flat())
 
+const appendTileToChunks = (
+  tile: TileInstance,
+  chunkIds: string[],
+  existing: Record<string, string[]>,
+): Record<string, string[]> => {
+  const next = { ...existing }
+  deriveTileChunkIds(tile, chunkIds).forEach((chunkId) => {
+    next[chunkId] = unique([...(next[chunkId] ?? []), tile.id])
+  })
+  return next
+}
+
 const rebuildTiles = (state: QuiltCacheState): Record<string, TileInstance> => {
   const retainedIds = new Set(Object.values(state.patches).flatMap((patch) => patch.tileIds))
   Object.keys(state.pins).forEach((tileId) => retainedIds.add(tileId))
@@ -172,6 +184,10 @@ export const applyQuiltPatchPlacement = (
   if (!patch) return state
   if (cursor.revision <= patch.cursor.revision) return state
 
+  const chunkTileIds = patch.chunkIds.length === 0
+    ? patch.chunkTileIds
+    : appendTileToChunks(tile, patch.chunkIds, patch.chunkTileIds)
+
   const next = {
     ...state,
     tiles: { ...state.tiles, [tile.id]: tile },
@@ -181,10 +197,8 @@ export const applyQuiltPatchPlacement = (
         ...patch,
         tileIds: patch.chunkIds.length === 0
           ? unique([...patch.tileIds, tile.id])
-          : buildPatchTileIds(buildChunkTileIds([tile], patch.chunkIds, patch.chunkTileIds)),
-        chunkTileIds: patch.chunkIds.length === 0
-          ? patch.chunkTileIds
-          : buildChunkTileIds([tile], patch.chunkIds, patch.chunkTileIds),
+          : buildPatchTileIds(chunkTileIds),
+        chunkTileIds,
         cursor,
         lastAccessed: Date.now(),
       },
