@@ -20,6 +20,8 @@ Fixed incremental placement events so they append the new tile to cached chunk m
 * Whole-quilt minimap occupancy cells
 * Client and PostgreSQL regression coverage
 * Cache-level and App-level settled-tile placement regressions
+* Real-browser sequential-placement retention coverage for owner and collaborator
+* Cache-level incremental-removal retention coverage
 
 ## Modified
 
@@ -28,6 +30,7 @@ Fixed incremental placement events so they append the new tile to cached chunk m
 * `apps/client/src/App.tsx`
 * `apps/client/src/domain/quiltCache.test.ts`
 * `apps/client/src/domain/quiltCache.ts`
+* `e2e/multi-user-fixtures.spec.ts`
 * `apps/client/src/network/session.ts`
 * `apps/client/src/ui/MinimapOverlay.test.tsx`
 * `apps/client/src/ui/MinimapOverlay.tsx`
@@ -41,6 +44,8 @@ Fixed incremental placement events so they append the new tile to cached chunk m
 * Client lint passed with one pre-existing hook dependency warning in `App.tsx`
 * Server lint passed with one pre-existing unused import warning
 * Client and server builds passed
-* Client tests: 177 passed, 16 skipped
+* Client tests: 178 passed, 16 skipped
+* Focused sequential-placement E2E: 1 passed
+* Full multi-user E2E: 2 passed and 5 unrelated existing fixture tests failed
 * Server tests: 220 passed, 1 skipped
 * Ports 3001 and 5173 were free at completion

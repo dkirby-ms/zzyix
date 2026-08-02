@@ -12,6 +12,8 @@ The initial shared-entry approach was reverted after review found that non-owner
 
 The placement follow-up corrected incremental cache updates that cleared settled chunk memberships. Viewport movement had hidden the defect by loading a fresh authoritative snapshot.
 
+The selected E2E continuation passes. A full-file run exposed five unrelated fixture failures: four active-tile material expectations and one test requesting fewer users than the fixture contract permits.
+
 ## Follow-on work
 
 Consider replacing polling with a quilt-level summary invalidation event if occupancy request volume becomes material.

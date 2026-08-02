@@ -21,6 +21,12 @@ Applicable guidance includes the workspace Markdown, prompt-builder, and writing
 * [x] Render occupancy across the whole minimap. <!-- parallelizable: false -->
 * [x] Add focused tests and run repository validation. <!-- parallelizable: false -->
 
+## Continuation checklist
+
+* [x] Add multi-user E2E coverage for sequential placement retention. <!-- parallelizable: true -->
+* [x] Add cache regression coverage for incremental removal retention. <!-- parallelizable: true -->
+* [x] Run focused and full validation for both follow-ups. <!-- parallelizable: false -->
+
 ## Dependencies
 
 No new package dependencies. Existing Drizzle, Express, React, and Vitest APIs are sufficient.

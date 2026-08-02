@@ -123,6 +123,27 @@ test('owner placements converge for collaborators while non-owner mutation is de
   await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [placedTile])
 })
 
+test('sequential placements preserve previously visible tiles without viewport movement', async ({ createMultiUserSession }) => {
+  const session = await createMultiUserSession({ userCount: 2 })
+  const [owner, collaborator] = session.users
+
+  await owner.waitForConnection('connected')
+  await collaborator.waitForConnection('connected')
+
+  const firstAck = await owner.placeTileWithAck({ x: 10, y: 10 })
+  expect(firstAck.rejected).toBe(false)
+  if (firstAck.rejected) throw new Error(`Expected first placement to succeed. got ${firstAck.reason}`)
+  const firstTile = await owner.waitForTile({ id: firstAck.placed.id })
+  await collaborator.waitForTile({ id: firstTile.id })
+
+  const secondAck = await owner.placeTileWithAck({ x: 11.01, y: 10 })
+  expect(secondAck.rejected).toBe(false)
+  if (secondAck.rejected) throw new Error(`Expected second placement to succeed. got ${secondAck.reason}`)
+  const secondTile = await owner.waitForTile({ id: secondAck.placed.id })
+
+  await expectAcceptedTilesExactlyOnceAcrossUsers(session.users, [firstTile, secondTile])
+})
+
 test('near-simultaneous owner and non-owner placements preserve authorization and convergence', async ({ createMultiUserSession }) => {
   const session = await createMultiUserSession({ userCount: 2 })
   const [userA, userB] = session.users
@@ -316,5 +337,4 @@ test('new tile shapes can be placed and persist through the full stack', async (
     const tile = await user.placeTile({ x: 10 + index * 5, y: 10 })
     expect(tile.shape).toBe(shape)
   }
-})
 })

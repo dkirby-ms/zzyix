@@ -24,12 +24,16 @@ The initial shared-entry approach was rejected during review because placement a
 
 A follow-up review found that incremental placement reused snapshot replacement semantics, clearing existing chunk membership until the next viewport snapshot. Incremental events now append only the placed tile, with cache-level and App-level regression coverage.
 
+Continuation added a passing real-browser regression for two sequential placements across owner and collaborator without viewport movement. Incremental removal coverage confirms unrelated tiles in the same and neighboring chunks remain cached.
+
 ## Validation
 
 * `npm run lint`: passed with two unrelated existing warnings
 * `npm run build`: passed
-* `npm run test:client`: 177 passed, 16 skipped
+* `npm run test:client`: 178 passed, 16 skipped
 * `npm run test:server`: 220 passed, 1 skipped
+* Focused sequential-placement Playwright test: passed
+* Complete multi-user Playwright spec: 2 passed and 5 failed on existing fixture assumptions (`setActiveTile` material updates and invalid one-user session setup)
 
 ## Status
 
