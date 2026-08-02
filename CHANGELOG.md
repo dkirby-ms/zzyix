@@ -5,6 +5,22 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.3.3](https://github.com/dkirby-ms/zzyix/compare/v1.3.2...v1.3.3) (2026-08-02)
+
+### Bug Fixes
+
+* **client:** preserve cached tiles after placement ([2a2344b](https://github.com/dkirby-ms/zzyix/commit/2a2344bc6a34fc182e79a291225039cf105972f0))
+
+### Tests
+
+* **canvas:** cover incremental tile retention ([ea160ef](https://github.com/dkirby-ms/zzyix/commit/ea160efb8cfd8f369f5cd09ba84cc85bb7e08bd6))
+* **e2e:** align canvas fixture identity and materials ([60d8ecd](https://github.com/dkirby-ms/zzyix/commit/60d8ecddf299bd1227a006b7363e1d5644b6627c))
+
+### Miscellaneous Chores
+
+* esbuild cleanup ([8ff186b](https://github.com/dkirby-ms/zzyix/commit/8ff186be85c836212a54211ae8d543d0e675a226))
+* remove manual test file ([7827e0b](https://github.com/dkirby-ms/zzyix/commit/7827e0b8eb49eda5b4e103a3f3aefe2954cdb853))
+
 ## [1.3.2](https://github.com/dkirby-ms/zzyix/compare/v1.3.1...v1.3.2) (2026-08-02)
 
 ### Bug Fixes
