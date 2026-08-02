@@ -1117,27 +1117,27 @@ function ProtectedApp() {
     emitPointerMove(pointer)
     const updated = resolveGhostFromPointer(pointer)
     emitSelectionUpdate(findHoveredTileId(x, y, visibleTiles))
+    const currentGhost = ghostRef.current
+    const nextGhost = {
+      ...currentGhost,
+      target: updated.target,
+      confidence: updated.confidence,
+      valid: updated.valid,
+      magnetStrength: updated.magnetStrength,
+      rejection: updated.rejection,
+      debugReason: updated.debugReason,
+      guideSlotId: updated.guideSlotId,
+      current: ghostVisibleRef.current ? currentGhost.current : updated.target,
+    }
+    ghostVisibleRef.current = true
+    ghostRef.current = nextGhost
     setGhostVisible(true)
-    setGhost((prev) => {
-      const nextGhost = {
-        ...prev,
-        target: updated.target,
-        confidence: updated.confidence,
-        valid: updated.valid,
-        magnetStrength: updated.magnetStrength,
-        rejection: updated.rejection,
-        debugReason: updated.debugReason,
-        guideSlotId: updated.guideSlotId,
-        current: ghostVisible ? prev.current : updated.target,
-      }
-      ghostRef.current = nextGhost
-      return nextGhost
-    })
-  }, [emitPointerMove, emitSelectionUpdate, ghostVisible, resolveGhostFromPointer, visibleTiles])
+    setGhost(nextGhost)
+  }, [emitPointerMove, emitSelectionUpdate, resolveGhostFromPointer, visibleTiles])
 
   const attemptPlace = useCallback((): void => {
-    placeFromState(activeTile, ghost)
-  }, [activeTile, ghost, placeFromState])
+    placeFromState(activeTileRef.current, ghostRef.current)
+  }, [placeFromState])
 
   useEffect(() => registerCanvasTestApi({
     getState: () => ({
