@@ -45,6 +45,7 @@ import type {
   QuiltProtocolHandshake,
   QuiltPlaceTileAck,
   QuiltPlaceTileRequest,
+  SubscribeQuiltAreaAck,
   QuiltRemoveTileAck,
   QuiltRemoveTileRequest,
   QuiltScopedStatePayload,
@@ -871,17 +872,38 @@ function ProtectedApp() {
       chunkIds: entry.chunks,
     }))
 
-    const timeoutId = window.setTimeout(() => {
-      socket.emit('subscribe_quilt_area', {
-        quiltId: topology.quiltId,
-        rooms,
-        cursors: quiltCursorsRef.current,
-      }, (ack) => {
+    let cancelled = false
+    let retryTimeoutId: number | null = null
+    const request = {
+      quiltId: topology.quiltId,
+      rooms,
+      cursors: quiltCursorsRef.current,
+    }
+    const emitSubscription = (): void => {
+      socket.emit('subscribe_quilt_area', request, (ack: SubscribeQuiltAreaAck) => {
+        if (cancelled) return
         quiltCursorsRef.current = { ...quiltCursorsRef.current, ...ack.acceptedCursors }
+        const shouldRetry = ack.outcomes.some(
+          (outcome) => outcome.status === 'invalid' && outcome.reason === 'SUBSCRIPTION_IN_PROGRESS',
+        )
+        if (!shouldRetry) return
+        if (retryTimeoutId !== null) window.clearTimeout(retryTimeoutId)
+        retryTimeoutId = window.setTimeout(() => {
+          if (cancelled) return
+          emitSubscription()
+        }, CHUNK_SUBSCRIPTION_DEBOUNCE_MS)
       })
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      emitSubscription()
     }, CHUNK_SUBSCRIPTION_DEBOUNCE_MS)
 
-    return () => window.clearTimeout(timeoutId)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+      if (retryTimeoutId !== null) window.clearTimeout(retryTimeoutId)
+    }
   }, [activeChunkIds, connectionEpoch, quiltProtocol, quiltSubscriptionEpoch, zoomTier])
 
   useEffect(() => {

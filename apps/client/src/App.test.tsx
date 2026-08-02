@@ -1131,6 +1131,56 @@ describe('App canonical canvas behavior', () => {
     expect(subscriptions()).toHaveLength(1)
   })
 
+  it('retries quilt area subscriptions rejected as in progress', async () => {
+    let subscribeAttempts = 0
+    const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
+      if (event !== 'subscribe_quilt_area') return
+      subscribeAttempts += 1
+      if (subscribeAttempts === 1) {
+        callback?.({
+          outcomes: [{ requestId: 'fine:0:3', status: 'invalid', reason: 'SUBSCRIPTION_IN_PROGRESS' }],
+          acceptedCursors: {},
+        })
+        return
+      }
+      callback?.({ outcomes: [], acceptedCursors: {} })
+    })
+    useSocketConnectionMock.mockImplementation((...args: unknown[]) => {
+      const actionRef = args[3] as { current: { emit: typeof emitMock } | null } | undefined
+      const socketRef = { current: { emit: emitMock, on: vi.fn(), off: vi.fn(), connected: true } }
+      if (actionRef) actionRef.current = socketRef.current
+      return socketRef as any
+    })
+
+    render(<App />)
+    await enterCanonicalCanvas()
+    const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
+    const onQuiltProtocol = socketCall[6] as (payload: any) => void
+
+    vi.useFakeTimers()
+    act(() => onQuiltProtocol({
+      selectedProtocolVersion: 2,
+      v1CompatibilityEnabled: false,
+      mutationEnabled: false,
+      topology: {
+        quiltId: 'quilt-1', topology: 'toroidal', patchRows: 1, patchColumns: 4,
+        patchWidth: RUNTIME_CHUNK_WORLD_SIZE, patchHeight: RUNTIME_CHUNK_WORLD_SIZE,
+      },
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 3' }))
+
+    const subscriptions = () => emitMock.mock.calls.filter((call) => call[0] === 'subscribe_quilt_area')
+    act(() => vi.advanceTimersByTime(120))
+    expect(subscriptions()).toHaveLength(1)
+    act(() => vi.advanceTimersByTime(119))
+    expect(subscriptions()).toHaveLength(1)
+    act(() => vi.advanceTimersByTime(1))
+    expect(subscriptions()).toHaveLength(2)
+    act(() => vi.advanceTimersByTime(500))
+    expect(subscriptions()).toHaveLength(2)
+  })
+
   it('subscribes canonical v2 AOI rooms and replaces only the recovered patch', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
     const emitMock = vi.fn((event: string, _payload: unknown, callback?: (ack: any) => void) => {
