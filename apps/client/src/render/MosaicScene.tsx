@@ -2,6 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import { useMemo, useRef, useEffect, useState } from 'react'
 import {
+  BackSide,
   ExtrudeGeometry,
   Group,
   MathUtils,
@@ -188,7 +189,7 @@ const TileMesh = ({ tile, ownershipIdentity }: { tile: TileInstance; ownershipId
       <mesh castShadow receiveShadow geometry={geometry} material={material} />
       {ownerColor && (
         <mesh geometry={geometry} scale={[1.035, 1.035, 1.035]} data-owner-boundary={tile.placedBy}>
-          <meshBasicMaterial color={ownerColor} wireframe transparent opacity={0.72} depthWrite={false} />
+          <meshBasicMaterial color={ownerColor} side={BackSide} />
         </mesh>
       )}
     </group>
