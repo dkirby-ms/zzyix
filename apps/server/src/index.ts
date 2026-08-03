@@ -939,7 +939,7 @@ app.get('/health', async (_req, res) => {
   const healthy = dbStatus === 'ok'
   res.status(healthy ? 200 : 503).json({
     status: healthy ? 'ok' : 'degraded',
-    version: '0.0.0',
+    version: process.env.npm_package_version ?? '0.0.0',
     checks: { db: dbStatus },
   })
 })

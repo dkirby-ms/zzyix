@@ -380,6 +380,32 @@ describe('useSocketConnection collaboration subscriptions', () => {
     expect(onAuthLoss).toHaveBeenCalledWith('authentication_failed', expect.any(Error))
   })
 
+  it('advances socket auth with an empty payload when token acquisition throws', async () => {
+    const socket = createMockSocket()
+    ioMock.mockReturnValue(socket)
+    const acquireAccessToken = vi.fn(async () => {
+      throw new Error('token unavailable')
+    })
+    const onAuthLoss = vi.fn()
+
+    renderAuthenticatedSocket([
+      'https://api.example.test',
+      'session-1',
+      'client-1',
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+    ], acquireAccessToken, onAuthLoss)
+
+    const options = ioMock.mock.calls[0]?.[1] as { auth: (callback: (auth: Record<string, unknown>) => Promise<void> | void) => Promise<void> }
+    const callback = vi.fn()
+
+    await options.auth(callback)
+
+    expect(onAuthLoss).toHaveBeenCalledWith('authentication_failed', expect.any(Error))
+    expect(callback).toHaveBeenCalledWith({})
+  })
+
   it('advances the connection epoch after an ordinary reconnect', () => {
     const socket = createMockSocket()
     ioMock.mockReturnValue(socket)

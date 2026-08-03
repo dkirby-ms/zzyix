@@ -36,10 +36,6 @@ output workspaceId string = logAnalyticsWorkspace.id
 @description('The Log Analytics workspace customer ID.')
 output customerId string = logAnalyticsWorkspace.properties.customerId
 
-@description('The Log Analytics workspace shared key.')
-#disable-next-line outputs-should-not-contain-secrets
-output sharedKey string = logAnalyticsWorkspace.listKeys().primarySharedKey
-
 @description('The Application Insights connection string for SDK instrumentation.')
 output appInsightsConnectionString string = appInsights.properties.ConnectionString
 

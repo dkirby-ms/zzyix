@@ -126,6 +126,23 @@ Instrument the zzyix server and client using OpenTelemetry-aligned contracts wit
 * [x] Step 6.3: Fix minor validation issues (lint, build warnings, type errors)
 * [x] Step 6.4: Report blocking issues requiring additional planning
 
+### [x] Implementation Phase 7: Review Rework
+
+<!-- parallelizable: true -->
+
+* [x] Step 7.1: Route client socket lifecycle telemetry through canonical telemetry and remove the dead client OTel API stub
+  * Details: .copilot-tracking/details/2026-08-03/monitoring-observability-details.md (Review Rework section)
+* [x] Step 7.2: Harden server preload and socket auth failure handling; fix adjacent observability correctness issues
+  * Details: .copilot-tracking/details/2026-08-03/monitoring-observability-details.md (Review Rework section)
+* [x] Step 7.3: Remove the Log Analytics shared key from Bicep outputs and resolve it inside the ACA environment module
+  * Details: .copilot-tracking/details/2026-08-03/monitoring-observability-details.md (Review Rework section)
+* [x] Step 7.4: Re-run focused validation for the rework slice
+  * `npm run test --workspace=apps/client -- useSocketConnection`
+  * `npm run lint --workspace=apps/client`
+  * `npm run test --workspace=apps/server`
+  * `npm run lint --workspace=apps/server`
+  * `az bicep build --file infra/bicep/main.bicep`
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-08-03/monitoring-observability-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.
@@ -135,7 +152,6 @@ See .copilot-tracking/plans/logs/2026-08-03/monitoring-observability-log.md for 
 * Azure CLI (`az`) with Bicep support for infra validation
 * Node.js / npm for server and client package installs
 * `@azure/monitor-opentelemetry` npm package (server)
-* `@opentelemetry/api` npm package (client, optional for typed span API)
 
 ## Success Criteria
 
@@ -147,3 +163,4 @@ See .copilot-tracking/plans/logs/2026-08-03/monitoring-observability-log.md for 
 * Socket lifecycle console.log/error calls in useSocketConnection.ts are replaced with structured telemetry — Traces to: research finding at apps/client/src/network/useSocketConnection.ts:146
 * SLO policy artifact exists at docs/decisions/2026-08-03-observability-slo-policy.md — Traces to: research actionable step 5; governance artifact gap
 * All server and client builds pass; no new lint errors introduced
+* Review rework findings are resolved: socket lifecycle telemetry reaches the canonical telemetry bus, server preload survives Azure Monitor initialization failures, socket auth failures reach connect_error, and Bicep no longer exposes the Log Analytics shared key in deployment outputs

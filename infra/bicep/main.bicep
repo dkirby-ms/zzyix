@@ -53,8 +53,7 @@ module containerAppsEnvironment 'modules/containerAppsEnvironment.bicep' = {
     location: deploymentLocation
     namePrefix: namePrefix
     acaSubnetId: network.outputs.acaSubnetId
-    logAnalyticsCustomerId: monitoring.outputs.customerId
-    logAnalyticsSharedKey: monitoring.outputs.sharedKey
+    logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
   }
 }
 

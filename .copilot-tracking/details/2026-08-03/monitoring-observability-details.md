@@ -519,6 +519,78 @@ Dependencies:
 
 ---
 
+## Implementation Phase 7: Review Rework
+
+<!-- parallelizable: true -->
+
+### Step 7.1: Route client socket lifecycle telemetry through canonical telemetry and remove the dead client OTel API stub
+
+The first implementation replaced raw console lifecycle logs with a helper, but that helper still wrote only to the browser console and never entered the canonical telemetry pipeline. Remove the helper and rely on the canonical telemetry events that already flow through `canonical_telemetry`, including entry readiness/failure and reconnect recovery/exhaustion. Remove `@opentelemetry/api` from the client because no browser tracer provider is initialized and the dependency contributes no runtime observability value.
+
+Files:
+* apps/client/src/network/useSocketConnection.ts - Remove console-only lifecycle helper; ensure auth callback advances on failure
+* apps/client/src/network/useSocketConnection.test.ts - Cover auth callback failure progression
+* apps/client/package.json - Remove `@opentelemetry/api`
+
+Success criteria:
+* Client lifecycle outcomes are represented only by canonical telemetry events that reach the server event bus
+* Auth callback failure calls `callback({})` after `onAuthLoss`, allowing socket.io to emit `connect_error`
+* Client tests cover the auth failure path
+
+Dependencies:
+* None
+
+---
+
+### Step 7.2: Harden server preload and socket auth failure handling; fix adjacent observability correctness issues
+
+The review identified two production blockers in the server slice and two nearby low-cost correctness issues. Wrap Azure Monitor preload initialization in `try/catch` so startup degrades gracefully, redact IP addresses in log contexts, and return the package version from `/health` rather than the hardcoded placeholder.
+
+Files:
+* apps/server/src/telemetry.ts - Catch Azure Monitor initialization errors and log a degraded-startup message
+* apps/server/src/logging/redact.ts - Treat `ip` as sensitive
+* apps/server/src/index.ts - Use runtime package version in `/health`
+
+Success criteria:
+* Server startup continues when `useAzureMonitor()` throws
+* Request IP addresses are redacted by existing telemetry logging
+* `/health` returns `process.env.npm_package_version ?? '0.0.0'`
+
+Dependencies:
+* None
+
+---
+
+### Step 7.3: Remove the Log Analytics shared key from Bicep outputs and resolve it inside the ACA environment module
+
+The monitoring module currently emits the Log Analytics shared key as a deployment output. Move key resolution into `containerAppsEnvironment.bicep` so the shared key never leaves the module boundary via deployment history.
+
+Files:
+* infra/bicep/modules/monitoring.bicep - Remove `sharedKey` output
+* infra/bicep/modules/containerAppsEnvironment.bicep - Resolve the workspace with `existing` and call `listKeys()` locally
+* infra/bicep/main.bicep - Pass workspace resource ID instead of customer ID/shared key outputs
+
+Success criteria:
+* `monitoring.bicep` no longer outputs the Log Analytics shared key
+* `containerAppsEnvironment.bicep` derives customer ID and shared key from the existing workspace resource
+* `az bicep build --file infra/bicep/main.bicep` succeeds
+
+Dependencies:
+* None
+
+---
+
+### Step 7.4: Re-run focused validation for the rework slice
+
+Validation commands:
+* `npm run test --workspace=apps/client -- useSocketConnection`
+* `npm run lint --workspace=apps/client`
+* `npm run test --workspace=apps/server`
+* `npm run lint --workspace=apps/server`
+* `az bicep build --file infra/bicep/main.bicep`
+
+---
+
 ### Step 4.3: Validate client changes
 
 Validation commands:

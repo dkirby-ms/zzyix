@@ -49,6 +49,11 @@ Gaps and differences identified between research findings and the implementation
   * Plan implements: Structured `console.info`/`console.error` helper events with timestamp, quilt ID, socket ID/reason, and optional OTel trace context in `useSocketConnection.ts`
   * Rationale: Existing typed canonical telemetry union only supports entry and reconnect terminal events. Structured helper preserves existing behavior while removing raw console lifecycle logs and keeping queryable payloads for dev diagnostics.
 
+* DD-07: Review rework removed the client OpenTelemetry API stub and canonicalized lifecycle telemetry
+  * Plan originally implemented: A client `@opentelemetry/api` dependency plus a console-only lifecycle helper in `useSocketConnection.ts`
+  * Implementation now differs: Lifecycle outcomes rely on canonical telemetry events already emitted through `canonical_telemetry`, and the unused client OTel API dependency was removed
+  * Rationale: Independent review confirmed the helper never entered the telemetry pipeline and the client OTel API had no runtime effect without a browser tracer provider
+
 ---
 
 ## Implementation Paths Considered
@@ -114,3 +119,20 @@ Items raised by Plan Validator and resolved in planning files.
 
 * DR-06 (MINOR, noted): apps/server/src/db/repository.ts and apps/server/src/db/client.ts listed as Scenario C rollout areas have no explicit enrichment step. pg auto-instrumentation covers the query spans; custom event trace correlation in these files is deferred to WI-04 (dashboard validation) or a dedicated follow-on step.
   * Resolution: Accepted as minor; deferred to WI-04 scope.
+
+## Review Rework Findings — Addressed (2026-08-03)
+
+* RR-01: Client socket lifecycle telemetry now relies on canonical telemetry events that reach the existing server event bus.
+  * Resolution: Removed the console-only helper from `apps/client/src/network/useSocketConnection.ts`; canonical entry and reconnect events remain the source of truth.
+
+* RR-02: Client auth callback failures now advance to `connect_error` instead of hanging the handshake.
+  * Resolution: The auth callback now invokes `callback({})` after `onAuthLoss` when token acquisition throws, and the new unit test covers the path.
+
+* RR-03: Azure Monitor preload failures no longer crash the server before startup.
+  * Resolution: Wrapped `useAzureMonitor()` in `apps/server/src/telemetry.ts` with a degrading `try/catch` path.
+
+* RR-04: Log Analytics shared key is no longer exposed in Bicep deployment outputs.
+  * Resolution: Removed the `sharedKey` output from `infra/bicep/modules/monitoring.bicep` and resolved the key inside `infra/bicep/modules/containerAppsEnvironment.bicep`.
+
+* RR-05: Adjacent observability correctness issues were resolved during the rework.
+  * Resolution: `apps/server/src/logging/redact.ts` now redacts `ip`, and `/health` returns `process.env.npm_package_version ?? '0.0.0'`.

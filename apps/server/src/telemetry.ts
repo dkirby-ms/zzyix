@@ -18,10 +18,14 @@ const parseSamplingRatio = (rawRatio: string | undefined): number => {
 }
 
 if (process.env.APPLICATIONINSIGHTS_CONNECTION_STRING) {
-  useAzureMonitor({
-    azureMonitorExporterOptions: {
-      connectionString: process.env.APPLICATIONINSIGHTS_CONNECTION_STRING,
-    },
-    samplingRatio: parseSamplingRatio(process.env.OTEL_SAMPLING_RATIO),
-  })
+  try {
+    useAzureMonitor({
+      azureMonitorExporterOptions: {
+        connectionString: process.env.APPLICATIONINSIGHTS_CONNECTION_STRING,
+      },
+      samplingRatio: parseSamplingRatio(process.env.OTEL_SAMPLING_RATIO),
+    })
+  } catch (error) {
+    console.error('[telemetry] Azure Monitor initialization failed; continuing without telemetry', error)
+  }
 }
