@@ -43,10 +43,12 @@ Required environment variables:
   AUTH_REQUIRED_SCOPE
   AUTH_JWKS_URI
   AUTH_ACCEPTED_ALGORITHM
+  APPLICATIONINSIGHTS_CONNECTION_STRING
   SERVER_DATABASE_URL
 
 Optional environment variables:
   SERVER_CORS_ORIGIN
+  OTEL_SAMPLING_RATIO
   AZURE_GHCR_USERNAME
   AZURE_GHCR_PASSWORD
 
@@ -273,6 +275,7 @@ main() {
   require_value "AUTH_REQUIRED_SCOPE"
   require_value "AUTH_JWKS_URI"
   require_value "AUTH_ACCEPTED_ALGORITHM"
+  require_value "APPLICATIONINSIGHTS_CONNECTION_STRING"
   require_value "SERVER_DATABASE_URL"
   warn_if_non_explicit_sslmode "${SERVER_DATABASE_URL}"
 
@@ -318,6 +321,12 @@ main() {
     "AUTH_JWKS_URI" "${AUTH_JWKS_URI}"
   set_environment_variable "${repo}" "${environment_name}" \
     "AUTH_ACCEPTED_ALGORITHM" "${AUTH_ACCEPTED_ALGORITHM}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
+  if [[ -n "${OTEL_SAMPLING_RATIO:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "OTEL_SAMPLING_RATIO" "${OTEL_SAMPLING_RATIO}"
+  fi
   if [[ -n "${SERVER_CORS_ORIGIN:-}" ]]; then
     set_environment_variable "${repo}" "${environment_name}" \
       "SERVER_CORS_ORIGIN" "${SERVER_CORS_ORIGIN}"

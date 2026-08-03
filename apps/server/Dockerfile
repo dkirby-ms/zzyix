@@ -26,4 +26,4 @@ COPY --from=build /app/apps/server/dist ./dist
 COPY --from=build /app/apps/server/migrations ./migrations
 
 EXPOSE 3001
-CMD ["node", "dist/index.js"]
+CMD ["node", "--import", "./dist/telemetry.js", "dist/index.js"]

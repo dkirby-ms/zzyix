@@ -58,6 +58,16 @@ module containerAppsEnvironment 'modules/containerAppsEnvironment.bicep' = {
   }
 }
 
+// ── Observability Diagnostics ─────────────────────────────────────────────────
+// Adds platform-level diagnostic settings to ACA environment routing logs/metrics to Log Analytics.
+module diagnostics 'modules/diagnostics.bicep' = {
+  name: 'diagnostics'
+  params: {
+    acaEnvironmentId: containerAppsEnvironment.outputs.environmentId
+    logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
+  }
+}
+
 // ── PostgreSQL Flexible Server ────────────────────────────────────────────────
 // Burstable B1ms (cheapest dev SKU), private-only (no public endpoint).
 // ACA containers connect using the FQDN resolved via the private DNS zone.
@@ -87,6 +97,8 @@ module recoveryJob 'modules/recovery-job.bicep' = {
 // ── Outputs ───────────────────────────────────────────────────────────────────
 output acaEnvironmentName string = containerAppsEnvironment.outputs.environmentName
 output acaDefaultDomain string = containerAppsEnvironment.outputs.defaultDomain
+@description('Application Insights connection string for server SDK instrumentation.')
+output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
 output postgresServerName string = postgresql.outputs.postgresServerName
 output postgresServerFqdn string = postgresql.outputs.postgresServerFqdn
 output recoveryJobName string = recoveryJob.outputs.jobName

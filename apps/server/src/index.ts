@@ -6,6 +6,7 @@ import { createServer } from 'http'
 import { Server, type Socket } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
 import { rateLimit } from 'express-rate-limit'
+import { trace } from '@opentelemetry/api'
 import { SCHEMA_VERSION, QUILT_PROTOCOL_VERSION } from './contracts.js'
 import type {
   ClientToServerEvents,
@@ -430,7 +431,11 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
 
   const timestamp = new Date().toISOString()
   const contextSuffix = context ? ` ${serializeLogValue(redactTelemetry(context))}` : ''
-  const line = `[${timestamp}] [${level.toUpperCase()}] ${message}${contextSuffix}`
+  const activeSpanContext = trace.getActiveSpan()?.spanContext()
+  const traceSuffix = activeSpanContext
+    ? ` traceId=${activeSpanContext.traceId} spanId=${activeSpanContext.spanId}`
+    : ''
+  const line = `[${timestamp}] [${level.toUpperCase()}] ${message}${contextSuffix}${traceSuffix}`
 
   if (level === 'error') {
     console.error(line)
@@ -921,8 +926,22 @@ app.use((req, res, next) => {
 })
 
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
-app.get('/health', (_req, res) => {
-  res.status(200).json({ status: 'ok', version: '0.0.0' })
+app.get('/health', async (_req, res) => {
+  let dbStatus: 'ok' | 'error' = 'error'
+  try {
+    // Use a lightweight query to verify the pooled DB connection is ready.
+    await getDatabaseBundle().pool.query('SELECT 1')
+    dbStatus = 'ok'
+  } catch {
+    dbStatus = 'error'
+  }
+
+  const healthy = dbStatus === 'ok'
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    version: '0.0.0',
+    checks: { db: dbStatus },
+  })
 })
 
 app.get('/me', authenticatedReadRateLimiter, requireHttpPrincipal, async (req, res) => {

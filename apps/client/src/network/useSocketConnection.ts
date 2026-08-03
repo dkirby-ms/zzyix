@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { context as otelContext, trace } from '@opentelemetry/api'
 import { io } from 'socket.io-client'
 import type { Socket } from 'socket.io-client'
 import type {
@@ -17,6 +18,33 @@ import { SCHEMA_VERSION } from '../../../server/src/contracts'
 import { isInteractionRequiredError, type AccessTokenProvider, type AuthLossReason } from './authenticatedFetch'
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>
+
+type SocketTelemetryLevel = 'info' | 'error'
+
+const emitSocketLifecycleTelemetry = (
+  event: string,
+  payload: Record<string, unknown>,
+  level: SocketTelemetryLevel = 'info',
+): void => {
+  const spanContext = trace.getSpan(otelContext.active())?.spanContext()
+  const telemetryEvent: Record<string, unknown> = {
+    event,
+    timestamp: new Date().toISOString(),
+    ...payload,
+  }
+
+  if (spanContext) {
+    telemetryEvent.traceId = spanContext.traceId
+    telemetryEvent.spanId = spanContext.spanId
+  }
+
+  if (level === 'error') {
+    console.error('[socket_lifecycle]', telemetryEvent)
+    return
+  }
+
+  console.info('[socket_lifecycle]', telemetryEvent)
+}
 
 export const useSocketConnection = (
   serverUrl: string,
@@ -143,7 +171,11 @@ export const useSocketConnection = (
         reconnectAttempts = 0
       }
       onConnectionEpoch?.(connectionEpoch)
-      console.log('✅ Socket.IO connected:', { quiltId, socketId: socket.id })
+      emitSocketLifecycleTelemetry('socket_connected', {
+        quiltId,
+        socketId: socket.id,
+        connectionEpoch,
+      })
     })
 
     const handleCanonicalLineage = (payload: { lineageAttemptId: string }): void => {
@@ -152,8 +184,12 @@ export const useSocketConnection = (
     socket.on('canonical_lineage', handleCanonicalLineage)
 
     socket.on('connect_error', (error: Error & { data?: { code?: string } }) => {
-      console.error('❌ Socket.IO connection error:', error.message)
       const code = error.data?.code
+      emitSocketLifecycleTelemetry('socket_connect_error', {
+        quiltId,
+        code: code ?? 'unknown',
+        message: error.message,
+      }, 'error')
       if (code === 'authentication_required' || code === 'invalid_token') {
         renewAndReconnect(error)
       } else if (code === 'principal_inactive' || code === 'insufficient_scope') {
@@ -171,7 +207,10 @@ export const useSocketConnection = (
     socket.on('disconnect', (reason: string) => {
       disconnectedAt = performance.now()
       reconnectAttempts = 0
-      console.log('🔌 Socket.IO disconnected:', reason)
+      emitSocketLifecycleTelemetry('socket_disconnected', {
+        quiltId,
+        reason,
+      })
       if (reason === 'io server disconnect') renewAndReconnect(new Error('Socket authentication expired'))
     })
 
