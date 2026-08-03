@@ -701,22 +701,7 @@ button:focus-visible,
 }
 
 .tile-palette-swatch span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  border-radius: 999px;
-  opacity: 0;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(33, 23, 16, 0.28);
-  transform: scale(0.92);
-  transition: opacity var(--transition-standard), transform var(--transition-standard);
-}
-
-.tile-palette-swatch[data-state='on'] span {
-  opacity: 1;
-  transform: scale(1);
+  display: none;
 }
 
 .tile-palette-summary {
