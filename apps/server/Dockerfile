@@ -2,6 +2,10 @@
 
 FROM node:24-alpine AS deps
 WORKDIR /app
+ENV NPM_CONFIG_FETCH_RETRIES=5 \
+	NPM_CONFIG_FETCH_RETRY_FACTOR=2 \
+	NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+	NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
 COPY package*.json ./
 COPY apps/server/package.json ./apps/server/
 RUN npm ci --workspace=apps/server --include-workspace-root
@@ -17,6 +21,10 @@ RUN npm run build --workspace=apps/server
 FROM node:24-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+ENV NPM_CONFIG_FETCH_RETRIES=5 \
+	NPM_CONFIG_FETCH_RETRY_FACTOR=2 \
+	NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+	NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
 
 COPY package*.json ./
 COPY apps/server/package.json ./apps/server/
