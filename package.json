@@ -19,7 +19,7 @@
     "telemetry:canonical-retirement": "npm run build:server && node apps/server/dist/operations/canonicalRetirementReportCli.js",
     "db:seed": "npm run build:server && node --env-file=.env apps/server/dist/db/seed.js",
     "db:purge": "./scripts/database-purge.sh",
-    "audit": "npm audit --audit-level=high --workspaces --if-present",
+    "audit": "npm audit --audit-level=high --workspaces --include-workspace-root --if-present",
     "audit:client": "npm audit --audit-level=high --workspace=apps/client",
     "audit:server": "npm audit --audit-level=high --workspace=apps/server",
     "build": "npm run build --workspaces --if-present",
