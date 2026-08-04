@@ -5,6 +5,7 @@ import './styles/index.css'
 import App from './App.tsx'
 import { AuthProvider } from './auth/AuthProvider.tsx'
 import { TestAuthProvider } from './auth/TestAuthProvider.tsx'
+import { AppErrorBoundary } from './ui/AppErrorBoundary.tsx'
 
 const AuthenticationProvider = import.meta.env.VITE_E2E_TEST_MODE === 'true'
   ? TestAuthProvider
@@ -12,8 +13,10 @@ const AuthenticationProvider = import.meta.env.VITE_E2E_TEST_MODE === 'true'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <AuthenticationProvider>
-      <App />
-    </AuthenticationProvider>
+    <AppErrorBoundary>
+      <AuthenticationProvider>
+        <App />
+      </AuthenticationProvider>
+    </AppErrorBoundary>
   </StrictMode>,
 )
