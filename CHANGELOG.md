@@ -5,6 +5,29 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.4.0](https://github.com/dkirby-ms/zzyix/compare/v1.3.3...v1.4.0) (2026-08-04)
+
+### Features
+
+* **apps:** implement observability baseline across infra server and client ([7f3dbea](https://github.com/dkirby-ms/zzyix/commit/7f3dbea8e0a523995a5ddfa20ae1a1e863fa4e0b))
+
+### Bug Fixes
+
+* **apps:** resolve observability review blockers ([019c4c0](https://github.com/dkirby-ms/zzyix/commit/019c4c0c85f260dca03738f5481d5ff7e6d8ccbd))
+* **ci:** bug in npm audit check ([3192277](https://github.com/dkirby-ms/zzyix/commit/3192277db4eb609582722ae9fd070ec790d5381c))
+* **ci:** initialize canonical world during deployment ([5b21d5e](https://github.com/dkirby-ms/zzyix/commit/5b21d5e7cc7194a7f2197d0bb19fe560842f588b))
+* **ci:** remove dev deps from audit ([73dec49](https://github.com/dkirby-ms/zzyix/commit/73dec492595e992a79c84fc1dae51e5773df8b5d))
+* **client:** add diagnostic crash fallback ([3e3df08](https://github.com/dkirby-ms/zzyix/commit/3e3df080c1564490dbcb99672a21163c7f65aaa5))
+* **client:** add proper logout channel ([a5b3a0a](https://github.com/dkirby-ms/zzyix/commit/a5b3a0a0e220e52ae83a17663741d934c0c5a286))
+* indentation ([68dbe10](https://github.com/dkirby-ms/zzyix/commit/68dbe102f46576266f6345565f7e6326c646c1d8))
+* **infra:** add better idempotency to bicep ([9f03f65](https://github.com/dkirby-ms/zzyix/commit/9f03f656867b0478299dbeb69e3801db1341ec1f))
+* **infra:** database object missing from postgres bicep ([86ba9df](https://github.com/dkirby-ms/zzyix/commit/86ba9dfd9d4037fcf7cdbaf96e3bb31c7e448579))
+* **server:** missing rate limits on new route ([198ddb3](https://github.com/dkirby-ms/zzyix/commit/198ddb30a1bacc052f883f0a10efda90a59a76e7))
+
+### Miscellaneous Chores
+
+* package bump ([95b9f61](https://github.com/dkirby-ms/zzyix/commit/95b9f615516a0eb9c42d0d17a24bede77b6b88e4))
+
 ## [1.3.3](https://github.com/dkirby-ms/zzyix/compare/v1.3.2...v1.3.3) (2026-08-02)
 
 ### Bug Fixes
