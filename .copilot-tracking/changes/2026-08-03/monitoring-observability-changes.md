@@ -21,7 +21,15 @@ Review rework completed the remaining production blockers by routing client life
 ### Modified
 
 * infra/bicep/modules/monitoring.bicep - Added workspace-based Application Insights resource and emitted connection string/instrumentation outputs.
-* infra/bicep/main.bicep - Wired diagnostics module, exposed the top-level Application Insights connection string output, and passed only the Log Analytics workspace ID into the ACA environment module.
+* infra/bicep/main.bicep - Wired diagnostics module, exposed the top-level Application Insights connection string output, passed only the Log Analytics workspace ID into the ACA environment module, and added `deploymentLocation`/`deploymentStamp` for idempotent regional stacks.
+* infra/bicep/main.bicepparam - Added a sample `westus3` regional deployment location and stamp.
+* infra/bicep/host.main.bicepparam - Configured the host deployment as an independent `westus3` staging stamp.
+* infra/bicep/modules/recovery-job.bicep - Shortened the recovery job resource name to fit Container Apps' 32-character limit and made the custom role definition GUID region-stamp-specific.
+* infra/bicep/main.bicep - Removed the unused recovery job module, its operational parameters, and the recovery job output.
+* infra/bicep/main.bicepparam - Removed unused recovery-job deployment parameters.
+* .github/workflows/cd.yml - Removed the manual restricted recovery workflow dispatch inputs and job.
+* apps/server/package.json - Removed the unused principal recovery operation command.
+* scripts/release-contract.test.mjs - Removed recovery-job contract assertions.
 * scripts/bootstrap-cd-environment.sh - Added `APPLICATIONINSIGHTS_CONNECTION_STRING` as required environment variable and optional `OTEL_SAMPLING_RATIO` environment variable support.
 * .github/workflows/cd.yml - Added `APPLICATIONINSIGHTS_CONNECTION_STRING`, `OTEL_SERVICE_NAME`, and `OTEL_SAMPLING_RATIO` to both server `az containerapp update` env var sets.
 * apps/server/package.json - Added `@azure/monitor-opentelemetry`; updated dev/start scripts to preload telemetry loader.
@@ -38,7 +46,10 @@ Review rework completed the remaining production blockers by routing client life
 
 ### Removed
 
-* None.
+* infra/bicep/modules/recovery-job.bicep - Removed the unused manual Container Apps recovery job and its custom role assignment.
+* apps/server/src/operations/principalRecovery.ts - Removed unused principal recovery operation logic.
+* apps/server/src/operations/principalRecoveryCli.ts - Removed unused principal recovery command-line entry point.
+* apps/server/src/operations/principalRecovery.test.ts - Removed tests for the deleted recovery operation.
 
 ## Additional or Deviating Changes
 
@@ -64,6 +75,12 @@ Validation status:
 * `cd apps/server && npm run lint && npm run build && npm test` passed
 * `cd apps/client && npm run lint && npm run build && npm test` passed
 * `az bicep build --file infra/bicep/main.bicep` passed
+* `az bicep build-params --file infra/bicep/main.bicepparam` passed via Bicep MCP parameter compilation
+* `az bicep build-params --file infra/bicep/host.main.bicepparam` passed via Bicep MCP parameter compilation after the westus3 regional stamp change
+* `az bicep build-params --file infra/bicep/host.main.bicepparam` passed after the recovery job name-limit fix
+* `az bicep build-params --file infra/bicep/host.main.bicepparam` passed after removing the recovery job parameters and module
+* `npm run test:release-contract` passed after removing the manual recovery workflow
+* `npm run test --workspace=apps/server` passed after deleting the recovery operation
 * `bash -n scripts/bootstrap-cd-environment.sh` passed
 * `npm run test --workspace=apps/client -- useSocketConnection` passed
 * `npm run lint --workspace=apps/client` passed

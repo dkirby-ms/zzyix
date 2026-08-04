@@ -74,6 +74,7 @@ Examples:
   AUTH_REQUIRED_SCOPE=access_as_user
   AUTH_JWKS_URI=https://example.ciamlogin.com/example.onmicrosoft.com/discovery/v2.0/keys
   AUTH_ACCEPTED_ALGORITHM=RS256
+  APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=<key>;IngestionEndpoint=https://<region>.in.applicationinsights.azure.com/;ApplicationId=<app-id>
   SERVER_DATABASE_URL=postgres://...
   # Optional: override auto-resolved CORS origin
   # SERVER_CORS_ORIGIN=https://client.example.com

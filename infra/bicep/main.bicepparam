@@ -3,6 +3,10 @@ using 'main.bicep'
 // Environment tag applied to all resource names (e.g. zzyix-dev-*)
 param environmentName = 'dev'
 
+// Optional: deploy the same environment into multiple regions with a stable regional name suffix.
+param deploymentLocation = 'westus3'
+param deploymentStamp = 'westus3'
+
 // PostgreSQL administrator username
 param postgresAdminLogin = 'pgadmin'
 
@@ -13,8 +17,4 @@ param postgresAdminLogin = 'pgadmin'
 //   az deployment group create ... --parameters postgresAdminPassword='<secret>'
 // The placeholder below will fail the @minLength(8) validation check if deployed as-is.
 param postgresAdminPassword = 'REPLACE_ME'
-
-// Required operational deployment values. Override all placeholders at deployment time.
-param serverImage = 'ghcr.io/OWNER/REPOSITORY-server:IMMUTABLE_TAG'
-param operationalDatabaseUrl = 'REPLACE_WITH_SECRET_DATABASE_URL'
-param deploymentPrincipalId = '00000000-0000-0000-0000-000000000000'
+// Replace this placeholder before deployment.

@@ -13,7 +13,6 @@ import { parseExactHttpsOrigin, validateDeploymentOrigins } from './deployment-o
 const workflowPath = new URL('../.github/workflows/cd.yml', import.meta.url)
 const ciWorkflowPath = new URL('../.github/workflows/ci.yml', import.meta.url)
 const infrastructurePath = new URL('../infra/bicep/main.bicep', import.meta.url)
-const recoveryJobModulePath = new URL('../infra/bicep/modules/recovery-job.bicep', import.meta.url)
 const dockerfilePath = new URL('../apps/client/Dockerfile', import.meta.url)
 const nginxPath = new URL('../apps/client/nginx.conf', import.meta.url)
 const migrationScriptPath = new URL('./verify-quilt-migration.sh', import.meta.url)
@@ -147,21 +146,6 @@ test('release workflow produces one repository changelog', async () => {
   assert.match(notes, /preserve release details/)
   assert.match(notes, /### Tests/)
   assert.match(notes, /cover changelog generation/)
-})
-
-test('restricted recovery job is provisioned and resolved from infrastructure output', async () => {
-  const workflow = await readWorkflow()
-  const infrastructure = await readFile(infrastructurePath, 'utf8')
-  const recoveryModule = await readFile(recoveryJobModulePath, 'utf8')
-
-  assert.match(infrastructure, /output recoveryJobName string = recoveryJob\.outputs\.jobName/)
-  assert.match(workflow, /properties\.outputs\.recoveryJobName\.value/)
-  assert.doesNotMatch(workflow, /RECOVERY_JOB_NAME: \$\{\{ vars\.RECOVERY_JOB_NAME \}\}/)
-  assert.match(recoveryModule, /scope: recoveryJob/)
-  assert.match(recoveryModule, /'Microsoft\.App\/jobs\/read'/)
-  assert.match(recoveryModule, /'Microsoft\.App\/jobs\/start\/action'/)
-  assert.match(recoveryModule, /'Microsoft\.App\/jobs\/executions\/read'/)
-  assert.doesNotMatch(recoveryModule, /Microsoft\.Authorization\/roleAssignments\/write/)
 })
 
 test('deployment accepts only exact same-origin HTTPS client and CORS values', async () => {

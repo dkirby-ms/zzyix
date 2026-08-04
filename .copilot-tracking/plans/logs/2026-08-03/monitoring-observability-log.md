@@ -136,3 +136,12 @@ Items raised by Plan Validator and resolved in planning files.
 
 * RR-05: Adjacent observability correctness issues were resolved during the rework.
   * Resolution: `apps/server/src/logging/redact.ts` now redacts `ip`, and `/health` returns `process.env.npm_package_version ?? '0.0.0'`.
+
+* RR-06: `westcentralus` does not support `Microsoft.Insights/components` deployments and the same unstamped resource names cannot be redeployed into a different location.
+  * Resolution: Added top-level `deploymentLocation` and `deploymentStamp` parameters. The host parameter file now targets a same-region `westus3` staging stack with stamped names, allowing the existing westcentralus stack to remain up while the westus3 stack is deployed idempotently.
+
+* RR-07: The stamped `principal-recovery` Container Apps job name exceeded the service's 32-character limit.
+  * Resolution: Shortened the resource name suffix to `-recovery` and added `namePrefix` to the custom role-definition GUID so simultaneous regional stacks in the same resource group do not contend for one role definition.
+
+* RR-08: The principal recovery job is not required for this deployment.
+  * Resolution: Removed the recovery Bicep module, its main-template parameters/output, the manual CD workflow path, and the server recovery CLI, operation, tests, and package command.
