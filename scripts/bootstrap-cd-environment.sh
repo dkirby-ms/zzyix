@@ -64,7 +64,7 @@ Examples:
   SERVER_CONTAINER_APP_NAME=zzyix-staging-server
   CLIENT_CONTAINER_APP_NAME=zzyix-staging-client
   MIGRATION_JOB_NAME=zzyix-staging-migrations
-  CANONICAL_INITIALIZATION_JOB_NAME=zzyix-staging-canonical-initialization
+  CANONICAL_INITIALIZATION_JOB_NAME=zzyix-staging-canon-init
   AUTH_AUTHORITY=https://example.ciamlogin.com/example.onmicrosoft.com
   AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000001
   AUTH_API_SCOPE=api://00000000-0000-0000-0000-000000000002/access_as_user
