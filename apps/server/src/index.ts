@@ -6,6 +6,7 @@ import { createServer } from 'http'
 import { Server, type Socket } from 'socket.io'
 import { createAdapter } from '@socket.io/postgres-adapter'
 import { rateLimit } from 'express-rate-limit'
+import { trace } from '@opentelemetry/api'
 import { SCHEMA_VERSION, QUILT_PROTOCOL_VERSION } from './contracts.js'
 import type {
   ClientToServerEvents,
@@ -430,7 +431,11 @@ const writeLog = (level: LogLevel, message: string, context?: Record<string, unk
 
   const timestamp = new Date().toISOString()
   const contextSuffix = context ? ` ${serializeLogValue(redactTelemetry(context))}` : ''
-  const line = `[${timestamp}] [${level.toUpperCase()}] ${message}${contextSuffix}`
+  const activeSpanContext = trace.getActiveSpan()?.spanContext()
+  const traceSuffix = activeSpanContext
+    ? ` traceId=${activeSpanContext.traceId} spanId=${activeSpanContext.spanId}`
+    : ''
+  const line = `[${timestamp}] [${level.toUpperCase()}] ${message}${contextSuffix}${traceSuffix}`
 
   if (level === 'error') {
     console.error(line)
@@ -789,6 +794,7 @@ export const httpServer = createServer(app)
 const isTestControlEnabled = process.env.NODE_ENV === 'test' && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
 const testControlToken = (process.env.E2E_RESET_TOKEN ?? TEST_CONTROL_DEFAULT_TOKEN).trim()
 const HTTP_RATE_LIMIT_WINDOW_MS = Number(process.env.HTTP_RATE_LIMIT_WINDOW_MS ?? 60_000)
+const HTTP_HEALTH_RATE_LIMIT_MAX = Number(process.env.HTTP_HEALTH_RATE_LIMIT_MAX ?? 60)
 const HTTP_AUTH_READ_RATE_LIMIT_MAX = Number(process.env.HTTP_AUTH_READ_RATE_LIMIT_MAX ?? 240)
 const HTTP_AUTH_MUTATION_RATE_LIMIT_MAX = Number(process.env.HTTP_AUTH_MUTATION_RATE_LIMIT_MAX ?? 120)
 const HTTP_TEST_CONTROL_RATE_LIMIT_MAX = Number(process.env.HTTP_TEST_CONTROL_RATE_LIMIT_MAX ?? 180)
@@ -810,6 +816,10 @@ const authenticatedReadRateLimiter = createHttpRateLimiter(
 const authenticatedMutationRateLimiter = createHttpRateLimiter(
   HTTP_AUTH_MUTATION_RATE_LIMIT_MAX,
   'Too many authenticated mutation requests, please try again later.',
+)
+const healthRateLimiter = createHttpRateLimiter(
+  HTTP_HEALTH_RATE_LIMIT_MAX,
+  'Too many health check requests, please try again later.',
 )
 const testControlRateLimiter = createHttpRateLimiter(
   HTTP_TEST_CONTROL_RATE_LIMIT_MAX,
@@ -921,8 +931,22 @@ app.use((req, res, next) => {
 })
 
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
-app.get('/health', (_req, res) => {
-  res.status(200).json({ status: 'ok', version: '0.0.0' })
+app.get('/health', healthRateLimiter, async (_req, res) => {
+  let dbStatus: 'ok' | 'error' = 'error'
+  try {
+    // Use a lightweight query to verify the pooled DB connection is ready.
+    await getDatabaseBundle().pool.query('SELECT 1')
+    dbStatus = 'ok'
+  } catch {
+    dbStatus = 'error'
+  }
+
+  const healthy = dbStatus === 'ok'
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    version: process.env.npm_package_version ?? '0.0.0',
+    checks: { db: dbStatus },
+  })
 })
 
 app.get('/me', authenticatedReadRateLimiter, requireHttpPrincipal, async (req, res) => {

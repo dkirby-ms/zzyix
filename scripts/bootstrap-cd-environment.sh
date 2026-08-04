@@ -32,6 +32,7 @@ Required environment variables:
   SERVER_CONTAINER_APP_NAME
   CLIENT_CONTAINER_APP_NAME
   MIGRATION_JOB_NAME
+  CANONICAL_INITIALIZATION_JOB_NAME
   AUTH_AUTHORITY
   AUTH_CLIENT_ID
   AUTH_API_SCOPE
@@ -43,10 +44,12 @@ Required environment variables:
   AUTH_REQUIRED_SCOPE
   AUTH_JWKS_URI
   AUTH_ACCEPTED_ALGORITHM
+  APPLICATIONINSIGHTS_CONNECTION_STRING
   SERVER_DATABASE_URL
 
 Optional environment variables:
   SERVER_CORS_ORIGIN
+  OTEL_SAMPLING_RATIO
   AZURE_GHCR_USERNAME
   AZURE_GHCR_PASSWORD
 
@@ -61,6 +64,7 @@ Examples:
   SERVER_CONTAINER_APP_NAME=zzyix-staging-server
   CLIENT_CONTAINER_APP_NAME=zzyix-staging-client
   MIGRATION_JOB_NAME=zzyix-staging-migrations
+  CANONICAL_INITIALIZATION_JOB_NAME=zzyix-staging-canonical-initialization
   AUTH_AUTHORITY=https://example.ciamlogin.com/example.onmicrosoft.com
   AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000001
   AUTH_API_SCOPE=api://00000000-0000-0000-0000-000000000002/access_as_user
@@ -72,6 +76,7 @@ Examples:
   AUTH_REQUIRED_SCOPE=access_as_user
   AUTH_JWKS_URI=https://example.ciamlogin.com/example.onmicrosoft.com/discovery/v2.0/keys
   AUTH_ACCEPTED_ALGORITHM=RS256
+  APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=<key>;IngestionEndpoint=https://<region>.in.applicationinsights.azure.com/;ApplicationId=<app-id>
   SERVER_DATABASE_URL=postgres://...
   # Optional: override auto-resolved CORS origin
   # SERVER_CORS_ORIGIN=https://client.example.com
@@ -262,6 +267,7 @@ main() {
   require_value "SERVER_CONTAINER_APP_NAME"
   require_value "CLIENT_CONTAINER_APP_NAME"
   require_value "MIGRATION_JOB_NAME"
+  require_value "CANONICAL_INITIALIZATION_JOB_NAME"
   require_value "AUTH_AUTHORITY"
   require_value "AUTH_CLIENT_ID"
   require_value "AUTH_API_SCOPE"
@@ -273,6 +279,7 @@ main() {
   require_value "AUTH_REQUIRED_SCOPE"
   require_value "AUTH_JWKS_URI"
   require_value "AUTH_ACCEPTED_ALGORITHM"
+  require_value "APPLICATIONINSIGHTS_CONNECTION_STRING"
   require_value "SERVER_DATABASE_URL"
   warn_if_non_explicit_sslmode "${SERVER_DATABASE_URL}"
 
@@ -297,6 +304,8 @@ main() {
   set_environment_variable "${repo}" "${environment_name}" \
     "MIGRATION_JOB_NAME" "${MIGRATION_JOB_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
+    "CANONICAL_INITIALIZATION_JOB_NAME" "${CANONICAL_INITIALIZATION_JOB_NAME}"
+  set_environment_variable "${repo}" "${environment_name}" \
     "AUTH_AUTHORITY" "${AUTH_AUTHORITY}"
   set_environment_variable "${repo}" "${environment_name}" \
     "AUTH_CLIENT_ID" "${AUTH_CLIENT_ID}"
@@ -318,6 +327,12 @@ main() {
     "AUTH_JWKS_URI" "${AUTH_JWKS_URI}"
   set_environment_variable "${repo}" "${environment_name}" \
     "AUTH_ACCEPTED_ALGORITHM" "${AUTH_ACCEPTED_ALGORITHM}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
+  if [[ -n "${OTEL_SAMPLING_RATIO:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "OTEL_SAMPLING_RATIO" "${OTEL_SAMPLING_RATIO}"
+  fi
   if [[ -n "${SERVER_CORS_ORIGIN:-}" ]]; then
     set_environment_variable "${repo}" "${environment_name}" \
       "SERVER_CORS_ORIGIN" "${SERVER_CORS_ORIGIN}"

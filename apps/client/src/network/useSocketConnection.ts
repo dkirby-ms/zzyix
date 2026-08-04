@@ -72,6 +72,7 @@ export const useSocketConnection = (
           })
         } catch (error) {
           onAuthLoss?.(isInteractionRequiredError(error) ? 'interaction_required' : 'authentication_failed', error)
+          callback({})
         }
       },
       transports: ['websocket', 'polling'],
@@ -143,7 +144,6 @@ export const useSocketConnection = (
         reconnectAttempts = 0
       }
       onConnectionEpoch?.(connectionEpoch)
-      console.log('✅ Socket.IO connected:', { quiltId, socketId: socket.id })
     })
 
     const handleCanonicalLineage = (payload: { lineageAttemptId: string }): void => {
@@ -152,7 +152,6 @@ export const useSocketConnection = (
     socket.on('canonical_lineage', handleCanonicalLineage)
 
     socket.on('connect_error', (error: Error & { data?: { code?: string } }) => {
-      console.error('❌ Socket.IO connection error:', error.message)
       const code = error.data?.code
       if (code === 'authentication_required' || code === 'invalid_token') {
         renewAndReconnect(error)
@@ -171,7 +170,6 @@ export const useSocketConnection = (
     socket.on('disconnect', (reason: string) => {
       disconnectedAt = performance.now()
       reconnectAttempts = 0
-      console.log('🔌 Socket.IO disconnected:', reason)
       if (reason === 'io server disconnect') renewAndReconnect(new Error('Socket authentication expired'))
     })
 

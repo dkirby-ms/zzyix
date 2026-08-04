@@ -1,4 +1,4 @@
-const SENSITIVE_KEY_PATTERN = /(?:authorization|access.?token|refresh.?token|external.?subject|email)/i
+const SENSITIVE_KEY_PATTERN = /(?:authorization|access.?token|refresh.?token|external.?subject|email|\bip\b)/i
 
 export const redactTelemetry = (value: unknown, seen = new WeakSet<object>()): unknown => {
   if (value === null || typeof value !== 'object') return value

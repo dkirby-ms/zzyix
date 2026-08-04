@@ -152,6 +152,15 @@ describe('Socket.IO handshake origin boundary', () => {
   })
 })
 
+describe('health endpoint', () => {
+  it('rate limits its database-backed readiness check', async () => {
+    const response = await fetch(`${liveBaseUrl}/health`)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('ratelimit-limit')).toBe('60')
+  })
+})
+
 describe('ownership HTTP contracts', () => {
   it('requires UUID operation and resource identifiers', () => {
     expect(ownershipRequest({

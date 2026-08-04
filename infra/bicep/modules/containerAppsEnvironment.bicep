@@ -7,12 +7,12 @@ param namePrefix string
 @description('The resource ID of the ACA infrastructure subnet.')
 param acaSubnetId string
 
-@description('The Log Analytics workspace customer ID for ACA app logs.')
-param logAnalyticsCustomerId string
+@description('The resource ID of the Log Analytics workspace for ACA app logs.')
+param logAnalyticsWorkspaceId string
 
-@description('The Log Analytics workspace shared key for ACA app logs.')
-@secure()
-param logAnalyticsSharedKey string
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' existing = {
+  name: last(split(logAnalyticsWorkspaceId, '/'))
+}
 
 // Consumption-only ACA environment with VNet integration so it can reach PostgreSQL
 // on the private subnet. No workloadProfiles → pure Consumption plan (no dedicated nodes).
@@ -24,8 +24,8 @@ resource acaEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
-        customerId: logAnalyticsCustomerId
-        sharedKey: logAnalyticsSharedKey
+        customerId: logAnalyticsWorkspace.properties.customerId
+        sharedKey: logAnalyticsWorkspace.listKeys().primarySharedKey
       }
     }
     vnetConfiguration: {

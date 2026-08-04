@@ -41,6 +41,95 @@
   margin: 0.65rem 0 1rem;
 }
 
+.app-error-page {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  color: var(--ink);
+  font-family: var(--font-body, 'Sora', sans-serif);
+  background:
+    radial-gradient(900px 360px at 15% 18%, rgba(245, 206, 160, 0.44), transparent 60%),
+    radial-gradient(720px 320px at 88% 20%, rgba(148, 182, 193, 0.34), transparent 58%),
+    var(--color-surface-primary);
+}
+
+.app-error-panel {
+  width: min(760px, 100%);
+  padding: 1.25rem;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 18px 40px rgba(39, 25, 16, 0.12);
+}
+
+.app-error-kicker {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-feedback-error);
+}
+
+.app-error-panel h1 {
+  margin: 0;
+  font-family: var(--font-display, 'Fraunces', serif);
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+}
+
+.app-error-panel p {
+  margin: 0.65rem 0 1rem;
+  max-width: 62ch;
+}
+
+.app-error-panel button {
+  min-height: var(--touch-target-min);
+}
+
+.app-error-diagnostics {
+  display: grid;
+  gap: 0.55rem;
+  margin: 1rem 0;
+  padding: 0.75rem;
+  border: 1px solid rgba(66, 47, 37, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 249, 238, 0.72);
+}
+
+.app-error-diagnostics div {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.7rem;
+}
+
+.app-error-diagnostics dt {
+  font-weight: 700;
+}
+
+.app-error-diagnostics dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-error-technical-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.app-error-technical-details pre {
+  max-height: 18rem;
+  overflow: auto;
+  margin: 0.75rem 0 0;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: rgba(45, 35, 28, 0.08);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+}
+
 .test-identity-control {
   display: grid;
   gap: 0.5rem;

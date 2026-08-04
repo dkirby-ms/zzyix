@@ -58,6 +58,14 @@ boundary coverage, and repeated full Playwright validation restore release readi
 * Public session contracts are retired, required product boundaries are live-tested, and standard Playwright state is isolated
 * Release readiness is restored after complete repeated validation
 
+### Implementation Deviations
+
+* DD-06: CD did not initialize a fresh canonical database
+	* Plan specifies: One active validated canonical world is the sole supported product entry
+	* Implementation differs: CD applied migrations and deployed the application without provisioning or activating the initial pointer
+	* Rationale: Initial provisioning was intentionally an explicit operator command, but no deployment-ready operation was supplied
+	* Resolution: Phase 9 adds an idempotent production initializer and a dedicated ACA job that completes before application deployment
+
 ## Implementation Paths Considered
 
 ### Selected: Database-Backed Canonical Pointer and Direct Entry

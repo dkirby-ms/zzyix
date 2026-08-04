@@ -1,4 +1,4 @@
-import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ErrorInfo, type ReactNode } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import {
   applyChunkSubscriptionBudgets,
   shouldRecomputeVisibleChunks,
@@ -63,6 +63,7 @@ import { palettes } from './ui/palettes'
 import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import { TooltipProvider } from './ui/primitives/Tooltip'
+import { AppErrorBoundary } from './ui/AppErrorBoundary'
 import { useAuthSession } from './auth/useAuthSession'
 import {
   COLLABORATOR_CLEANUP_INTERVAL_MS,
@@ -105,50 +106,6 @@ const MosaicScene = lazy(async () => {
   const module = await import('./render/MosaicScene')
   return { default: module.MosaicScene }
 })
-
-type CanvasErrorBoundaryProps = {
-  children: ReactNode
-}
-
-type CanvasErrorBoundaryState = {
-  hasError: boolean
-  retryKey: number
-}
-
-class CanvasErrorBoundary extends Component<CanvasErrorBoundaryProps, CanvasErrorBoundaryState> {
-  state: CanvasErrorBoundaryState = {
-    hasError: false,
-    retryKey: 0,
-  }
-
-  static getDerivedStateFromError(): Partial<CanvasErrorBoundaryState> {
-    return { hasError: true }
-  }
-
-  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error('Canvas lazy-load failed', error, errorInfo)
-  }
-
-  private readonly handleRetry = (): void => {
-    this.setState((previousState) => ({
-      hasError: false,
-      retryKey: previousState.retryKey + 1,
-    }))
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="canvas-loading-fallback" role="alert">
-          <span>Canvas failed to load.</span>
-          <button type="button" onClick={this.handleRetry}>Retry</button>
-        </div>
-      )
-    }
-
-    return <div key={this.state.retryKey} className="canvas-scene">{this.props.children}</div>
-  }
-}
 
 type ZoomTier = 'fine' | 'aggregate'
 
@@ -1460,9 +1417,14 @@ function ProtectedApp() {
               setGridOverlayAnnouncement(pattern ? `Grid pattern changed to ${pattern.label}.` : '')
             }}
           />
-          <CanvasErrorBoundary>
-            <Suspense fallback={<CanvasLoadingFallback />}>
-              <MosaicScene
+          <AppErrorBoundary
+            title="Canvas failed to load"
+            description="Reload the canvas to try again. If this repeats, include the diagnostic details below when reporting it."
+            actionLabel="Reload canvas"
+          >
+            <div className="canvas-scene">
+              <Suspense fallback={<CanvasLoadingFallback />}>
+                <MosaicScene
                 tiles={visibleTiles}
                 clientId={clientId}
                 ownershipIdentity={ownershipIdentity}
@@ -1513,9 +1475,10 @@ function ProtectedApp() {
                   setZoomTier(nextTier)
                   clientTelemetryRef.current.tierTransitions += 1
                 }}
-              />
-            </Suspense>
-          </CanvasErrorBoundary>
+                />
+              </Suspense>
+            </div>
+          </AppErrorBoundary>
           <MinimapOverlay
             worldBounds={worldBounds}
             viewport={cameraViewport}
@@ -1567,8 +1530,49 @@ function ProtectedApp() {
   )
 }
 
+const isPostLogoutRoute = (postLogoutRedirectUri: string): boolean => {
+  const postLogoutUrl = new URL(postLogoutRedirectUri)
+  return postLogoutUrl.origin === location.origin
+    && postLogoutUrl.pathname === location.pathname
+    && postLogoutUrl.search === location.search
+}
+
 function App() {
   const auth = useAuthSession()
+  const logoutRequested = useRef(false)
+  const isLogoutRoute = isPostLogoutRoute(auth.postLogoutRedirectUri)
+
+  useEffect(() => {
+    if (isLogoutRoute && auth.status === 'authenticated' && !logoutRequested.current) {
+      logoutRequested.current = true
+      clearCanonicalPatchLink()
+      void auth.logout()
+    }
+  }, [auth, isLogoutRoute])
+
+  if (isLogoutRoute) {
+    const signingOut = auth.status === 'authenticated' || auth.status === 'loading'
+    return (
+      <main className="auth-shell" aria-live="polite">
+        <section className="auth-panel">
+          <h1>{signingOut ? 'Signing out' : 'You are signed out'}</h1>
+          <p>{signingOut ? 'Ending your secure session...' : 'Your secure session has ended.'}</p>
+          {!signingOut && (
+            <button
+              type="button"
+              className="active"
+              onClick={() => {
+                clearCanonicalPatchLink()
+                void auth.login()
+              }}
+            >
+              Sign in
+            </button>
+          )}
+        </section>
+      </main>
+    )
+  }
 
   if (auth.status === 'loading') {
     return <main className="auth-shell">Loading your secure workspace...</main>

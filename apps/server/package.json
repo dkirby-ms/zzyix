@@ -4,16 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development nodemon --exec 'node --env-file=../../.env --import tsx/esm' src/index.ts",
+    "dev": "NODE_ENV=development nodemon --exec 'node --env-file=../../.env --import tsx/esm --import ./src/telemetry.ts' src/index.ts",
     "build": "tsc",
     "lint": "oxlint",
-    "start": "node dist/index.js",
+    "start": "node --import ./dist/telemetry.js dist/index.js",
     "db:apply": "node dist/db/migrate.js",
     "db:backfill:quilts": "node dist/db/quiltBackfill.js",
     "db:parity:quilts": "node dist/db/quiltParityCli.js",
     "db:canonical-world": "node dist/cli/selectCanonicalWorld.js",
+    "db:initialize-canonical-world": "node dist/db/initializeCanonicalWorld.js",
     "jobs:principal-deletion": "node dist/jobs/principalDeletionCli.js",
-    "operations:principal-recovery": "node dist/operations/principalRecoveryCli.js",
     "telemetry:canonical-retirement": "node dist/operations/canonicalRetirementReportCli.js",
     "db:generate": "npx drizzle-kit@0.31.10 generate",
     "db:migrate": "npx drizzle-kit@0.31.10 migrate",
@@ -23,6 +23,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@azure/monitor-opentelemetry": "^1.19.0",
     "@socket.io/postgres-adapter": "^0.5.0",
     "drizzle-orm": "^0.45.2",
     "express": "^5.2.1",

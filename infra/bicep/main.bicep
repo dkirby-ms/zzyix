@@ -1,6 +1,12 @@
 @description('Short name for the target environment (e.g. dev, staging, prod). Used as a suffix on all resource names.')
 param environmentName string = 'dev'
 
+@description('Azure region for regional application resources. Defaults to the resource group location.')
+param deploymentLocation string = resourceGroup().location
+
+@description('Optional stable suffix for deploying the same environment into multiple regions simultaneously, for example westus3.')
+param deploymentStamp string = ''
+
 @description('Administrator login name for the PostgreSQL Flexible Server.')
 param postgresAdminLogin string = 'pgadmin'
 
@@ -9,18 +15,15 @@ param postgresAdminLogin string = 'pgadmin'
 @minLength(8)
 param postgresAdminPassword string
 
-@description('The immutable server container image reference used by operational jobs.')
-param serverImage string
+@description('The application database name to provision on the PostgreSQL Flexible Server.')
+param postgresDatabaseName string = 'zzyix'
 
-@description('The PostgreSQL connection string used only by operational jobs.')
-@secure()
-param operationalDatabaseUrl string
+@description('Optional Azure region for Log Analytics and Application Insights. Defaults to deploymentLocation.')
+param monitoringLocation string = ''
 
-@description('The Microsoft Entra object ID of the deployment workflow service principal.')
-param deploymentPrincipalId string
-
-var namePrefix = 'zzyix-${environmentName}'
-var deploymentLocation = resourceGroup().location
+var deploymentStampSuffix = empty(deploymentStamp) ? '' : '-${toLower(deploymentStamp)}'
+var effectiveMonitoringLocation = empty(monitoringLocation) ? deploymentLocation : monitoringLocation
+var namePrefix = 'zzyix-${environmentName}${deploymentStampSuffix}'
 
 // ── Networking ────────────────────────────────────────────────────────────────
 // VNet with two subnets:
@@ -39,7 +42,7 @@ module network 'modules/network.bicep' = {
 module monitoring 'modules/monitoring.bicep' = {
   name: 'monitoring'
   params: {
-    location: deploymentLocation
+    location: effectiveMonitoringLocation
     namePrefix: namePrefix
   }
 }
@@ -53,8 +56,17 @@ module containerAppsEnvironment 'modules/containerAppsEnvironment.bicep' = {
     location: deploymentLocation
     namePrefix: namePrefix
     acaSubnetId: network.outputs.acaSubnetId
-    logAnalyticsCustomerId: monitoring.outputs.customerId
-    logAnalyticsSharedKey: monitoring.outputs.sharedKey
+    logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
+  }
+}
+
+// ── Observability Diagnostics ─────────────────────────────────────────────────
+// Adds platform-level diagnostic settings to ACA environment routing logs/metrics to Log Analytics.
+module diagnostics 'modules/diagnostics.bicep' = {
+  name: 'diagnostics'
+  params: {
+    acaEnvironmentId: containerAppsEnvironment.outputs.environmentId
+    logAnalyticsWorkspaceId: monitoring.outputs.workspaceId
   }
 }
 
@@ -70,23 +82,14 @@ module postgresql 'modules/postgresql.bicep' = {
     vnetId: network.outputs.vnetId
     adminLogin: postgresAdminLogin
     adminPassword: postgresAdminPassword
-  }
-}
-
-module recoveryJob 'modules/recovery-job.bicep' = {
-  params: {
-    databaseUrl: operationalDatabaseUrl
-    environmentId: containerAppsEnvironment.outputs.environmentId
-    invocationPrincipalId: deploymentPrincipalId
-    location: deploymentLocation
-    namePrefix: namePrefix
-    serverImage: serverImage
+    databaseName: postgresDatabaseName
   }
 }
 
 // ── Outputs ───────────────────────────────────────────────────────────────────
 output acaEnvironmentName string = containerAppsEnvironment.outputs.environmentName
 output acaDefaultDomain string = containerAppsEnvironment.outputs.defaultDomain
+@description('Application Insights connection string for server SDK instrumentation.')
+output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
 output postgresServerName string = postgresql.outputs.postgresServerName
 output postgresServerFqdn string = postgresql.outputs.postgresServerFqdn
-output recoveryJobName string = recoveryJob.outputs.jobName

@@ -9,6 +9,7 @@ const TEST_TOKEN_LIFETIME_KEY = 'zzyix:e2e-token-lifetime-seconds'
 const TEST_ISSUER = import.meta.env.VITE_TEST_OIDC_ISSUER as string | undefined
 const TEST_TOKEN_URL = import.meta.env.VITE_TEST_OIDC_TOKEN_URL as string | undefined
 const API_ORIGIN = location.origin
+const POST_LOGOUT_REDIRECT_URI = new URL('/logout', location.origin).toString()
 
 const requestToken = async (subject: string): Promise<string> => {
   if (!TEST_TOKEN_URL && !TEST_ISSUER) {
@@ -111,6 +112,7 @@ export const TestAuthProvider = ({ children }: { children: ReactNode }) => {
     status,
     principal,
     error,
+    postLogoutRedirectUri: POST_LOGOUT_REDIRECT_URI,
     testIdentity: { subject: testSubject, setSubject: selectTestSubject },
     apiOrigin: API_ORIGIN,
     authenticatedFetch,

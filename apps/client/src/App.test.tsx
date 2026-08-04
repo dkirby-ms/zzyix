@@ -44,6 +44,7 @@ const {
       },
     } as MeResponse | null,
     error: null as string | null,
+    postLogoutRedirectUri: new URL('/logout', location.origin).toString(),
     apiOrigin: 'http://localhost:3001',
     authenticatedFetch: vi.fn<typeof fetch>(),
     acquireAccessToken: vi.fn(async () => 'access-token'),
@@ -294,6 +295,7 @@ describe('App canonical canvas behavior', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    window.history.replaceState({}, '', '/')
     cleanup()
   })
 
@@ -318,6 +320,28 @@ describe('App canonical canvas behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
 
     expect(clearCanonicalPatchLinkMock).toHaveBeenCalledOnce()
+    expect(authSessionState.login).toHaveBeenCalledOnce()
+  })
+
+  it('initiates Entra logout when the configured logout route is opened', async () => {
+    window.history.pushState({}, '', '/logout')
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'Signing out' })).toBeInTheDocument()
+    await waitFor(() => expect(authSessionState.logout).toHaveBeenCalledOnce())
+    expect(clearCanonicalPatchLinkMock).toHaveBeenCalledOnce()
+  })
+
+  it('shows a signed-out confirmation after Entra returns to the logout route', () => {
+    window.history.pushState({}, '', '/logout')
+    authSessionState.status = 'signed_out'
+    authSessionState.principal = null
+
+    render(<App />)
+
+    expect(screen.getByRole('heading', { name: 'You are signed out' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
     expect(authSessionState.login).toHaveBeenCalledOnce()
   })
 
