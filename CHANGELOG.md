@@ -5,6 +5,12 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.4.2](https://github.com/dkirby-ms/zzyix/compare/v1.4.1...v1.4.2) (2026-08-04)
+
+### Bug Fixes
+
+* **ci:** harden cd ([2ac2b45](https://github.com/dkirby-ms/zzyix/commit/2ac2b4581d0dcd8016ee13350e6592272256aba5))
+
 ## [1.4.1](https://github.com/dkirby-ms/zzyix/compare/v1.4.0...v1.4.1) (2026-08-04)
 
 ### Bug Fixes
