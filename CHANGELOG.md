@@ -5,6 +5,13 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.4.1](https://github.com/dkirby-ms/zzyix/compare/v1.4.0...v1.4.1) (2026-08-04)
+
+### Bug Fixes
+
+* patch broken cd ([34fcc23](https://github.com/dkirby-ms/zzyix/commit/34fcc23fe656a8230e4c7068f1a2981ac5ae5eae))
+* patch broken cd ([5efaed3](https://github.com/dkirby-ms/zzyix/commit/5efaed32a7edee1c85f6554230235d8445d0ce13))
+
 ## [1.4.0](https://github.com/dkirby-ms/zzyix/compare/v1.3.3...v1.4.0) (2026-08-04)
 
 ### Features
