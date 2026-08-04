@@ -30,6 +30,8 @@ Review rework completed the remaining production blockers by routing client life
 * .github/workflows/cd.yml - Removed the manual restricted recovery workflow dispatch inputs and job.
 * apps/server/package.json - Removed the unused principal recovery operation command.
 * scripts/release-contract.test.mjs - Removed recovery-job contract assertions.
+* infra/bicep/modules/postgresql.bicep - Added explicit application database provisioning for `zzyix` on new PostgreSQL Flexible Server deployments.
+* infra/bicep/main.bicep - Added `postgresDatabaseName` and passed it into the PostgreSQL module.
 * scripts/bootstrap-cd-environment.sh - Added `APPLICATIONINSIGHTS_CONNECTION_STRING` as required environment variable and optional `OTEL_SAMPLING_RATIO` environment variable support.
 * .github/workflows/cd.yml - Added `APPLICATIONINSIGHTS_CONNECTION_STRING`, `OTEL_SERVICE_NAME`, and `OTEL_SAMPLING_RATIO` to both server `az containerapp update` env var sets.
 * apps/server/package.json - Added `@azure/monitor-opentelemetry`; updated dev/start scripts to preload telemetry loader.
@@ -79,6 +81,7 @@ Validation status:
 * `az bicep build-params --file infra/bicep/host.main.bicepparam` passed via Bicep MCP parameter compilation after the westus3 regional stamp change
 * `az bicep build-params --file infra/bicep/host.main.bicepparam` passed after the recovery job name-limit fix
 * `az bicep build-params --file infra/bicep/host.main.bicepparam` passed after removing the recovery job parameters and module
+* `az bicep build-params --file infra/bicep/host.main.bicepparam` passed after adding PostgreSQL application database provisioning
 * `npm run test:release-contract` passed after removing the manual recovery workflow
 * `npm run test --workspace=apps/server` passed after deleting the recovery operation
 * `bash -n scripts/bootstrap-cd-environment.sh` passed

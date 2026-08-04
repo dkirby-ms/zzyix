@@ -17,6 +17,9 @@ param adminLogin string
 @secure()
 param adminPassword string
 
+@description('The application database name to create on the PostgreSQL Flexible Server.')
+param databaseName string = 'zzyix'
+
 var serverName = '${namePrefix}-psql'
 
 // Private DNS zone is required for PostgreSQL Flexible Server VNet integration.
@@ -76,6 +79,11 @@ resource postgresServer 'Microsoft.DBforPostgreSQL/flexibleServers@2025-08-01' =
   dependsOn: [
     privateDnsZoneVnetLink
   ]
+}
+
+resource applicationDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2025-08-01' = {
+  parent: postgresServer
+  name: databaseName
 }
 
 output postgresServerName string = postgresServer.name

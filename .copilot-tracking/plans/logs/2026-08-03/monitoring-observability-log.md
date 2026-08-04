@@ -145,3 +145,6 @@ Items raised by Plan Validator and resolved in planning files.
 
 * RR-08: The principal recovery job is not required for this deployment.
   * Resolution: Removed the recovery Bicep module, its main-template parameters/output, the manual CD workflow path, and the server recovery CLI, operation, tests, and package command.
+
+* RR-09: New regional PostgreSQL Flexible Server deployments did not create the application database used by `SERVER_DATABASE_URL`.
+  * Resolution: Added `postgresDatabaseName` with default `zzyix` and provisioned `Microsoft.DBforPostgreSQL/flexibleServers/databases` in the PostgreSQL module before migrations run.

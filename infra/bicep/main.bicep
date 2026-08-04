@@ -15,6 +15,9 @@ param postgresAdminLogin string = 'pgadmin'
 @minLength(8)
 param postgresAdminPassword string
 
+@description('The application database name to provision on the PostgreSQL Flexible Server.')
+param postgresDatabaseName string = 'zzyix'
+
 @description('Optional Azure region for Log Analytics and Application Insights. Defaults to deploymentLocation.')
 param monitoringLocation string = ''
 
@@ -79,6 +82,7 @@ module postgresql 'modules/postgresql.bicep' = {
     vnetId: network.outputs.vnetId
     adminLogin: postgresAdminLogin
     adminPassword: postgresAdminPassword
+    databaseName: postgresDatabaseName
   }
 }
 
