@@ -197,6 +197,11 @@ jobs:
             fi
           done
 
+          if (( ${#CANONICAL_INITIALIZATION_JOB_NAME} > 32 )) || [[ ! "${CANONICAL_INITIALIZATION_JOB_NAME}" =~ ^[a-z][a-z0-9-]*[a-z0-9]$ ]] || [[ "${CANONICAL_INITIALIZATION_JOB_NAME}" == *--* ]]; then
+            echo "CANONICAL_INITIALIZATION_JOB_NAME must be a lowercase Container Apps name under 33 characters without consecutive hyphens: ${CANONICAL_INITIALIZATION_JOB_NAME}" >&2
+            exit 1
+          fi
+
           required_approvals=(
             AUTH_TELEMETRY_GATE_APPROVED
             AUTH_ROLLBACK_GATE_APPROVED
