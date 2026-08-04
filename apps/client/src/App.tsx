@@ -1567,8 +1567,49 @@ function ProtectedApp() {
   )
 }
 
+const isPostLogoutRoute = (postLogoutRedirectUri: string): boolean => {
+  const postLogoutUrl = new URL(postLogoutRedirectUri)
+  return postLogoutUrl.origin === location.origin
+    && postLogoutUrl.pathname === location.pathname
+    && postLogoutUrl.search === location.search
+}
+
 function App() {
   const auth = useAuthSession()
+  const logoutRequested = useRef(false)
+  const isLogoutRoute = isPostLogoutRoute(auth.postLogoutRedirectUri)
+
+  useEffect(() => {
+    if (isLogoutRoute && auth.status === 'authenticated' && !logoutRequested.current) {
+      logoutRequested.current = true
+      clearCanonicalPatchLink()
+      void auth.logout()
+    }
+  }, [auth, isLogoutRoute])
+
+  if (isLogoutRoute) {
+    const signingOut = auth.status === 'authenticated' || auth.status === 'loading'
+    return (
+      <main className="auth-shell" aria-live="polite">
+        <section className="auth-panel">
+          <h1>{signingOut ? 'Signing out' : 'You are signed out'}</h1>
+          <p>{signingOut ? 'Ending your secure session...' : 'Your secure session has ended.'}</p>
+          {!signingOut && (
+            <button
+              type="button"
+              className="active"
+              onClick={() => {
+                clearCanonicalPatchLink()
+                void auth.login()
+              }}
+            >
+              Sign in
+            </button>
+          )}
+        </section>
+      </main>
+    )
+  }
 
   if (auth.status === 'loading') {
     return <main className="auth-shell">Loading your secure workspace...</main>

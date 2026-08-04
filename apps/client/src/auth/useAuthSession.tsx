@@ -8,6 +8,7 @@ export type AuthSession = {
   status: AuthSessionStatus
   principal: MeResponse | null
   error: string | null
+  postLogoutRedirectUri: string
   testIdentity?: {
     subject: string
     setSubject: (subject: string) => void
