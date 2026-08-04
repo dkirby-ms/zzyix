@@ -32,6 +32,7 @@ Required environment variables:
   SERVER_CONTAINER_APP_NAME
   CLIENT_CONTAINER_APP_NAME
   MIGRATION_JOB_NAME
+  CANONICAL_INITIALIZATION_JOB_NAME
   AUTH_AUTHORITY
   AUTH_CLIENT_ID
   AUTH_API_SCOPE
@@ -63,6 +64,7 @@ Examples:
   SERVER_CONTAINER_APP_NAME=zzyix-staging-server
   CLIENT_CONTAINER_APP_NAME=zzyix-staging-client
   MIGRATION_JOB_NAME=zzyix-staging-migrations
+  CANONICAL_INITIALIZATION_JOB_NAME=zzyix-staging-canonical-initialization
   AUTH_AUTHORITY=https://example.ciamlogin.com/example.onmicrosoft.com
   AUTH_CLIENT_ID=00000000-0000-0000-0000-000000000001
   AUTH_API_SCOPE=api://00000000-0000-0000-0000-000000000002/access_as_user
@@ -265,6 +267,7 @@ main() {
   require_value "SERVER_CONTAINER_APP_NAME"
   require_value "CLIENT_CONTAINER_APP_NAME"
   require_value "MIGRATION_JOB_NAME"
+  require_value "CANONICAL_INITIALIZATION_JOB_NAME"
   require_value "AUTH_AUTHORITY"
   require_value "AUTH_CLIENT_ID"
   require_value "AUTH_API_SCOPE"
@@ -300,6 +303,8 @@ main() {
     "CLIENT_CONTAINER_APP_NAME" "${CLIENT_CONTAINER_APP_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
     "MIGRATION_JOB_NAME" "${MIGRATION_JOB_NAME}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "CANONICAL_INITIALIZATION_JOB_NAME" "${CANONICAL_INITIALIZATION_JOB_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
     "AUTH_AUTHORITY" "${AUTH_AUTHORITY}"
   set_environment_variable "${repo}" "${environment_name}" \

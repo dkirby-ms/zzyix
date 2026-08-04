@@ -12,6 +12,7 @@
     "db:backfill:quilts": "node dist/db/quiltBackfill.js",
     "db:parity:quilts": "node dist/db/quiltParityCli.js",
     "db:canonical-world": "node dist/cli/selectCanonicalWorld.js",
+    "db:initialize-canonical-world": "node dist/db/initializeCanonicalWorld.js",
     "jobs:principal-deletion": "node dist/jobs/principalDeletionCli.js",
     "telemetry:canonical-retirement": "node dist/operations/canonicalRetirementReportCli.js",
     "db:generate": "npx drizzle-kit@0.31.10 generate",

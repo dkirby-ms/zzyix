@@ -11,6 +11,43 @@ Sources:
 * `.copilot-tracking/research/subagents/2026-07-29/canonical-infinite-canvas-convergence-planning-research.md`
 * `docs/decisions/2026-07-27-finite-toroidal-quilt-v01.md`
 
+## Implementation Phase 9: Initialize the Canonical World on Deployment
+
+### Step 9.1: Add a production-safe initializer
+
+Add a compiled server operation that checks the canonical pointer and performs only the
+approved initial bootstrap. For a missing pointer, provision the fixed 32-by-32 toroidal
+quilt with 31.2-by-20.4 patches at origin `(0, 0)`, then activate the returned target. For an
+inactive pointer, activate the validated existing target. For an active pointer, make no
+change. Do not create demo users, canvases, tiles, or participants. Write a machine-readable
+result and fail for an invalid target or unexpected pointer state.
+
+Files:
+
+* `apps/server/src/db/initializeCanonicalWorld.ts` - Define the production initializer
+* `apps/server/src/db/initializeCanonicalWorld.test.ts` - Cover missing, inactive, active, and invalid outcomes
+* `apps/server/package.json` - Expose the compiled operation
+* `package.json` - Expose the root operation
+
+### Step 9.2: Run initialization after migrations
+
+Extend CD to create or update a separate manual ACA job for canonical initialization. The job
+uses the deployed server image and database secret, runs only after the migration job succeeds,
+and waits for a terminal successful execution. Its job name is an explicit environment variable
+so migration and initialization executions cannot overwrite each other's command.
+
+Files:
+
+* `.github/workflows/cd.yml` - Run and wait for the dedicated initializer job before app deployment
+* `scripts/bootstrap-cd-environment.sh` - Register the required initializer-job variable
+* `scripts/gh-vars.env.template` - Document the required initializer-job variable
+
+### Step 9.3: Validate deployment readiness
+
+Verify the initializer's focused test coverage, server build, workflow YAML parsing, release
+contract checks, and whitespace. The deployment must fail if initialization cannot produce an
+active canonical world.
+
 ## Implementation Phase 0: Fix the Canonical Product Contract
 
 <!-- parallelizable: false -->

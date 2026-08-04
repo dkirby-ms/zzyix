@@ -15,6 +15,8 @@ live-boundary, Playwright-isolation, release-reporting, and ADR findings.
 
 ### Added
 
+* `apps/server/src/db/initializeCanonicalWorld.ts` - Added a production-safe canonical-world bootstrap that provisions and activates only the approved target
+* `apps/server/src/db/initializeCanonicalWorld.test.ts` - Covered missing, inactive, active, and invalid pointer states
 * `.copilot-tracking/research/2026-07-29/canonical-infinite-canvas-convergence-research.md`
 * `.copilot-tracking/research/subagents/2026-07-29/infinite-canvas-convergence-research.md`
 * `.copilot-tracking/plans/2026-07-29/canonical-infinite-canvas-convergence-plan.instructions.md`
@@ -38,6 +40,12 @@ live-boundary, Playwright-isolation, release-reporting, and ADR findings.
 
 ### Modified
 
+* `.github/workflows/cd.yml` - Added a separate, serial canonical-initialization Container Apps job after migrations and before application deployment
+* `apps/server/package.json` - Exposed the compiled canonical-world initialization command
+* `package.json` - Exposed the root canonical-world initialization command
+* `scripts/bootstrap-cd-environment.sh` - Required and published the dedicated initialization-job environment variable
+* `scripts/gh-vars.env.template` - Documented the initialization-job environment variable
+* `scripts/gh-vars.env` - Configured the staging initialization job name
 * `.github/workflows/cd.yml` - Deployed immutable retirement evidence and removed final canonical canary controls
 * `apps/client/Dockerfile` - Removed retired canonical-entry runtime configuration
 * `apps/client/public/auth-config.template.json` - Removed the retired canonical-entry setting
@@ -213,11 +221,16 @@ live-boundary, Playwright-isolation, release-reporting, and ADR findings.
 
 ## Release Summary
 
-All eight implementation phases are complete. Phase 8 closes IV-004, IV-007, IV-010,
+All nine implementation phases are complete. Phase 9 adds a dedicated, idempotent ACA job
+that initializes a fresh database's canonical world after migrations and before application
+deployment, without inserting demo data. It uses a separate job identity so it cannot mutate
+the migration job command. Phase 8 closes IV-004, IV-007, IV-010,
 IV-011, IV-012, IV-015, and IV-016 with observed single-use socket cycles, rotating durable
 lineage, retired public session contracts, live authenticated boundary coverage, isolated
 acceptance fixtures, and corrected release artifacts. Validation passed 146 client tests
 with 16 skipped, 221 server tests with one skipped, two consecutive 14-of-14 standard
 Playwright runs, one multi-replica Playwright test, 10 recovery rehearsal tests, nine
 release-contract checks, ADR YAML parsing, lint, production builds, and `git diff --check`.
+Phase 9 validation passed four focused initializer tests, server build, workflow YAML parsing,
+bootstrap shell syntax, ten release-contract checks, editor diagnostics, and `git diff --check`.
 Ports 3001 and 5173 are clear.

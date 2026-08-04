@@ -125,6 +125,7 @@ jobs:
       CLIENT_TARGET_PORT: '80'
       CONFIGURED_CORS_ORIGIN: ${{ vars.SERVER_CORS_ORIGIN }}
       MIGRATION_JOB_NAME: ${{ vars.MIGRATION_JOB_NAME }}
+      CANONICAL_INITIALIZATION_JOB_NAME: ${{ vars.CANONICAL_INITIALIZATION_JOB_NAME }}
       AUTH_AUTHORITY: ${{ vars.AUTH_AUTHORITY }}
       AUTH_CLIENT_ID: ${{ vars.AUTH_CLIENT_ID }}
       AUTH_API_SCOPE: ${{ vars.AUTH_API_SCOPE }}
@@ -171,6 +172,7 @@ jobs:
             SERVER_CONTAINER_APP_NAME
             CLIENT_CONTAINER_APP_NAME
             MIGRATION_JOB_NAME
+            CANONICAL_INITIALIZATION_JOB_NAME
             AUTH_AUTHORITY
             AUTH_CLIENT_ID
             AUTH_API_SCOPE
@@ -379,6 +381,148 @@ jobs:
             done
 
             echo "Migration execution ${execution_name} did not finish within 20 minutes." >&2
+            exit 1
+
+      - name: Initialize Canonical World
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        env:
+          SERVER_DATABASE_URL: ${{ secrets.SERVER_DATABASE_URL }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${SERVER_DATABASE_URL:-}" ]]; then
+              echo 'Missing required GitHub environment secret: SERVER_DATABASE_URL' >&2
+              exit 1
+            fi
+
+            HAS_GHCR_CREDS=false
+            if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
+              HAS_GHCR_CREDS=true
+            fi
+
+            if az containerapp job show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${CANONICAL_INITIALIZATION_JOB_NAME}" >/dev/null 2>&1; then
+              terminal_statuses='Succeeded|Failed|Stopped|Degraded'
+              active_execution="$(az containerapp job execution list \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+                --query "[?!contains('${terminal_statuses}', properties.status)].name | [0]" \
+                --output tsv)"
+
+              if [[ -n "${active_execution}" ]]; then
+                echo "Canonical initialization job ${CANONICAL_INITIALIZATION_JOB_NAME} already has active execution ${active_execution}; refusing to mutate or start it." >&2
+                exit 1
+              fi
+
+              initialization_job_id="$(az containerapp job show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+                --query id \
+                --output tsv)"
+              az resource update \
+                --ids "${initialization_job_id}" \
+                --set \
+                  properties.configuration.triggerType=Manual \
+                  properties.configuration.replicaTimeout=1800 \
+                  properties.configuration.replicaRetryLimit=2 \
+                  properties.configuration.manualTriggerConfig.parallelism=1 \
+                  properties.configuration.manualTriggerConfig.replicaCompletionCount=1
+
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                az containerapp job registry set \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+                  --server "ghcr.io" \
+                  --username "${{ secrets.AZURE_GHCR_USERNAME }}" \
+                  --password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+              fi
+
+              az containerapp job update \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+                --replica-timeout 1800 \
+                --replica-retry-limit 2 \
+                --parallelism 1 \
+                --replica-completion-count 1 \
+                --image "${SERVER_IMAGE}" \
+                --set-env-vars "NODE_ENV=production" "DATABASE_URL=${SERVER_DATABASE_URL}" \
+                --command node \
+                --args dist/db/initializeCanonicalWorld.js
+            else
+              CREATE_REGISTRY_ARGS=()
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                CREATE_REGISTRY_ARGS=(
+                  --registry-server "ghcr.io"
+                  --registry-username "${{ secrets.AZURE_GHCR_USERNAME }}"
+                  --registry-password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+                )
+              fi
+
+              az containerapp job create \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+                --environment "${CONTAINERAPPS_ENVIRONMENT}" \
+                --trigger-type Manual \
+                --replica-timeout 1800 \
+                --replica-retry-limit 2 \
+                --parallelism 1 \
+                --replica-completion-count 1 \
+                --image "${SERVER_IMAGE}" \
+                --env-vars "NODE_ENV=production" "DATABASE_URL=${SERVER_DATABASE_URL}" \
+                --command node \
+                --args dist/db/initializeCanonicalWorld.js \
+                ${CREATE_REGISTRY_ARGS[@]}
+            fi
+
+            job_settings="$(az containerapp job show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+              --query "[properties.configuration.triggerType, properties.configuration.manualTriggerConfig.parallelism, properties.configuration.manualTriggerConfig.replicaCompletionCount, properties.configuration.replicaTimeout, properties.configuration.replicaRetryLimit]" \
+              --output tsv)"
+            normalized_job_settings="$(printf '%s' "${job_settings}" | tr '\n\t\r' '   ' | tr -s ' ' | sed -e 's/^ //' -e 's/ $//')"
+            expected_settings='Manual 1 1 1800 2'
+
+            if [[ "${normalized_job_settings}" != "${expected_settings}" ]]; then
+              echo "Canonical initialization job settings are unsafe: ${normalized_job_settings}" >&2
+              exit 1
+            fi
+
+            execution_name="$(az containerapp job start \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+              --query name \
+              --output tsv)"
+
+            if [[ -z "${execution_name}" ]]; then
+              echo 'Canonical initialization job did not return an execution name.' >&2
+              exit 1
+            fi
+
+            for attempt in {1..120}; do
+              execution_status="$(az containerapp job execution show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${CANONICAL_INITIALIZATION_JOB_NAME}" \
+                --job-execution-name "${execution_name}" \
+                --query properties.status \
+                --output tsv)"
+
+              case "${execution_status}" in
+                Succeeded)
+                  echo "Canonical initialization execution ${execution_name} succeeded."
+                  exit 0
+                  ;;
+                Failed|Stopped|Degraded)
+                  echo "Canonical initialization execution ${execution_name} ended with ${execution_status}." >&2
+                  exit 1
+                  ;;
+              esac
+
+              sleep 10
+            done
+
+            echo "Canonical initialization execution ${execution_name} did not finish within 20 minutes." >&2
             exit 1
 
       - name: Deploy Server Container App

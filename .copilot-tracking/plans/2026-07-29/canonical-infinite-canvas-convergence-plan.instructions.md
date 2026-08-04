@@ -157,6 +157,17 @@ Steps 3.1 and 3.2 execute sequentially because both integrate through `App.tsx` 
 * [x] Step 8.4: Rerun complete release validation
   * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 8, Step 8.4)
 
+### [x] Implementation Phase 9: Initialize the Canonical World on Deployment
+
+<!-- parallelizable: false -->
+
+* [x] Step 9.1: Add a production-safe, idempotent canonical-world initializer
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 9, Step 9.1)
+* [x] Step 9.2: Run the initializer in a dedicated Container Apps job after migrations
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 9, Step 9.2)
+* [x] Step 9.3: Verify the active canonical pointer and deployment workflow syntax
+  * Details: `.copilot-tracking/details/2026-07-29/canonical-infinite-canvas-convergence-details.md` (Implementation Phase 9, Step 9.3)
+
 ## Planning Log
 
 See `.copilot-tracking/plans/logs/2026-07-29/canonical-infinite-canvas-convergence-log.md`
