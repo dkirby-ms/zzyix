@@ -794,6 +794,7 @@ export const httpServer = createServer(app)
 const isTestControlEnabled = process.env.NODE_ENV === 'test' && parseBooleanFlag(process.env.E2E_TEST_MODE, false)
 const testControlToken = (process.env.E2E_RESET_TOKEN ?? TEST_CONTROL_DEFAULT_TOKEN).trim()
 const HTTP_RATE_LIMIT_WINDOW_MS = Number(process.env.HTTP_RATE_LIMIT_WINDOW_MS ?? 60_000)
+const HTTP_HEALTH_RATE_LIMIT_MAX = Number(process.env.HTTP_HEALTH_RATE_LIMIT_MAX ?? 60)
 const HTTP_AUTH_READ_RATE_LIMIT_MAX = Number(process.env.HTTP_AUTH_READ_RATE_LIMIT_MAX ?? 240)
 const HTTP_AUTH_MUTATION_RATE_LIMIT_MAX = Number(process.env.HTTP_AUTH_MUTATION_RATE_LIMIT_MAX ?? 120)
 const HTTP_TEST_CONTROL_RATE_LIMIT_MAX = Number(process.env.HTTP_TEST_CONTROL_RATE_LIMIT_MAX ?? 180)
@@ -815,6 +816,10 @@ const authenticatedReadRateLimiter = createHttpRateLimiter(
 const authenticatedMutationRateLimiter = createHttpRateLimiter(
   HTTP_AUTH_MUTATION_RATE_LIMIT_MAX,
   'Too many authenticated mutation requests, please try again later.',
+)
+const healthRateLimiter = createHttpRateLimiter(
+  HTTP_HEALTH_RATE_LIMIT_MAX,
+  'Too many health check requests, please try again later.',
 )
 const testControlRateLimiter = createHttpRateLimiter(
   HTTP_TEST_CONTROL_RATE_LIMIT_MAX,
@@ -926,7 +931,7 @@ app.use((req, res, next) => {
 })
 
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
-app.get('/health', async (_req, res) => {
+app.get('/health', healthRateLimiter, async (_req, res) => {
   let dbStatus: 'ok' | 'error' = 'error'
   try {
     // Use a lightweight query to verify the pooled DB connection is ready.
