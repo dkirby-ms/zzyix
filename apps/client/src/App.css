@@ -63,10 +63,7 @@
   padding: 1rem;
   color: var(--ink);
   font-family: var(--font-body, 'Manrope', sans-serif);
-  background:
-    radial-gradient(900px 360px at 15% 18%, rgba(245, 206, 160, 0.44), transparent 60%),
-    radial-gradient(720px 320px at 88% 20%, rgba(148, 182, 193, 0.34), transparent 58%),
-    var(--color-surface-primary);
+  background: var(--color-surface-primary);
 }
 
 .app-error-panel {
@@ -94,7 +91,7 @@
 }
 
 .app-error-panel p {
-  margin: 0.65rem 0 1rem;
+  margin: 1rem 0;
   max-width: 62ch;
 }
 
@@ -1915,6 +1912,7 @@ button.active,
   --atlas-shadow-strong: 0 18px 40px rgba(39, 25, 16, 0.12);
   --atlas-shadow-soft: 0 8px 18px rgba(16, 47, 61, 0.12);
   --atlas-ink-muted: color-mix(in srgb, var(--ink) 74%, white);
+  --atlas-map-line: rgba(61, 48, 37, 0.08);
 }
 
 .auth-shell,
@@ -1922,6 +1920,20 @@ button.active,
 .app-error-page {
   position: relative;
   isolation: isolate;
+  background-color: var(--warm);
+  background-image:
+    linear-gradient(var(--atlas-map-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--atlas-map-line) 1px, transparent 1px);
+  background-size: 4rem 4rem;
+}
+
+.backdrop-gradient {
+  background-color: var(--color-surface-secondary, #e5d6b9);
+  background-image:
+    linear-gradient(rgba(61, 48, 37, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(61, 48, 37, 0.06) 1px, transparent 1px),
+    linear-gradient(135deg, rgba(25, 60, 104, 0.08), transparent 42%, rgba(184, 78, 54, 0.05));
+  background-size: 4rem 4rem, 4rem 4rem, 100% 100%;
 }
 
 .auth-shell::before,
@@ -1932,9 +1944,7 @@ button.active,
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(720px 280px at 12% 14%, rgba(245, 206, 160, 0.24), transparent 65%),
-    radial-gradient(640px 220px at 88% 16%, rgba(148, 182, 193, 0.2), transparent 62%);
+  background: linear-gradient(135deg, rgba(25, 60, 104, 0.04), transparent 42%, rgba(184, 78, 54, 0.04));
 }
 
 .auth-panel,
@@ -1979,7 +1989,8 @@ button.active,
 
 button {
   border-color: rgba(61, 48, 37, 0.24);
-  background: linear-gradient(145deg, rgba(255, 250, 241, 0.96), rgba(244, 236, 224, 0.9));
+  border-radius: 4px;
+  background: var(--atlas-surface-soft);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 3px 8px rgba(39, 25, 16, 0.08);
 }
 
@@ -1998,6 +2009,56 @@ button.active,
   box-shadow: 0 6px 14px rgba(25, 60, 104, 0.18);
 }
 
+.account-control,
+.account-signout,
+.collaborator-summary,
+.collaborator-chip,
+.lobby-chip,
+.palette-control-chip,
+.grid-overlay-toggle-state {
+  border-radius: 4px;
+}
+
+.palette-region .ui-toggle-group-item[data-state='on'],
+.shape-grid .ui-toggle-group-item[data-state='on'] {
+  color: var(--ink);
+  background: var(--atlas-ochre);
+  border-color: rgba(61, 48, 37, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 244, 208, 0.56), 0 3px 8px rgba(212, 151, 42, 0.2);
+}
+
+.grid-pattern-options .ui-toggle-group-item[data-state='on'] {
+  color: var(--warm);
+  background: var(--atlas-lapis);
+  border-color: var(--ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.grid-overlay-toggle[aria-pressed='true'] {
+  color: var(--warm);
+  background: var(--atlas-lapis);
+  border-color: var(--ink);
+}
+
+.minimap-track {
+  border-radius: 4px;
+  background-color: var(--color-surface-secondary, #e5d6b9);
+  background-image:
+    linear-gradient(rgba(61, 48, 37, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(61, 48, 37, 0.08) 1px, transparent 1px);
+  background-size: 1.2rem 1.2rem;
+}
+
+.minimap-occupancy {
+  fill: var(--atlas-lapis);
+}
+
+.minimap-viewport {
+  border-color: var(--atlas-terracotta);
+  background: rgba(184, 78, 54, 0.16);
+  box-shadow: 0 0 0 1px rgba(255, 250, 241, 0.92) inset;
+}
+
 .lobby-create-config,
 .lobby-claim,
 .lobby-preset,
@@ -2006,16 +2067,18 @@ button.active,
 }
 
 .lobby-create-config {
-  background: linear-gradient(135deg, rgba(255, 250, 241, 0.96), rgba(245, 235, 220, 0.9));
+  background: var(--atlas-surface-soft);
 }
 
 .lobby-claim {
-  background: linear-gradient(135deg, rgba(240, 248, 243, 0.96), rgba(229, 243, 233, 0.9));
+  border-color: rgba(25, 60, 104, 0.28);
+  background: color-mix(in srgb, var(--atlas-lapis) 8%, var(--warm));
 }
 
 .lobby-preset,
 .lobby-row {
-  background: linear-gradient(135deg, rgba(255, 250, 241, 0.96), rgba(247, 241, 232, 0.9));
+  border-radius: 8px;
+  background: var(--atlas-surface-soft);
 }
 
 .lobby-preset:hover,
