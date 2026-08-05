@@ -77,7 +77,7 @@ test('assigns a stable patch on first sign-in and places without claim controls'
   await page.getByRole('button', { name: 'Sign out' }).click()
 
   await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Mosaic Atelier' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'zzyix' })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page.locator('.status-indicator.status-connected').first()).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(assignedPatchLabel!)).toBeVisible()

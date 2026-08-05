@@ -112,8 +112,10 @@ describe('TilePalette', () => {
       />,
     )
 
-    expect(screen.getByRole('region', { name: 'Active selection summary' })).toBeInTheDocument()
-    expect(screen.getByText('triangle · glass · Lagoon · #489ac0')).toBeInTheDocument()
+    const activeSelection = screen.getByRole('region', { name: 'Active selection summary' })
+    expect(activeSelection).toBeInTheDocument()
+    expect(within(activeSelection).getByText('Triangle · glass · Lagoon')).toBeInTheDocument()
+    expect(within(activeSelection).getByText('#489ac0')).toBeInTheDocument()
   })
 
   it('exposes selected state semantics on radio controls and swatches', () => {

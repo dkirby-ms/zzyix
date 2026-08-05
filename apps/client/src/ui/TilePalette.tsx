@@ -127,11 +127,25 @@ export const TilePalette = ({
   return (
     <aside className="palette-region" aria-label="Tile palette controls">
       <div className="palette-header-row">
-        <h2>Tile Palette</h2>
+        <div>
+          <h2>Tile palette</h2>
+        </div>
         <button type="button" onClick={onTogglePaletteOpen} aria-expanded={paletteOpen} aria-controls="tile-palette-body">
           {paletteOpen ? 'Collapse' : 'Expand'}
         </button>
       </div>
+      <section className="palette-current-selection" aria-label="Active selection summary">
+        <span
+          className="palette-current-selection-swatch"
+          style={{ backgroundColor: activeTile.color }}
+          aria-hidden="true"
+        />
+        <div>
+          <span className="palette-current-selection-label">Active tessera</span>
+          <p>{shapeLabels[activeTile.shape]} · {activeTile.material} · {paletteLabels[paletteName]}</p>
+        </div>
+        <code>{activeTile.color}</code>
+      </section>
       <div id="tile-palette-body" hidden={!paletteOpen}>
         <section>
           <h2>Shape</h2>
@@ -289,12 +303,6 @@ export const TilePalette = ({
           </details>
         </section>
 
-        <section className="tile-palette-summary" aria-label="Active selection summary">
-          <h2>Active</h2>
-          <p>
-            {activeTile.shape} · {activeTile.material} · {paletteLabels[paletteName]} · {activeTile.color}
-          </p>
-        </section>
       </div>
       <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
         {paletteFallbackAnnouncement}

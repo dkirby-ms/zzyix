@@ -1,4 +1,5 @@
 import type { ConnectionState } from '../network/useConnectionStatus'
+import { ArrowLeft, LogOut, Users } from 'lucide-react'
 import { StatusIndicator } from './StatusIndicator'
 
 type AppHeaderProps = {
@@ -20,13 +21,19 @@ export const AppHeader = ({
     <header className="app-header">
       {onReturnToLobby && (
         <button type="button" className="return-btn" onClick={onReturnToLobby}>
-          ← Back
+          <ArrowLeft aria-hidden="true" />
+          <span>Back to mosaics</span>
         </button>
       )}
-      <span className="app-header-title">Mosaic Atelier</span>
+      <div className="app-brand">
+        <span className="app-brand-mark" aria-hidden="true">Z</span>
+        <span className="app-header-title">zzyix</span>
+        <span className="app-brand-subtitle">Shared mosaic atlas</span>
+      </div>
       <div className="app-header-meta">
         {collaboratorCount > 0 && (
-          <span className="collaborator-summary">
+          <span className="collaborator-summary" title={`${collaboratorCount} collaborators active`}>
+            <Users aria-hidden="true" />
             {collaboratorCount} active
           </span>
         )}
@@ -40,11 +47,7 @@ export const AppHeader = ({
             title="Sign out"
             onClick={onLogout}
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M10 4H5v16h5" />
-              <path d="M14 8l5 4-5 4" />
-              <path d="M9 12h10" />
-            </svg>
+            <LogOut aria-hidden="true" />
           </button>
         </div>
       </div>
