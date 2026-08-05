@@ -70,7 +70,7 @@ Examples:
   AUTH_API_SCOPE=api://00000000-0000-0000-0000-000000000002/access_as_user
   AUTH_API_ORIGIN=https://app.example.com
   AUTH_REDIRECT_URI=https://app.example.com
-  AUTH_POST_LOGOUT_REDIRECT_URI=https://app.example.com
+  AUTH_POST_LOGOUT_REDIRECT_URI=https://app.example.com/logout
   AUTH_TRUSTED_ISSUER=https://example.ciamlogin.com/00000000-0000-0000-0000-000000000003/v2.0
   AUTH_API_AUDIENCE=00000000-0000-0000-0000-000000000002
   AUTH_REQUIRED_SCOPE=access_as_user

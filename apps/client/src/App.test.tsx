@@ -333,6 +333,16 @@ describe('App canonical canvas behavior', () => {
     expect(clearCanonicalPatchLinkMock).toHaveBeenCalledOnce()
   })
 
+  it('does not sign out the authenticated app at the login route', async () => {
+    window.history.pushState({}, '', '/')
+
+    render(<App />)
+
+    expect(screen.queryByRole('heading', { name: 'Signing out' })).not.toBeInTheDocument()
+    expect(authSessionState.logout).not.toHaveBeenCalled()
+    expect(await screen.findByText('Loading the canonical canvas...')).toBeInTheDocument()
+  })
+
   it('shows a signed-out confirmation after Entra returns to the logout route', () => {
     window.history.pushState({}, '', '/logout')
     authSessionState.status = 'signed_out'
