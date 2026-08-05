@@ -1374,7 +1374,7 @@ function ProtectedApp() {
             <section className="canonical-navigation" aria-label="Canonical patch navigation">
               <div className="canonical-navigation-heading">
                 <div>
-                  <h2>Canonical Quilt</h2>
+                  <h2>World Mosaic</h2>
                   <p>
                     {focusedCanonicalPatch
                       ? `Patch ${focusedCanonicalPatch.row}, ${focusedCanonicalPatch.column}`
@@ -1582,8 +1582,8 @@ function App() {
     return (
       <main className="auth-shell">
         <section className="auth-panel">
-          <h1>Mosaic Atelier</h1>
-          <p>{auth.error ?? 'Sign in to view your canvases.'}</p>
+          <h1>zzyix</h1>
+          <p>{auth.error ?? 'Sign in to enter the shared mosaic atlas.'}</p>
           {auth.testIdentity && (
             <div className="test-identity-control">
               <label htmlFor="test-identity">Local test user</label>

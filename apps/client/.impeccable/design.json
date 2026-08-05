@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-04T00:00:00Z",
+  "title": "Design System: Zzyix Pattern Workshop",
+  "extensions": {
+    "colorMeta": {
+      "blueprint-ink": {
+        "role": "primary",
+        "displayName": "Blueprint Ink",
+        "canonical": "#102f3d",
+        "tonalRamp": ["#081820", "#0d2732", "#102f3d", "#1e4552", "#41646e", "#718f96", "#afc4c7", "#edf3f1"]
+      },
+      "workshop-blue": {
+        "role": "secondary",
+        "displayName": "Workshop Blue",
+        "canonical": "#14627a",
+        "tonalRamp": ["#082f3b", "#0d4b5d", "#14627a", "#367c90", "#639eab", "#96bec5", "#c5dde0", "#eff7f6"]
+      },
+      "canvas-paper": {
+        "role": "neutral",
+        "displayName": "Canvas Paper",
+        "canonical": "#f5f0e4",
+        "tonalRamp": ["#3f3b35", "#625d54", "#898276", "#b3ac9e", "#d1c9b9", "#e1dacb", "#f5f0e4", "#fffdf7"]
+      },
+      "paper-deep": {
+        "role": "neutral",
+        "displayName": "Paper Deep",
+        "canonical": "#e9dfca",
+        "tonalRamp": ["#3d3931", "#60594c", "#867d69", "#aea58e", "#cbc1a9", "#ddd3bd", "#e9dfca", "#fffdf4"]
+      },
+      "copper-pin": {
+        "role": "tertiary",
+        "displayName": "Copper Pin",
+        "canonical": "#bf5c39",
+        "tonalRamp": ["#4b1f16", "#742f20", "#9c472d", "#bf5c39", "#d77d5a", "#e9a283", "#f4c9b3", "#fceee7"]
+      },
+      "measuring-yellow": {
+        "role": "tertiary",
+        "displayName": "Measuring Yellow",
+        "canonical": "#f0c453",
+        "tonalRamp": ["#4b3907", "#765c10", "#a88820", "#d6ad3b", "#f0c453", "#f5d87d", "#fae9ae", "#fff9e7"]
+      },
+      "workshop-line": {
+        "role": "neutral",
+        "displayName": "Workshop Line",
+        "canonical": "rgba(16, 47, 61, 0.19)",
+        "tonalRamp": ["rgba(16, 47, 61, 0.82)", "rgba(16, 47, 61, 0.65)", "rgba(16, 47, 61, 0.48)", "rgba(16, 47, 61, 0.34)", "rgba(16, 47, 61, 0.19)", "rgba(16, 47, 61, 0.14)", "rgba(16, 47, 61, 0.1)", "rgba(16, 47, 61, 0.04)"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Workshop Display", "purpose": "Studio wordmark and prominent panel titles." },
+      "body": { "displayName": "Workshop Body", "purpose": "Controls, readouts, and collaboration context." },
+      "label": { "displayName": "Drafting Label", "purpose": "Uppercase category, status, and instrumentation labels." }
+    },
+    "shadows": [
+      { "name": "overlay-lift", "value": "0 8px 18px rgba(16, 47, 61, 0.12)", "purpose": "Canvas-edge overlays." },
+      { "name": "control-lift", "value": "0 2px 5px rgba(16, 47, 61, 0.08)", "purpose": "Default discrete instruments." },
+      { "name": "active-control-lift", "value": "0 3px 8px rgba(16, 47, 61, 0.2)", "purpose": "Selected active actions." }
+    ],
+    "motion": [
+      { "name": "standard", "value": "200ms cubic-bezier(0.4, 0, 0.2, 1)", "purpose": "Default button and tool state transition." },
+      { "name": "instrument-press", "value": "hover translate(-1px, -1px); active translate(1px, 1px)", "purpose": "Physical response for enabled controls." }
+    ],
+    "breakpoints": [
+      { "name": "rail-stack", "value": "960px" },
+      { "name": "compact-header", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Workshop Action",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Default measured action control for the workshop.",
+      "html": "<button class=\"ds-workshop-action\" type=\"button\">PLACE TILE</button>",
+      "css": ".ds-workshop-action { min-height: 44px; padding: 0.5rem 0.82rem; border: 1px solid rgba(16,47,61,.19); border-radius: 3px; background: #f5f0e4; color: #102f3d; box-shadow: 0 2px 5px rgba(16,47,61,.08); font: 650 .86rem Sora, sans-serif; cursor: pointer; transition: transform 200ms cubic-bezier(.4,0,.2,1), border-color 200ms cubic-bezier(.4,0,.2,1), box-shadow 200ms cubic-bezier(.4,0,.2,1); } .ds-workshop-action:hover { transform: translate(-1px,-1px); border-color: #14627a; box-shadow: 0 4px 10px rgba(20,98,122,.18); } .ds-workshop-action:focus-visible { outline: 2px solid #14627a; outline-offset: 3px; } .ds-workshop-action:active { transform: translate(1px,1px); box-shadow: none; }"
+    },
+    {
+      "name": "Active Workshop Action",
+      "kind": "button",
+      "refersTo": "button-active",
+      "description": "Active command state for grid and workflow tools.",
+      "html": "<button class=\"ds-workshop-action ds-workshop-action--active\" type=\"button\">GRID ON</button>",
+      "css": ".ds-workshop-action { min-height: 44px; padding: 0.5rem 0.82rem; border: 1px solid rgba(16,47,61,.19); border-radius: 3px; font: 650 .86rem Sora, sans-serif; cursor: pointer; } .ds-workshop-action--active { background: #14627a; color: #f5f0e4; border-color: #102f3d; box-shadow: 0 3px 8px rgba(16,47,61,.2); } .ds-workshop-action:focus-visible { outline: 2px solid #f0c453; outline-offset: 3px; } .ds-workshop-action:active { transform: translate(1px,1px); box-shadow: none; }"
+    },
+    {
+      "name": "Shape Tool",
+      "kind": "custom",
+      "refersTo": "palette-selection",
+      "description": "Square tile-shape selection card in the material rail.",
+      "html": "<button class=\"ds-shape-tool\" type=\"button\"><span class=\"ds-shape-tool__square\"></span><span>Square</span></button>",
+      "css": ".ds-shape-tool { display: grid; place-items: center; gap: .4rem; min-height: 64px; width: 100%; padding: .32rem; border: 1px solid #102f3d; border-radius: 3px; background: #f0c453; color: #102f3d; box-shadow: 0 3px 8px rgba(191,92,57,.22); font: 500 .64rem Sora, sans-serif; cursor: pointer; } .ds-shape-tool__square { width: 1.8rem; height: 1.8rem; border: 2px solid currentColor; } .ds-shape-tool:hover { transform: translate(-1px,-1px); } .ds-shape-tool:focus-visible { outline: 2px solid #14627a; outline-offset: 3px; } .ds-shape-tool:active { transform: translate(1px,1px); box-shadow: none; }"
+    },
+    {
+      "name": "Material Rail",
+      "kind": "card",
+      "refersTo": "material-rail",
+      "description": "Blueprint-paper rail for material and tile controls.",
+      "html": "<section class=\"ds-material-rail\"><header class=\"ds-material-rail__head\"><strong>Tile palette</strong><button type=\"button\">Collapse</button></header><p>SHAPE</p></section>",
+      "css": ".ds-material-rail { padding: 1.15rem; color: #102f3d; background: linear-gradient(rgba(16,47,61,.035) 1px,transparent 1px), linear-gradient(90deg,rgba(16,47,61,.035) 1px,transparent 1px), #f5f0e4; background-size: 24px 24px; font-family: Sora,sans-serif; } .ds-material-rail__head { display: flex; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; padding-bottom: .8rem; border-bottom: 2px solid #102f3d; } .ds-material-rail strong { font: 700 1.28rem 'Bodoni Moda',serif; } .ds-material-rail p { color: #14627a; font-size: .68rem; font-weight: 700; letter-spacing: .09em; } .ds-material-rail button { border: 1px solid rgba(16,47,61,.19); border-radius: 3px; background: #f5f0e4; color: #102f3d; font: 650 .76rem Sora,sans-serif; } .ds-material-rail button:focus-visible { outline: 2px solid #14627a; outline-offset: 3px; }"
+    },
+    {
+      "name": "Minimap Overlay",
+      "kind": "custom",
+      "refersTo": "material-rail",
+      "description": "Compact canvas-edge world overview with a copper viewport frame.",
+      "html": "<aside class=\"ds-minimap\"><header>MINIMAP</header><div class=\"ds-minimap__track\"><span class=\"ds-minimap__viewport\"></span></div></aside>",
+      "css": ".ds-minimap { width: min(15rem,100%); padding: .55rem; border: 1px solid rgba(16,47,61,.19); border-radius: 3px; background: rgba(250,247,238,.95); box-shadow: 0 8px 18px rgba(16,47,61,.12); color: #14627a; font: 700 .82rem Sora,sans-serif; letter-spacing: .08em; } .ds-minimap__track { position: relative; aspect-ratio: 1; margin-top: .35rem; border: 1px solid rgba(16,47,61,.19); border-radius: 2px; background: linear-gradient(rgba(16,47,61,.07) 1px,transparent 1px), linear-gradient(90deg,rgba(16,47,61,.07) 1px,transparent 1px), #e9dfca; background-size: 10px 10px; } .ds-minimap__viewport { position: absolute; left: 28%; top: 22%; width: 42%; height: 36%; border: 2px solid #bf5c39; background: rgba(191,92,57,.16); box-shadow: 0 0 0 1px #f5f0e4 inset; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Working Pattern Table",
+    "overview": "Zzyix presents collaborative quilt editing as a craft workspace rather than a dashboard. Blueprint ink, ruled paper, copper markers, and exact rectangular instruments keep attention on the shared canvas while making material choices and spatial context readable at a glance. The canvas occupies the primary workspace. A compact material rail supplies tile controls, while status, collaboration, grid, and navigation tools stay at the canvas edges as contained overlays. The Pattern Workshop rules govern the authenticated quilt editor; older authentication and account-shell affordances are not reusable workshop primitives.",
+    "keyCharacteristics": ["Blueprint-and-paper material language", "Canvas-first layout with a fixed desktop material rail", "Square, measured controls with small press movement", "Narrow uppercase Sora labels paired with Bodoni Moda display text", "Contained edge overlays that preserve the visible canvas"],
+    "rules": [
+      { "name": "The Blueprint Ground Rule", "body": "Paper backgrounds carry a 24px blueprint grid; the grid supports orientation and never competes with tiles or text.", "section": "colors" },
+      { "name": "The Marking Rule", "body": "Copper and yellow identify a located, selected, or authored state. They are not general-purpose surface colors.", "section": "colors" },
+      { "name": "The Drafting Label Rule", "body": "Uppercase tracking belongs to compact Sora labels and status information; it does not replace the Bodoni display hierarchy.", "section": "typography" },
+      { "name": "The Canvas Dominance Rule", "body": "Workspace chrome may frame the canvas, but may not convert it into a padded card or consume its central field.", "section": "elevation" },
+      { "name": "The Instrument Rule", "body": "Elevation implies a movable instrument or an overlay, not generic card decoration.", "section": "elevation" }
+    ],
+    "dos": ["Do keep the shared canvas as the largest uninterrupted surface", "Do use paper grids to express the working-table material language", "Do reserve blue for active workflow state and structured context", "Do use copper and yellow for precise selection, location, and identity signals", "Do keep mobile overlays intrinsically sized and edge-contained"],
+    "donts": ["Don't round Pattern Workshop tools into pill-shaped controls", "Don't place generic dashboard cards around the canvas", "Don't use the blueprint grid as a competing decorative pattern", "Don't let an overlay expand to the canvas height on narrow screens", "Don't reuse legacy pill-shaped shell controls in editor workflows"]
+  }
+}

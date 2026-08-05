@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { Maximize2, Minimize2, Minus, Plus } from 'lucide-react'
 import type { TileShape } from '../domain/tileGeometry'
 
 export type MinimapViewport = {
@@ -321,7 +322,7 @@ export const MinimapOverlay = ({
             aria-label={minimized ? 'Expand minimap' : 'Minimize minimap'}
             aria-expanded={!minimized}
           >
-            {minimized ? '▢' : '−'}
+            {minimized ? <Maximize2 aria-hidden="true" /> : <Minimize2 aria-hidden="true" />}
           </button>
         </div>
       </div>
@@ -334,8 +335,8 @@ export const MinimapOverlay = ({
           onPointerDown={handleTrackPointerDown}
         >
           <div className="minimap-corner-controls" role="group" aria-label="Minimap zoom controls">
-            <button type="button" onClick={handleZoomOut} disabled={zoomOutDisabled} aria-label="Zoom out">−</button>
-            <button type="button" onClick={handleZoomIn} disabled={zoomInDisabled} aria-label="Zoom in">+</button>
+            <button type="button" onClick={handleZoomOut} disabled={zoomOutDisabled} aria-label="Zoom out"><Minus aria-hidden="true" /></button>
+            <button type="button" onClick={handleZoomIn} disabled={zoomInDisabled} aria-label="Zoom in"><Plus aria-hidden="true" /></button>
           </div>
           <svg className="minimap-quilt-render" viewBox="0 0 100 100" aria-label="Whole quilt preview" preserveAspectRatio="none">
             {occupancyCells.map((cell) => (

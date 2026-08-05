@@ -2,8 +2,8 @@
   /* Semantic color tokens */
   --color-text-primary: var(--color-brown-900);
   --color-surface-primary: var(--color-cream-100);
-  --color-surface-panel: rgba(247, 240, 227, 0.78);
-  --color-border-subtle: rgba(75, 56, 42, 0.18);
+  --color-surface-panel: rgba(248, 242, 226, 0.9);
+  --color-border-subtle: rgba(61, 48, 37, 0.22);
   --color-accent-primary: var(--color-amber-500);
   --color-feedback-error: var(--color-red-600);
   --color-feedback-success: var(--color-green-500);
@@ -35,9 +35,9 @@
 
   /* Semantic spacing/radius/elevation */
   --space-control-gap: var(--space-2);
-  --radius-component: var(--radius-5);
-  --radius-control: var(--radius-3);
-  --radius-action: var(--radius-pill);
+  --radius-component: var(--radius-2);
+  --radius-control: var(--radius-1);
+  --radius-action: var(--radius-2);
   --shadow-panel: var(--elevation-3);
 
   /* Semantic typography */

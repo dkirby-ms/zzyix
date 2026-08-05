@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Sora:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Marcellus&display=swap');
 
 :root {
   --ink: var(--color-text-primary);
@@ -19,7 +19,7 @@
   place-items: center;
   padding: 1rem;
   color: var(--ink);
-  font-family: var(--font-body, 'Sora', sans-serif);
+  font-family: var(--font-body, 'Manrope', sans-serif);
   background: var(--color-surface-primary);
 }
 
@@ -34,7 +34,7 @@
 
 .auth-panel h1 {
   margin: 0;
-  font-family: var(--font-display, 'Fraunces', serif);
+  font-family: var(--font-display, 'Marcellus', serif);
 }
 
 .auth-panel p {
@@ -47,7 +47,7 @@
   place-items: center;
   padding: 1rem;
   color: var(--ink);
-  font-family: var(--font-body, 'Sora', sans-serif);
+  font-family: var(--font-body, 'Manrope', sans-serif);
   background:
     radial-gradient(900px 360px at 15% 18%, rgba(245, 206, 160, 0.44), transparent 60%),
     radial-gradient(720px 320px at 88% 20%, rgba(148, 182, 193, 0.34), transparent 58%),
@@ -74,7 +74,7 @@
 
 .app-error-panel h1 {
   margin: 0;
-  font-family: var(--font-display, 'Fraunces', serif);
+  font-family: var(--font-display, 'Marcellus', serif);
   font-size: clamp(1.75rem, 4vw, 2.5rem);
 }
 
@@ -189,7 +189,7 @@
 .lobby-header h1 {
   margin: 0;
   font-size: 1.55rem;
-  font-family: var(--font-display, 'Fraunces', serif);
+  font-family: var(--font-display, 'Bodoni Moda', serif);
 }
 
 .lobby-header p {
@@ -354,7 +354,7 @@
 }
 
 .app-header-title {
-  font-family: var(--font-display, 'Fraunces', serif);
+  font-family: var(--font-display, 'Bodoni Moda', serif);
   font-size: 1.1rem;
   margin: 0;
   flex: 1;
@@ -1406,5 +1406,535 @@ button:focus-visible,
 
   .invalid-pulse .status-strip {
     animation: none;
+  }
+}
+
+/* Pattern Workshop redesign */
+:root {
+  --workshop-ink: #28282a;
+  --workshop-blue: #193c68;
+  --workshop-paper: #efe5cd;
+  --workshop-paper-deep: #dfcfad;
+  --workshop-copper: #b84e36;
+  --workshop-yellow: #d4972a;
+  --workshop-line: rgba(61, 48, 37, 0.24);
+  --workshop-soft-line: rgba(61, 48, 37, 0.12);
+  --ink: var(--workshop-ink);
+  --warm: var(--workshop-paper);
+  --panel: rgba(248, 242, 226, 0.94);
+  --panel-border: var(--workshop-line);
+  --radius: 6px;
+}
+
+.app-shell,
+.auth-shell,
+.lobby-shell,
+.app-error-page {
+  color: var(--workshop-ink);
+  font-family: 'Sora', sans-serif;
+  background-color: var(--workshop-paper);
+  background-image:
+    linear-gradient(rgba(16, 47, 61, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 47, 61, 0.035) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.backdrop-gradient {
+  background:
+    linear-gradient(rgba(16, 47, 61, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 47, 61, 0.04) 1px, transparent 1px),
+    radial-gradient(circle at 85% 0%, rgba(240, 196, 83, 0.24), transparent 26%),
+    var(--workshop-paper);
+  background-size: 24px 24px, 24px 24px, auto, auto;
+}
+
+.auth-panel,
+.app-error-panel,
+.lobby-panel,
+.palette-region {
+  border-radius: 4px;
+  border: 1px solid var(--workshop-line);
+  box-shadow: 0 10px 24px rgba(16, 47, 61, 0.1);
+}
+
+.app-header {
+  min-height: 68px;
+  padding: 0.65rem 1rem;
+  gap: 1rem;
+  color: var(--workshop-ink);
+  background: rgba(250, 247, 238, 0.94);
+  border-bottom: 1px solid var(--workshop-line);
+  box-shadow: 0 4px 14px rgba(16, 47, 61, 0.05);
+}
+
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.app-brand-mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--workshop-paper);
+  background: var(--workshop-copper);
+  border: 2px solid var(--workshop-ink);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.26), 0 2px 4px rgba(16, 47, 61, 0.2);
+  font-family: 'Bodoni Moda', serif;
+  font-weight: 700;
+}
+
+.app-header-title {
+  flex: 0 0 auto;
+  font-family: 'Bodoni Moda', serif;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.app-brand-subtitle {
+  margin: 0;
+  color: rgba(16, 47, 61, 0.66);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.app-header-meta {
+  margin-left: auto;
+  gap: 0.65rem;
+}
+
+.collaborator-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.58rem;
+  border: 1px solid var(--workshop-line);
+  border-radius: 3px;
+  background: var(--workshop-paper);
+  color: var(--workshop-blue);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.collaborator-summary svg,
+.return-btn svg,
+.account-signout svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 2.25;
+}
+
+.account-control {
+  border-radius: 3px;
+  border-color: var(--workshop-line);
+  background: var(--workshop-paper);
+  box-shadow: none;
+}
+
+.account-signout {
+  border-radius: 2px;
+  color: var(--workshop-ink);
+}
+
+.return-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  border-radius: 3px;
+  font-size: 0.76rem;
+}
+
+.canvas-workspace {
+  grid-template-columns: minmax(0, 1fr) 312px;
+  gap: 0;
+  padding: 0;
+  background: rgba(16, 47, 61, 0.08);
+}
+
+.canvas-shell {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: #d8d2c2;
+}
+
+.palette-region {
+  border-width: 0 0 0 1px;
+  box-shadow: none;
+  padding: 1.15rem;
+  background:
+    linear-gradient(rgba(16, 47, 61, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 47, 61, 0.035) 1px, transparent 1px),
+    var(--workshop-paper);
+  background-size: 24px 24px;
+}
+
+.palette-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 2px solid var(--workshop-ink);
+}
+
+.palette-region h2 {
+  margin: 0.12rem 0 0;
+  color: var(--workshop-ink);
+  font-family: 'Bodoni Moda', serif;
+  font-size: 1.28rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 1;
+}
+
+.palette-region section h2,
+.palette-region h3 {
+  color: var(--workshop-blue);
+  font-family: 'Sora', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+button {
+  border-radius: 3px;
+  border-color: var(--workshop-line);
+  background: var(--workshop-paper);
+  box-shadow: 0 2px 5px rgba(16, 47, 61, 0.08);
+  font-weight: 650;
+}
+
+button:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  border-color: var(--workshop-blue);
+  box-shadow: 0 4px 10px rgba(20, 98, 122, 0.18);
+}
+
+button:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: none;
+}
+
+button.active,
+.grid-overlay-toggle[aria-pressed='true'] {
+  color: var(--workshop-paper);
+  background: var(--workshop-blue);
+  border-color: var(--workshop-ink);
+  box-shadow: 0 3px 8px rgba(16, 47, 61, 0.2);
+}
+
+.shape-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.shape-grid .ui-toggle-group-item {
+  min-width: 0;
+  min-height: 64px;
+  padding: 0.32rem;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.shape-grid .ui-toggle-group-item[data-state='on'],
+.palette-region .ui-toggle-group-item[data-state='on'] {
+  color: var(--workshop-ink);
+  background: var(--workshop-yellow);
+  border-color: var(--workshop-ink);
+  box-shadow: 0 3px 8px rgba(191, 92, 57, 0.22);
+}
+
+.tile-shape-card-label {
+  font-size: 0.64rem;
+  text-align: center;
+}
+
+.palette-preset-card,
+.tile-palette-summary,
+.palette-custom-input {
+  border-radius: 3px;
+}
+
+.palette-control-chip {
+  border-radius: 2px;
+  border-color: var(--workshop-line);
+  background: var(--workshop-yellow);
+  color: var(--workshop-ink);
+}
+
+.tile-palette-swatch {
+  border-radius: 2px;
+}
+
+.status-strip,
+.collaborator-chip,
+.canonical-navigation,
+.grid-overlay-controls,
+.minimap-overlay {
+  border-radius: 3px;
+  border-color: var(--workshop-line);
+  background: rgba(250, 247, 238, 0.95);
+  box-shadow: 0 8px 18px rgba(16, 47, 61, 0.12);
+}
+
+.status-strip,
+.collaborator-chip,
+.minimap-header h3,
+.grid-overlay-options-label {
+  color: var(--workshop-blue);
+  font-family: 'Sora', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.status-strip {
+  top: 1rem;
+  left: 1rem;
+  right: auto;
+  max-width: min(420px, calc(100% - 2rem));
+  border-left: 1px solid var(--workshop-line);
+}
+
+.collaborator-roster {
+  top: 1rem;
+  right: 1rem;
+}
+
+.collaborator-chip {
+  padding: 0.3rem 0.5rem;
+}
+
+.canonical-navigation {
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid var(--workshop-line);
+}
+
+.grid-overlay-controls {
+  left: 1rem;
+  bottom: 1rem;
+  padding: 0.65rem;
+  border-radius: 3px;
+}
+
+.minimap-overlay {
+  right: 1rem;
+  bottom: 1rem;
+  border-radius: 3px;
+}
+
+.minimap-track {
+  border-radius: 2px;
+  border-color: var(--workshop-line);
+  background:
+    linear-gradient(rgba(16, 47, 61, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 47, 61, 0.07) 1px, transparent 1px),
+    var(--workshop-paper-deep);
+  background-size: 10px 10px;
+}
+
+.minimap-occupancy {
+  fill: var(--workshop-blue);
+}
+
+.minimap-viewport {
+  border-radius: 0;
+  border-color: var(--workshop-copper);
+  background: rgba(191, 92, 57, 0.16);
+  box-shadow: 0 0 0 1px var(--workshop-paper) inset;
+}
+
+.lobby-panel h1,
+.auth-panel h1,
+.app-error-panel h1 {
+  font-family: 'Bodoni Moda', serif;
+  color: var(--workshop-ink);
+}
+
+@media (max-width: 960px) {
+  .canvas-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .palette-region {
+    border-width: 1px 0 0;
+    max-height: 38dvh;
+  }
+
+  .shape-grid {
+    grid-template-columns: repeat(8, minmax(54px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    min-height: 58px;
+    gap: 0.5rem;
+  }
+
+  .app-brand-subtitle,
+  .profile-summary {
+    display: none;
+  }
+
+  .app-header-title {
+    font-size: 1.3rem;
+  }
+
+  .return-btn span {
+    display: none;
+  }
+
+  .shape-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .status-strip,
+  .collaborator-roster {
+    top: 0.75rem;
+  }
+
+  .status-strip {
+    left: 0.75rem;
+  }
+
+  .collaborator-roster {
+    right: 0.75rem;
+  }
+
+  .grid-overlay-controls {
+    left: 0.75rem;
+    bottom: 0.75rem;
+  }
+
+  .minimap-overlay {
+    right: 0.75rem;
+    align-self: start;
+    height: fit-content;
+  }
+}
+
+/* Palette flow: form first, then material family, then individual tessera. */
+.palette-current-selection {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--workshop-soft-line);
+}
+
+.palette-current-selection-swatch {
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 2px solid var(--workshop-ink);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.palette-current-selection-label {
+  display: block;
+  color: var(--workshop-blue);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.palette-current-selection p {
+  margin: 0.16rem 0 0;
+  color: var(--workshop-ink);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.palette-current-selection code {
+  color: rgba(40, 40, 42, 0.72);
+  font-family: 'Manrope', sans-serif;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.palette-region section {
+  margin-bottom: 1.15rem;
+}
+
+.palette-control {
+  gap: 0.5rem;
+}
+
+.palette-control-header {
+  align-items: center;
+}
+
+.palette-preset-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.palette-preset-card {
+  min-height: 3.25rem;
+  padding: 0.32rem;
+  gap: 0.28rem;
+}
+
+.palette-preset-card-label {
+  overflow: hidden;
+  font-size: 0.62rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-preset-card-strip {
+  gap: 0.1rem;
+}
+
+.palette-preset-card-swatch {
+  height: 0.36rem;
+  border-radius: 1px;
+}
+
+.palette-subsection {
+  gap: 0.35rem;
+  padding-top: 0.2rem;
+}
+
+.palette-subsection h3 {
+  margin: 0;
+}
+
+.palette-color-grid {
+  gap: 0.32rem;
+}
+
+.tile-palette-swatch {
+  min-height: 2.75rem;
+  min-width: 0;
+}
+
+.palette-custom-input {
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 640px) {
+  .palette-current-selection {
+    grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  }
+
+  .palette-preset-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }

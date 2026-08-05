@@ -2,15 +2,15 @@
   /* Primitive color scale */
   --color-white: #ffffff;
   --color-black: #000000;
-  --color-cream-100: #f6ecdd;
-  --color-cream-200: #f7f0e3;
-  --color-brown-700: #4b382a;
-  --color-brown-900: #2f251f;
-  --color-amber-500: #ca7a4c;
-  --color-red-600: #8c3434;
-  --color-green-500: #4caf50;
-  --color-yellow-500: #ffc107;
-  --color-gray-500: #9e9e9e;
+  --color-cream-100: #efe5cd;
+  --color-cream-200: #e5d6b9;
+  --color-brown-700: #5d442e;
+  --color-brown-900: #28282a;
+  --color-amber-500: #c68526;
+  --color-red-600: #a54336;
+  --color-green-500: #207459;
+  --color-yellow-500: #dcae32;
+  --color-gray-500: #827d72;
 
   /* Primitive spacing scale */
   --space-0: 0;
@@ -36,8 +36,8 @@
   --elevation-3: 0 18px 40px rgba(39, 25, 16, 0.12);
 
   /* Primitive typography */
-  --font-family-display: 'Fraunces', Georgia, serif;
-  --font-family-body: 'Sora', system-ui, sans-serif;
+  --font-family-display: 'Marcellus', Georgia, serif;
+  --font-family-body: 'Manrope', system-ui, sans-serif;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-md: 1rem;
