@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from './domain/collaboratorUtils'
@@ -1158,6 +1158,7 @@ describe('App canonical canvas behavior', () => {
         patchWidth: RUNTIME_CHUNK_WORLD_SIZE, patchHeight: RUNTIME_CHUNK_WORLD_SIZE,
       },
     }))
+    emitMock.mockClear()
 
     fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 1' }))
     fireEvent.click(screen.getByRole('button', { name: 'Emit Viewport 2' }))
@@ -1559,6 +1560,27 @@ describe('App canonical canvas behavior', () => {
     expect(screen.queryByRole('radiogroup', { name: 'Shape' })).not.toBeInTheDocument()
   })
 
+  it('locks the tile palette to shapes compatible with the selected grid pattern', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await enterCanonicalCanvas()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
+
+    expect(screen.getByText('Locked to Square lattice')).toBeInTheDocument()
+    expect(within(screen.getByRole('radiogroup', { name: 'Shape' })).getAllByRole('radio'))
+      .toHaveLength(1)
+    expect(screen.getByRole('radio', { name: 'Square' })).toHaveAttribute('aria-checked', 'true')
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Running bond' }))
+
+    expect(screen.getByText('Locked to Running bond')).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Rectangle' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.queryByRole('radio', { name: 'Square' })).not.toBeInTheDocument()
+  })
+
   it.skip('retains the selected grid pattern while hidden and preserves settled tiles', async () => {
     listSessionsMock.mockResolvedValue(mockSessions)
 
@@ -1666,7 +1688,6 @@ describe('App canonical canvas behavior', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle tessellation' }))
-    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
     fireEvent.click(screen.getByRole('button', { name: 'Move Pointer Offset' }))
     fireEvent.click(screen.getByRole('button', { name: 'Place Tile' }))
 
@@ -1727,7 +1748,7 @@ describe('App canonical canvas behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangles' }))
     fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Triangle tessellation' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Lagoon' }))
@@ -1788,7 +1809,7 @@ describe('App canonical canvas behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangles' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Lagoon' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Palette color #d9efe6' }))
     fireEvent.click(screen.getByRole('button', { name: 'Grid overlay' }))
@@ -1970,7 +1991,7 @@ describe('App canonical canvas behavior', () => {
       expect(screen.getByRole('complementary', { name: 'Tile palette controls' })).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangles' }))
     fireEvent.click(screen.getByRole('radio', { name: 'glass' }))
     fireEvent.click(screen.getByRole('radio', { name: 'lagoon' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Color #d9efe6' }))

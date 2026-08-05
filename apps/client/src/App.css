@@ -1597,6 +1597,40 @@ button.active,
   gap: 0.35rem;
 }
 
+.shape-control {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.shape-control-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.shape-lock-label {
+  color: var(--atlas-lapis);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.shape-family-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.shape-family-options .ui-toggle-group-item {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
 .shape-grid .ui-toggle-group-item {
   min-width: 0;
   min-height: 64px;

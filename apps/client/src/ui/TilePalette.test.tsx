@@ -142,7 +142,7 @@ describe('TilePalette', () => {
     expect(screen.getByRole('radio', { name: 'Lagoon' })).toHaveAttribute('aria-checked', 'true')
   })
 
-  it('keeps shape radios accessible with visual preview cards', () => {
+  it('groups all canonical shapes into accessible visual families', () => {
     render(
       <TilePalette
         activeTile={{
@@ -162,27 +162,22 @@ describe('TilePalette', () => {
       />,
     )
 
-    const shapeGroup = screen.getByRole('radiogroup', { name: 'Shape' })
-
-    for (const shape of TILE_SHAPES) {
-      const radio = within(shapeGroup).getByRole('radio', { name: shapeLabelByToken[shape] })
-      expect(radio).toBeInTheDocument()
-      const preview = radio.querySelector('svg')
-      expect(preview).not.toBeNull()
-      expect(preview).toHaveAttribute('aria-hidden', 'true')
+    const renderedShapeOptions = new Set<string | null>()
+    for (const family of ['Basic', 'Triangles', 'Special']) {
+      fireEvent.click(screen.getByRole('radio', { name: family }))
+      const shapeGroup = screen.getByRole('radiogroup', { name: 'Shape' })
+      for (const radio of within(shapeGroup).getAllByRole('radio')) {
+        renderedShapeOptions.add(radio.getAttribute('aria-label'))
+        expect(radio.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+      }
     }
 
-    expect(screen.getByText('Square')).toBeInTheDocument()
-    expect(screen.getByText('Triangle')).toBeInTheDocument()
-    expect(screen.getByText('Rectangle')).toBeInTheDocument()
-    expect(screen.getByText('L-shape')).toBeInTheDocument()
-    expect(screen.getByText('Large square')).toBeInTheDocument()
-    expect(screen.getByText('Circle')).toBeInTheDocument()
-    expect(screen.getByText('Right triangle')).toBeInTheDocument()
-    expect(screen.getByText('Large right triangle')).toBeInTheDocument()
+    expect(renderedShapeOptions).toEqual(new Set(TILE_SHAPES.map((shape) => shapeLabelByToken[shape])))
   })
 
-  it('keeps shape option radios aligned with the canonical geometry list', () => {
+  it('selects a shape in the chosen family', () => {
+    const onShape = vi.fn()
+
     render(
       <TilePalette
         activeTile={{
@@ -192,6 +187,35 @@ describe('TilePalette', () => {
           rotation: 0,
           mirrored: false,
         }}
+        onShape={onShape}
+        paletteName="terracotta"
+        onPaletteName={vi.fn()}
+        paletteOpen
+        onTogglePaletteOpen={vi.fn()}
+        onColor={vi.fn()}
+        paletteFallbackAnnouncement=""
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Triangles' }))
+
+    expect(onShape).toHaveBeenCalledWith('triangle')
+    expect(screen.getByRole('radio', { name: 'Triangle' })).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: 'Square' })).not.toBeInTheDocument()
+  })
+
+  it('shows only compatible shapes when a grid pattern locks the palette', () => {
+    render(
+      <TilePalette
+        activeTile={{
+          shape: 'rectangle',
+          color: '#d4614f',
+          material: 'ceramic',
+          rotation: 0,
+          mirrored: false,
+        }}
+        availableShapes={['rectangle']}
+        shapeConstraintLabel="Running bond"
         onShape={vi.fn()}
         paletteName="terracotta"
         onPaletteName={vi.fn()}
@@ -202,12 +226,11 @@ describe('TilePalette', () => {
       />,
     )
 
-    const shapeGroup = screen.getByRole('radiogroup', { name: 'Shape' })
-    const renderedShapeOptions = within(shapeGroup)
-      .getAllByRole('radio')
-      .map((radio) => radio.getAttribute('aria-label'))
-
-    expect(renderedShapeOptions).toEqual(TILE_SHAPES.map((shape) => shapeLabelByToken[shape]))
+    expect(screen.getByText('Locked to Running bond')).toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'Shape family' })).not.toBeInTheDocument()
+    expect(within(screen.getByRole('radiogroup', { name: 'Shape' })).getAllByRole('radio'))
+      .toHaveLength(1)
+    expect(screen.getByRole('radio', { name: 'Rectangle' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('supports keyboard arrow navigation between shape radios', async () => {
@@ -237,7 +260,7 @@ describe('TilePalette', () => {
     square.focus()
     fireEvent.keyDown(square, { key: 'ArrowRight' })
 
-    expect(onShape).toHaveBeenCalledWith('triangle')
+    expect(onShape).toHaveBeenCalledWith('rectangle')
   })
 
   it('supports keyboard Space/Enter activation on shape radios', () => {
@@ -262,16 +285,16 @@ describe('TilePalette', () => {
       />,
     )
 
-    const triangle = screen.getByRole('radio', { name: 'Triangle' })
+    const rectangle = screen.getByRole('radio', { name: 'Rectangle' })
     const square = screen.getByRole('radio', { name: 'Square' })
 
-    triangle.focus()
-    fireEvent.keyDown(triangle, { key: 'Enter' })
+    rectangle.focus()
+    fireEvent.keyDown(rectangle, { key: 'Enter' })
 
     square.focus()
     fireEvent.keyDown(square, { key: ' ' })
 
-    expect(onShape).toHaveBeenCalledWith('triangle')
+    expect(onShape).toHaveBeenCalledWith('rectangle')
     expect(onShape).toHaveBeenCalledWith('square')
   })
 
@@ -301,11 +324,11 @@ describe('TilePalette', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Triangle' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Rectangle' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Lagoon' }))
     fireEvent.click(screen.getByRole('radio', { name: 'Palette color #eea655' }))
 
-    expect(onShape).toHaveBeenCalledWith('triangle')
+    expect(onShape).toHaveBeenCalledWith('rectangle')
     expect(onPaletteName).toHaveBeenCalledWith('lagoon')
     expect(onColor).toHaveBeenCalledWith('#eea655')
   })

@@ -9,7 +9,7 @@ import {
 } from './domain/math2d'
 import { getTileDefinition, normalizeAngle, quantizeRotation, TILE_SHAPES, transformPolygon } from './domain/tileGeometry'
 import type { TileShape } from './domain/tileGeometry'
-import { GRID_PATTERNS, getConstructibleGridPatterns } from './domain/gridPatterns'
+import { GRID_PATTERNS, getConstructibleGridPatterns, getPatternCompatibleShapes } from './domain/gridPatterns'
 import type { GridPatternId } from './domain/gridPatterns'
 import {
   createInitialGhost,
@@ -1473,6 +1473,12 @@ function ProtectedApp() {
             activeShape={activeTile.shape}
             announcement={gridOverlayAnnouncement}
             onEnabledChange={(enabled) => {
+              if (enabled && selectedGridPattern) {
+                const compatibleShapes = getPatternCompatibleShapes(selectedGridPattern)
+                if (!compatibleShapes.includes(activeTile.shape)) {
+                  dispatchActiveTileUi({ type: 'set-shape', shape: compatibleShapes[0] })
+                }
+              }
               setGridOverlayEnabled(enabled)
               setGridOverlayAnnouncement(
                 enabled && selectedGridPattern
@@ -1482,6 +1488,12 @@ function ProtectedApp() {
             }}
             onPatternChange={(patternId) => {
               const pattern = constructibleGridPatterns.find((entry) => entry.id === patternId)
+              if (pattern) {
+                const compatibleShapes = getPatternCompatibleShapes(pattern)
+                if (!compatibleShapes.includes(activeTile.shape)) {
+                  dispatchActiveTileUi({ type: 'set-shape', shape: compatibleShapes[0] })
+                }
+              }
               setSelectedGridPatternId(patternId)
               setGridOverlayAnnouncement(pattern ? `Grid pattern changed to ${pattern.label}.` : '')
             }}
@@ -1581,6 +1593,10 @@ function ProtectedApp() {
         {mutationControlsEnabled && (
           <TilePalette
             activeTile={activeTile}
+            availableShapes={gridOverlayEnabled && selectedGridPattern
+              ? getPatternCompatibleShapes(selectedGridPattern)
+              : undefined}
+            shapeConstraintLabel={gridOverlayEnabled ? selectedGridPattern?.label : undefined}
             onMaterial={(material) => dispatchActiveTileUi({ type: 'patch-active-tile', patch: { material } })}
             onRotateQuarter={(direction) => dispatchActiveTileUi({ type: 'rotate-quarter', direction })}
             onToggleMirror={() => dispatchActiveTileUi({ type: 'toggle-mirror' })}

@@ -9,6 +9,8 @@ import type { ActiveTile } from '../interaction/controller'
 type TilePaletteProps = {
   activeTile: ActiveTile
   onShape: (shape: TileShape) => void
+  availableShapes?: readonly TileShape[]
+  shapeConstraintLabel?: string
   onMaterial?: (material: ActiveTile['material']) => void
   onRotateQuarter?: (direction: 1 | -1) => void
   onToggleMirror?: () => void
@@ -44,6 +46,21 @@ const shapeLabels: Record<TileShape, string> = {
   'right-triangle': 'Right triangle',
   'large-right-triangle': 'Large right triangle',
 }
+
+type ShapeFamily = 'basic' | 'triangles' | 'special'
+
+const shapeFamilies: Record<ShapeFamily, { label: string; shapes: readonly TileShape[] }> = {
+  basic: { label: 'Basic', shapes: ['square', 'rectangle', 'large-square'] },
+  triangles: { label: 'Triangles', shapes: ['triangle', 'right-triangle', 'large-right-triangle'] },
+  special: { label: 'Special', shapes: ['circle', 'l-shape'] },
+}
+
+const shapeFamilyNames = Object.keys(shapeFamilies) as ShapeFamily[]
+
+const getShapeFamily = (shape: TileShape): ShapeFamily =>
+  shapeFamilyNames.find((family) => shapeFamilies[family].shapes.includes(shape)) ?? 'basic'
+
+const isShapeFamily = (value: string): value is ShapeFamily => shapeFamilyNames.includes(value as ShapeFamily)
 
 const materialOptions: Array<ActiveTile['material']> = ['ceramic', 'glass', 'stone']
 const materialLabels: Record<ActiveTile['material'], string> = {
@@ -94,6 +111,8 @@ const normalizeColorForTile = (value: string): string | null => {
 export const TilePalette = ({
   activeTile,
   onShape,
+  availableShapes,
+  shapeConstraintLabel,
   onMaterial,
   onRotateQuarter,
   onToggleMirror,
@@ -109,14 +128,22 @@ export const TilePalette = ({
   const customColorInputId = useId()
   const [customColorValue, setCustomColorValue] = useState(activeTile.color)
   const [customColorError, setCustomColorError] = useState('')
+  const [shapeFamily, setShapeFamily] = useState<ShapeFamily>(() => getShapeFamily(activeTile.shape))
 
   useEffect(() => {
     setCustomColorValue(activeTile.color)
     setCustomColorError('')
   }, [activeTile.color])
 
+  useEffect(() => {
+    setShapeFamily(getShapeFamily(activeTile.shape))
+  }, [activeTile.shape])
+
   const activeSwatches = palettes[paletteName]
   const selectedSwatch = activeSwatches.some((entry) => entry === activeTile.color) ? activeTile.color : undefined
+  const visibleShapes = shapeConstraintLabel
+    ? availableShapes ?? []
+    : shapeFamilies[shapeFamily].shapes
 
   const applyCustomColor = () => {
     const nextColor = customColorValue.trim()
@@ -164,8 +191,31 @@ export const TilePalette = ({
         <code>{activeTile.color}</code>
       </section>
       <div id="tile-palette-body" hidden={!paletteOpen}>
-        <section>
-          <h2>Shape</h2>
+        <section className="shape-control">
+          <div className="shape-control-header">
+            <h2>Shape</h2>
+            {shapeConstraintLabel && <span className="shape-lock-label">Locked to {shapeConstraintLabel}</span>}
+          </div>
+          {!shapeConstraintLabel && (
+            <ToggleGroup
+              type="single"
+              className="shape-family-options"
+              value={shapeFamily}
+              onValueChange={(value) => {
+                if (value && isShapeFamily(value)) {
+                  setShapeFamily(value)
+                  onShape(shapeFamilies[value].shapes[0])
+                }
+              }}
+              aria-label="Shape family"
+            >
+              {shapeFamilyNames.map((family) => (
+                <ToggleGroupItem key={family} value={family} aria-label={shapeFamilies[family].label}>
+                  {shapeFamilies[family].label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          )}
           <ToggleGroup
             type="single"
             className="shape-grid"
@@ -177,7 +227,7 @@ export const TilePalette = ({
             }}
             aria-label="Shape"
           >
-            {TILE_SHAPES.map((entry) => (
+            {visibleShapes.map((entry) => (
               <ToggleGroupItem
                 key={entry}
                 value={entry}
@@ -196,10 +246,10 @@ export const TilePalette = ({
                   }
 
                   event.preventDefault()
-                  const currentIndex = TILE_SHAPES.indexOf(entry)
+                  const currentIndex = visibleShapes.indexOf(entry)
                   const direction = isForwardArrow ? 1 : -1
-                  const nextIndex = (currentIndex + direction + TILE_SHAPES.length) % TILE_SHAPES.length
-                  onShape(TILE_SHAPES[nextIndex])
+                  const nextIndex = (currentIndex + direction + visibleShapes.length) % visibleShapes.length
+                  onShape(visibleShapes[nextIndex])
                 }}
               >
                 <span className="tile-shape-card">
