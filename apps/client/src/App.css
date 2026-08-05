@@ -1702,11 +1702,17 @@ button.active,
 @media (max-width: 960px) {
   .canvas-workspace {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .canvas-shell {
+    min-height: 24rem;
+    height: clamp(24rem, 64dvh, 42rem);
   }
 
   .palette-region {
     border-width: 1px 0 0;
-    max-height: 38dvh;
+    max-height: none;
   }
 
   .shape-grid {
@@ -1735,31 +1741,79 @@ button.active,
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .canvas-workspace {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .canvas-shell {
+    min-height: 22rem;
+    height: clamp(22rem, 62dvh, 34rem);
+  }
+
+  .canonical-navigation {
+    margin-top: 5rem;
+    padding: 0.55rem 0.6rem;
+  }
+
   .palette-current-selection {
     grid-template-columns: 2.25rem minmax(0, 1fr) auto;
   }
 
-  .status-strip,
-  .collaborator-roster {
-    top: 0.75rem;
+  .status-strip {
+    top: 0.5rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    gap: 0.25rem 0.5rem;
+    padding: 0.36rem 0.56rem;
+    font-size: 0.74rem;
+    letter-spacing: 0.05em;
   }
 
   .status-strip {
-    left: 0.75rem;
+    max-width: calc(100% - 1rem);
+  }
+
+  .status-strip span {
+    max-width: none;
   }
 
   .collaborator-roster {
-    right: 0.75rem;
+    top: 2.95rem;
+    left: 0.5rem;
+    right: 0.5rem;
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .collaborator-chip {
+    max-width: 44vw;
+    padding: 0.18rem 0.48rem;
+    font-size: 0.7rem;
   }
 
   .grid-overlay-controls {
-    left: 0.75rem;
-    bottom: 0.75rem;
+    left: 0.5rem;
+    bottom: 0.5rem;
+    width: calc(100% - 1rem);
+    max-height: min(34%, 8.5rem);
+    padding: 0.45rem;
   }
 
   .minimap-overlay {
-    right: 0.75rem;
-    align-self: start;
-    height: fit-content;
+    right: 0.5rem;
+    bottom: calc(8.5rem + 0.9rem);
+    top: auto;
+    width: min(8.8rem, calc(100% - 1rem));
+    padding: 0.45rem;
+    gap: 0.25rem;
+  }
+
+  .minimap-header h3 {
+    font-size: 0.72rem;
+  }
+
+  .minimap-header span {
+    display: none;
   }
 }
