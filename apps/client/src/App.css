@@ -1915,7 +1915,6 @@ button.active,
   --atlas-map-line: rgba(61, 48, 37, 0.08);
 }
 
-.auth-shell,
 .lobby-shell,
 .app-error-page {
   position: relative;
@@ -1936,7 +1935,6 @@ button.active,
   background-size: 4rem 4rem, 4rem 4rem, 100% 100%;
 }
 
-.auth-shell::before,
 .lobby-shell::before,
 .app-error-page::before {
   content: '';
