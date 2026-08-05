@@ -43,6 +43,15 @@ import {
 
 const PRODUCT_NAMES = ['PRODUCT.md', 'Product.md', 'product.md'];
 const DESIGN_NAMES = ['DESIGN.md', 'Design.md', 'design.md'];
+
+function replaceUntilStable(input, pattern, replacement) {
+  let current = input;
+  while (true) {
+    const next = current.replace(pattern, replacement);
+    if (next === current) return next;
+    current = next;
+  }
+}
 const SKILL_REFERENCE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'reference');
 const FALLBACK_DIRS = ['.agents/context', 'docs'];
 const MONOREPO_MARKER_FILES = ['pnpm-workspace.yaml', 'turbo.json', 'nx.json', 'lerna.json'];
@@ -849,10 +858,12 @@ export function hasVisualImplementation(projectRoot) {
       return false;
     }
 
-    const evidence = body
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/<!--[\s\S]*?-->/g, '')
-      .replace(/^\s*\/\/.*$/gm, '');
+    const evidence = replaceUntilStable(
+      body
+        .replace(/\/\*[\s\S]*?\*\//g, ''),
+      /<!--[\s\S]*?-->/g,
+      ''
+    ).replace(/^\s*\/\/.*$/gm, '');
     if (STYLE_EXTENSIONS.has(ext)) {
       const customProperties = evidence.match(/--[a-z0-9_-]+\s*:/gi)?.length ?? 0;
       const visualDeclarations = evidence.match(/\b(?:color|background(?:-color)?|border(?:-color)?|font-family)\s*:/gi)?.length ?? 0;
