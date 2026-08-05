@@ -9,6 +9,11 @@ import type { ActiveTile } from '../interaction/controller'
 type TilePaletteProps = {
   activeTile: ActiveTile
   onShape: (shape: TileShape) => void
+  onMaterial?: (material: ActiveTile['material']) => void
+  onRotateQuarter?: (direction: 1 | -1) => void
+  onToggleMirror?: () => void
+  onUndo?: () => void
+  canUndo?: boolean
   paletteName: PaletteName
   onPaletteName: (name: PaletteName) => void
   paletteOpen: boolean
@@ -38,6 +43,13 @@ const shapeLabels: Record<TileShape, string> = {
   circle: 'Circle',
   'right-triangle': 'Right triangle',
   'large-right-triangle': 'Large right triangle',
+}
+
+const materialOptions: Array<ActiveTile['material']> = ['ceramic', 'glass', 'stone']
+const materialLabels: Record<ActiveTile['material'], string> = {
+  ceramic: 'Ceramic',
+  glass: 'Glass',
+  stone: 'Stone',
 }
 
 const isTileShape = (value: string): value is TileShape => TILE_SHAPES.includes(value as TileShape)
@@ -82,6 +94,11 @@ const normalizeColorForTile = (value: string): string | null => {
 export const TilePalette = ({
   activeTile,
   onShape,
+  onMaterial,
+  onRotateQuarter,
+  onToggleMirror,
+  onUndo,
+  canUndo = false,
   paletteName,
   onPaletteName,
   paletteOpen,
@@ -195,6 +212,29 @@ export const TilePalette = ({
         </section>
 
         <section className="palette-control">
+          {onMaterial && (
+            <div className="palette-subsection">
+              <h3>Material</h3>
+              <ToggleGroup
+                type="single"
+                className="palette-preset-grid"
+                value={activeTile.material}
+                onValueChange={(value) => {
+                  if (value === 'ceramic' || value === 'glass' || value === 'stone') {
+                    onMaterial(value)
+                  }
+                }}
+                aria-label="Material"
+              >
+                {materialOptions.map((material) => (
+                  <ToggleGroupItem key={material} value={material} aria-label={materialLabels[material]}>
+                    <span className="palette-preset-card-label">{materialLabels[material]}</span>
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+          )}
+
           <div className="palette-control-header">
             <div>
               <h2>Palette</h2>
@@ -301,6 +341,40 @@ export const TilePalette = ({
               )}
             </div>
           </details>
+
+          {(onRotateQuarter || onToggleMirror || onUndo) && (
+            <div className="palette-subsection">
+              <h3>Transform & recovery</h3>
+              <div className="pill-row">
+                {onRotateQuarter && (
+                  <>
+                    <button type="button" onClick={() => onRotateQuarter(-1)} aria-label="Rotate left 90 degrees">
+                      Rotate left
+                    </button>
+                    <button type="button" onClick={() => onRotateQuarter(1)} aria-label="Rotate right 90 degrees">
+                      Rotate right
+                    </button>
+                  </>
+                )}
+                {onToggleMirror && (
+                  <button
+                    type="button"
+                    className={activeTile.mirrored ? 'active' : undefined}
+                    aria-pressed={activeTile.mirrored}
+                    onClick={onToggleMirror}
+                  >
+                    Mirror
+                  </button>
+                )}
+                {onUndo && (
+                  <button type="button" onClick={onUndo} disabled={!canUndo}>
+                    Undo last
+                  </button>
+                )}
+              </div>
+              <p className="palette-custom-input-help">Shortcuts: R rotate, F mirror, Z undo.</p>
+            </div>
+          )}
         </section>
 
       </div>

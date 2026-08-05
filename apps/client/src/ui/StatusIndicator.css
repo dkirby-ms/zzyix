@@ -33,7 +33,6 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  animation: pulse-dot 2s ease-in-out infinite;
 }
 
 @keyframes pulse-dot {
@@ -65,6 +64,7 @@
 
 .status-connecting .status-dot {
   background-color: var(--color-status-connecting);
+  animation: pulse-dot 1.6s ease-in-out infinite;
 }
 
 .status-reconnecting {
@@ -75,6 +75,7 @@
 
 .status-reconnecting .status-dot {
   background-color: var(--color-status-reconnecting);
+  animation: pulse-dot 1.6s ease-in-out infinite;
 }
 
 .status-error {

@@ -248,6 +248,20 @@ const isPointInPolygon = (point: { x: number; y: number }, polygon: Array<{ x: n
   return inside
 }
 
+const describePlacementBlockReason = (debugReason: string): string => {
+  const reason = debugReason.toLowerCase()
+  if (reason.includes('collision') || reason.includes('occupied')) {
+    return 'Blocked: this position overlaps an existing tessera.'
+  }
+  if (reason.includes('bounds') || reason.includes('outside') || reason.includes('patch')) {
+    return 'Blocked: this location is outside your writable patch.'
+  }
+  if (reason.includes('grid') || reason.includes('guide') || reason.includes('slot')) {
+    return 'Blocked: this shape does not fit the active grid slot.'
+  }
+  return 'Blocked: adjust the target location before placing.'
+}
+
 const findHoveredTileId = (x: number, y: number, tiles: SequencedTilesState['tiles']): string | undefined => {
   for (let index = tiles.length - 1; index >= 0; index -= 1) {
     const tile = tiles[index]
@@ -401,6 +415,10 @@ function ProtectedApp() {
   const visibleTiles = useMemo(
     () => isQuiltV2 ? selectQuiltTiles(quiltCache) : sequencedState.tiles,
     [isQuiltV2, quiltCache, sequencedState.tiles],
+  )
+  const canUndo = useMemo(
+    () => visibleTiles.some((tile) => isServerTileId(tile.id) && tile.placedBy === ownershipIdentity),
+    [ownershipIdentity, visibleTiles],
   )
 
   useEffect(() => {
@@ -753,6 +771,40 @@ function ProtectedApp() {
   )
 
   const connectionState = useConnectionStatus(socketRef)
+  const placementStatus = useMemo(() => {
+    if (!mutationControlsEnabled) {
+      return {
+        state: 'near-valid' as const,
+        message: 'Read-only: ownership sync is still initializing.',
+      }
+    }
+
+    if (connectionState.status !== 'connected') {
+      return {
+        state: 'near-valid' as const,
+        message: 'Waiting for live connection before placement updates.',
+      }
+    }
+
+    if (!ghostVisible) {
+      return {
+        state: 'valid' as const,
+        message: 'Move over the canvas to position your next tessera.',
+      }
+    }
+
+    if (ghost.valid) {
+      return {
+        state: 'valid' as const,
+        message: 'Ready: click the canvas to place this tessera.',
+      }
+    }
+
+    return {
+      state: 'invalid' as const,
+      message: describePlacementBlockReason(ghost.debugReason),
+    }
+  }, [connectionState.status, ghost.debugReason, ghost.valid, ghostVisible, mutationControlsEnabled])
 
   useEffect(() => {
     if (!quiltProtocol?.canaryTelemetryEnabled || !quiltProtocol.topology) return
@@ -954,6 +1006,19 @@ function ProtectedApp() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return
+      }
+
+      const target = event.target as HTMLElement | null
+      if (
+        target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || target?.isContentEditable
+      ) {
+        return
+      }
+
       if (event.key.toLowerCase() === 'r') {
         dispatchActiveTileUi({ type: 'rotate-quarter', direction: event.shiftKey ? -1 : 1 })
       }
@@ -1361,6 +1426,10 @@ function ProtectedApp() {
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
+          <div className="status-strip" data-state={placementStatus.state} aria-live="polite">
+            <span>{visibleTiles.length} placed</span>
+            <span>{placementStatus.message}</span>
+          </div>
           {activeCollaborators.length > 0 && (
             <div className="collaborator-roster" aria-label="Active collaborators">
               {activeCollaborators.map((collaborator) => (
@@ -1512,6 +1581,11 @@ function ProtectedApp() {
         {mutationControlsEnabled && (
           <TilePalette
             activeTile={activeTile}
+            onMaterial={(material) => dispatchActiveTileUi({ type: 'patch-active-tile', patch: { material } })}
+            onRotateQuarter={(direction) => dispatchActiveTileUi({ type: 'rotate-quarter', direction })}
+            onToggleMirror={() => dispatchActiveTileUi({ type: 'toggle-mirror' })}
+            onUndo={handleUndo}
+            canUndo={canUndo}
             paletteName={paletteName}
             onPaletteName={handlePaletteChange}
             paletteOpen={paletteOpen}
