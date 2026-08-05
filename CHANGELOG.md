@@ -5,6 +5,16 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.5.0](https://github.com/dkirby-ms/zzyix/compare/v1.4.2...v1.5.0) (2026-08-05)
+
+### Features
+
+* impeccable.style UX design update ([bf27674](https://github.com/dkirby-ms/zzyix/commit/bf276748ae1e5fc3290f66d612142be821fa3296))
+
+### Miscellaneous Chores
+
+* **ci:** test update ([d0f89bf](https://github.com/dkirby-ms/zzyix/commit/d0f89bfecdc68a5a632cabf4c8420d630453df2c))
+
 ## [1.4.2](https://github.com/dkirby-ms/zzyix/compare/v1.4.1...v1.4.2) (2026-08-04)
 
 ### Bug Fixes
