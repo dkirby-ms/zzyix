@@ -7,6 +7,13 @@
   --panel-border: var(--color-border-subtle);
   --accent: var(--color-accent-primary);
   --radius: var(--radius-component);
+  --atlas-surface: rgba(17, 15, 26, 0.9);
+  --atlas-ink: rgba(236, 225, 201, 0.96);
+  --atlas-ink-muted: rgba(214, 199, 171, 0.92);
+  --atlas-line: rgba(227, 208, 173, 0.3);
+  --atlas-command: rgba(191, 100, 79, 0.94);
+  --atlas-authorship: rgba(190, 225, 232, 0.96);
+  --atlas-selection: rgba(191, 100, 79, 0.2);
 }
 
 * {
@@ -423,10 +430,10 @@
 }
 
 .account-signout {
-  min-height: calc(var(--touch-target-min) - 8px);
-  min-width: calc(var(--touch-target-min) - 8px);
-  width: calc(var(--touch-target-min) - 8px);
-  height: calc(var(--touch-target-min) - 8px);
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
   padding: 0;
   border-radius: 999px;
   display: inline-flex;
@@ -1096,7 +1103,7 @@ button:focus-visible,
 
 .grid-overlay-compatible-shapes {
   margin: 0;
-  color: rgba(46, 36, 29, 0.76);
+  color: var(--atlas-ink-muted);
   font-size: 0.78rem;
 }
 
@@ -1197,14 +1204,14 @@ button:focus-visible,
 }
 
 .minimap-header span {
-  color: rgba(46, 36, 29, 0.76);
+  color: var(--atlas-ink-muted);
   font-size: 0.72rem;
   letter-spacing: 0.02em;
 }
 
 .minimap-minimize-toggle {
-  min-height: 1.28rem;
-  min-width: 1.28rem;
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
   border-radius: 8px;
   padding: 0;
   display: inline-flex;
@@ -1224,8 +1231,8 @@ button:focus-visible,
 }
 
 .minimap-corner-controls button {
-  min-height: 1.05rem;
-  min-width: 1.05rem;
+  min-height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
   border-radius: 6px;
   border: 1px solid rgba(66, 47, 37, 0.34);
   background: rgba(255, 249, 238, 0.94);
@@ -1638,10 +1645,10 @@ button:focus-visible,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  min-width: 2.25rem;
-  height: 2.25rem;
-  min-height: 2.25rem;
+  width: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  min-height: var(--touch-target-min);
   padding: 0;
 }
 
@@ -1653,6 +1660,10 @@ button:focus-visible,
 .account-signout {
   border-radius: 999px;
   color: var(--workshop-ink);
+  width: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  min-height: var(--touch-target-min);
 }
 
 .return-btn {
@@ -1704,6 +1715,13 @@ button:focus-visible,
   --color-surface-panel: var(--panel);
   --color-border-subtle: var(--workshop-line);
   --color-accent-primary: var(--workshop-yellow);
+  --atlas-surface: rgba(255, 252, 244, 0.94);
+  --atlas-ink: rgba(25, 60, 72, 0.96);
+  --atlas-ink-muted: rgba(25, 60, 72, 0.84);
+  --atlas-line: rgba(25, 60, 72, 0.22);
+  --atlas-command: rgba(40, 111, 125, 0.9);
+  --atlas-authorship: rgba(35, 82, 96, 0.96);
+  --atlas-selection: rgba(166, 109, 8, 0.18);
 }
 
 :root[data-theme='light'] .app-shell,
@@ -1911,8 +1929,8 @@ button.active,
 .minimap-overlay,
 .canvas-interaction-guide {
   border-radius: 10px;
-  border-color: rgba(227, 208, 173, 0.28);
-  background: rgba(17, 15, 26, 0.9);
+  border-color: var(--atlas-line);
+  background: var(--atlas-surface);
   box-shadow: 0 10px 24px rgba(4, 7, 14, 0.44);
 }
 
@@ -1920,7 +1938,7 @@ button.active,
 .collaborator-chip,
 .minimap-header h3,
 .grid-overlay-options-label {
-  color: rgba(180, 217, 224, 0.92);
+  color: var(--atlas-authorship);
   font-family: 'Alegreya Sans', sans-serif;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -1955,7 +1973,7 @@ button.active,
 }
 
 .canonical-navigation p {
-  color: rgba(214, 193, 159, 0.84);
+  color: var(--atlas-ink-muted);
 }
 
 .grid-overlay-controls {
@@ -2040,14 +2058,14 @@ button.active,
 }
 
 .canvas-zoom-controls-actions button {
-  width: 2rem;
-  height: 2rem;
-  min-width: 2rem;
-  min-height: 2rem;
+  width: var(--touch-target-min);
+  height: var(--touch-target-min);
+  min-width: var(--touch-target-min);
+  min-height: var(--touch-target-min);
   border-radius: 5px;
-  border-color: rgba(227, 208, 173, 0.24);
+  border-color: var(--atlas-line);
   background: rgba(36, 32, 51, 0.94);
-  color: var(--workshop-ink);
+  color: var(--atlas-ink);
   box-shadow: none;
   padding: 0;
 }
@@ -2059,11 +2077,11 @@ button.active,
 
 .canvas-zoom-coordinate {
   display: block;
-  padding: 0.12rem 0.2rem;
-  border: 1px solid rgba(227, 208, 173, 0.2);
+  padding: 0.24rem 0.4rem;
+  border: 1px solid var(--atlas-line);
   border-radius: 4px;
-  background: rgba(19, 17, 27, 0.82);
-  color: var(--workshop-ink);
+  background: rgba(19, 17, 27, 0.88);
+  color: var(--atlas-ink);
   font-family: 'Alegreya Sans', sans-serif;
   font-size: 0.62rem;
   font-variant-numeric: tabular-nums;
@@ -2075,7 +2093,7 @@ button.active,
 
 .minimap-track {
   border-radius: 8px;
-  border-color: rgba(227, 208, 173, 0.22);
+  border-color: var(--atlas-line);
   background:
     linear-gradient(rgba(126, 174, 185, 0.08) 1px, transparent 1px),
     linear-gradient(90deg, rgba(126, 174, 185, 0.08) 1px, transparent 1px),
@@ -2089,8 +2107,8 @@ button.active,
 
 .minimap-viewport {
   border-radius: 4px;
-  border-color: rgba(191, 100, 79, 0.94);
-  background: rgba(191, 100, 79, 0.16);
+  border-color: var(--atlas-command);
+  background: var(--atlas-selection);
   box-shadow: 0 0 0 1px rgba(233, 220, 190, 0.72) inset;
 }
 

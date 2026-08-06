@@ -363,7 +363,7 @@ describe('App canonical canvas behavior', () => {
 
     render(<App />)
 
-    expect(await screen.findByText('Tracing the canonical galaxy...')).toBeInTheDocument()
+    expect(await screen.findByText('Tracing the canonical atlas...')).toBeInTheDocument()
     await waitFor(() => {
       const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
       expect(socketCall[1]).toMatchObject({ quiltId: 'quilt-1', generation: 1 })
@@ -415,7 +415,7 @@ describe('App canonical canvas behavior', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
 
     await waitFor(() => expect(
-      screen.getByLabelText('Whole galaxy preview').querySelector('[data-tile-count="7"]'),
+      screen.getByLabelText('Whole atlas preview').querySelector('[data-tile-count="7"]'),
     ).toBeInTheDocument())
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '0')
   })
@@ -449,7 +449,7 @@ describe('App canonical canvas behavior', () => {
         patchWidth: 10, patchHeight: 10,
       },
     }))
-    expect(screen.getByText('Enclave 1, 1')).toBeInTheDocument()
+    expect(screen.getByText('Patch 1, 1')).toBeInTheDocument()
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-camera-pan', '15,15')
     expect(screen.queryByRole('button', { name: /^Claim / })).not.toBeInTheDocument()
   })
@@ -472,7 +472,7 @@ describe('App canonical canvas behavior', () => {
 
     render(<App />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Galaxy unavailable')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Atlas unavailable')
     expect(screen.getByRole('alert')).toHaveTextContent('Canonical world is unavailable (503)')
     expect(getStoredSessionIdMock).not.toHaveBeenCalled()
     expect(setStoredSessionIdMock).not.toHaveBeenCalled()
@@ -549,7 +549,7 @@ describe('App canonical canvas behavior', () => {
     }
     rerender(<App />)
 
-    await screen.findByText('Tracing the canonical galaxy...')
+    await screen.findByText('Tracing the canonical atlas...')
     expect(screen.queryByTestId('mosaic-scene')).not.toBeInTheDocument()
   })
 
@@ -1575,12 +1575,12 @@ describe('App canonical canvas behavior', () => {
 
     const minimapToggle = screen.getByRole('button', { name: 'Expand minimap' })
     expect(minimapToggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByRole('application', { name: 'Drag or click to glide across mosaic enclaves' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('application', { name: 'Drag or click to glide across atlas patches' })).not.toBeInTheDocument()
 
     fireEvent.click(minimapToggle)
 
     expect(screen.getByRole('button', { name: 'Minimize minimap' })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('application', { name: 'Drag or click to glide across mosaic enclaves' })).toBeInTheDocument()
+    expect(screen.getByRole('application', { name: 'Drag or click to glide across atlas patches' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeInTheDocument()
   })

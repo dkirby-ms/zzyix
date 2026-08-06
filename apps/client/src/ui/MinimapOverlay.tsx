@@ -282,9 +282,9 @@ export const MinimapOverlay = ({
   }, [applyPanToPointer, dragOffset])
 
   return (
-    <aside className={`minimap-overlay${minimized ? ' minimap-overlay--minimized' : ''}`} aria-label="Galaxy minimap">
+    <aside className={`minimap-overlay${minimized ? ' minimap-overlay--minimized' : ''}`} aria-label="Atlas minimap">
       <div className="minimap-header">
-        <h3>Galaxy map</h3>
+        <h3>Atlas map</h3>
         <div className="minimap-header-actions">
           {!minimized && <span>Drift viewport</span>}
           <button
@@ -306,10 +306,10 @@ export const MinimapOverlay = ({
           ref={containerRef}
           className="minimap-track"
           role="application"
-          aria-label="Drag or click to glide across mosaic enclaves"
+          aria-label="Drag or click to glide across atlas patches"
           onPointerDown={handleTrackPointerDown}
         >
-          <svg className="minimap-quilt-render" viewBox="0 0 100 100" aria-label="Whole galaxy preview" preserveAspectRatio="none">
+          <svg className="minimap-quilt-render" viewBox="0 0 100 100" aria-label="Whole atlas preview" preserveAspectRatio="none">
             {occupancyCells.map((cell) => (
               <rect
                 key={cell.id}

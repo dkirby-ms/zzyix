@@ -1381,12 +1381,12 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   ])
 
   const content = mode === 'canonical-loading' ? (
-    <main className="auth-shell" aria-live="polite">Tracing the canonical galaxy...</main>
+    <main className="auth-shell" aria-live="polite">Tracing the canonical atlas...</main>
   ) : mode === 'canonical-unavailable' ? (
     <main className="auth-shell" role="alert">
       <section className="auth-panel">
-        <h1>Galaxy unavailable</h1>
-        <p>{canonicalError ?? 'The canonical mosaic galaxy is temporarily unavailable.'}</p>
+        <h1>Atlas unavailable</h1>
+        <p>{canonicalError ?? 'The canonical mosaic atlas is temporarily unavailable.'}</p>
       </section>
     </main>
   ) : (
@@ -1415,11 +1415,11 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
             <section className="canonical-navigation" aria-label="Canonical patch navigation">
               <div className="canonical-navigation-heading">
                 <div>
-                  <h2>Mosaic Galaxy</h2>
+                  <h2>Mosaic Atlas</h2>
                   <p>
                     {focusedCanonicalPatch
-                      ? `Enclave ${focusedCanonicalPatch.row}, ${focusedCanonicalPatch.column}`
-                      : 'Choose an enclave to focus'}
+                      ? `Patch ${focusedCanonicalPatch.row}, ${focusedCanonicalPatch.column}`
+                      : 'Choose a patch to focus'}
                   </p>
                 </div>
                 <button
@@ -1433,7 +1433,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
                     centerY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 0.5) * canonicalDescriptor.patchHeight,
                   })}
                 >
-                  Home Enclave
+                  Home Patch
                 </button>
               </div>
             </section>
