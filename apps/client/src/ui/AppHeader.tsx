@@ -34,7 +34,7 @@ export const AppHeader = ({
       <div className="app-brand">
         <span className="app-brand-mark" aria-hidden="true">Z</span>
         <span className="app-header-title">zzyix</span>
-        <span className="app-brand-subtitle">Living ancient mosaic atlas</span>
+        <span className="app-brand-subtitle">Shared mosaic atlas</span>
       </div>
       <div className="app-header-meta">
         <span className="observer-invite" title="Observers can pan and explore without editing">
