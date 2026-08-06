@@ -5,6 +5,8 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.6.0](https://github.com/dkirby-ms/zzyix/compare/v1.5.0...v1.6.0) (2026-08-06)
+
 ## [1.5.0](https://github.com/dkirby-ms/zzyix/compare/v1.4.2...v1.5.0) (2026-08-05)
 
 ### Features
