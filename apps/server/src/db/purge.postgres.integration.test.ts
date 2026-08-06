@@ -4,7 +4,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Pool } from 'pg'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'

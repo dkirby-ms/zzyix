@@ -2,15 +2,15 @@
   /* Primitive color scale */
   --color-white: #ffffff;
   --color-black: #000000;
-  --color-cream-100: #efe5cd;
-  --color-cream-200: #e5d6b9;
-  --color-brown-700: #5d442e;
-  --color-brown-900: #28282a;
-  --color-amber-500: #c68526;
-  --color-red-600: #a54336;
-  --color-green-500: #207459;
-  --color-yellow-500: #dcae32;
-  --color-gray-500: #827d72;
+  --color-cream-100: #161420;
+  --color-cream-200: #242033;
+  --color-brown-700: #d2bda0;
+  --color-brown-900: #f3ecde;
+  --color-amber-500: #cb9a3a;
+  --color-red-600: #b34f45;
+  --color-green-500: #5a9684;
+  --color-yellow-500: #d1ae59;
+  --color-gray-500: #9f9da8;
 
   /* Primitive spacing scale */
   --space-0: 0;
@@ -33,11 +33,11 @@
   /* Primitive elevation */
   --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.08);
   --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.12);
-  --elevation-3: 0 18px 40px rgba(39, 25, 16, 0.12);
+  --elevation-3: 0 18px 40px rgba(7, 8, 16, 0.42);
 
   /* Primitive typography */
-  --font-family-display: 'Marcellus', Georgia, serif;
-  --font-family-body: 'Manrope', system-ui, sans-serif;
+  --font-family-display: 'Cinzel', Georgia, serif;
+  --font-family-body: 'Alegreya Sans', 'Segoe UI', sans-serif;
   --font-size-xs: 0.75rem;
   --font-size-sm: 0.875rem;
   --font-size-md: 1rem;

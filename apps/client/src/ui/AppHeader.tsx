@@ -1,6 +1,8 @@
 import type { ConnectionState } from '../network/useConnectionStatus'
-import { ArrowLeft, LogOut, Users } from 'lucide-react'
+import { ArrowLeft, LogOut, Moon, Sun, Users } from 'lucide-react'
 import { StatusIndicator } from './StatusIndicator'
+
+export type ThemeMode = 'dark' | 'light'
 
 type AppHeaderProps = {
   onReturnToLobby?: () => void
@@ -8,6 +10,8 @@ type AppHeaderProps = {
   collaboratorCount: number
   profileName?: string
   onLogout: () => void
+  theme: ThemeMode
+  onToggleTheme: () => void
 }
 
 export const AppHeader = ({
@@ -16,6 +20,8 @@ export const AppHeader = ({
   collaboratorCount,
   profileName,
   onLogout,
+  theme,
+  onToggleTheme,
 }: AppHeaderProps) => {
   return (
     <header className="app-header">
@@ -31,12 +37,24 @@ export const AppHeader = ({
         <span className="app-brand-subtitle">Shared mosaic atlas</span>
       </div>
       <div className="app-header-meta">
+        <span className="observer-invite" title="Observers can pan and explore without editing">
+          Observer lanes open
+        </span>
         {collaboratorCount > 0 && (
           <span className="collaborator-summary" title={`${collaboratorCount} collaborators active`}>
             <Users aria-hidden="true" />
             {collaboratorCount} active
           </span>
         )}
+        <button
+          type="button"
+          className="theme-toggle"
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          onClick={onToggleTheme}
+        >
+          {theme === 'dark' ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+        </button>
         <div className="account-control" aria-label="Account controls">
           <StatusIndicator connectionState={connectionState} showLabel={false} />
           {profileName && <span className="profile-summary">{profileName}</span>}

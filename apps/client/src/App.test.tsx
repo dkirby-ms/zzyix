@@ -363,7 +363,7 @@ describe('App canonical canvas behavior', () => {
 
     render(<App />)
 
-    expect(await screen.findByText('Loading the canonical canvas...')).toBeInTheDocument()
+    expect(await screen.findByText('Tracing the canonical atlas...')).toBeInTheDocument()
     await waitFor(() => {
       const socketCall = useSocketConnectionMock.mock.calls.at(-1) as unknown[]
       expect(socketCall[1]).toMatchObject({ quiltId: 'quilt-1', generation: 1 })
@@ -411,8 +411,11 @@ describe('App canonical canvas behavior', () => {
       authSessionState.apiOrigin,
       canonicalDescriptor.quiltId,
     ))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
+
     await waitFor(() => expect(
-      screen.getByLabelText('Whole quilt preview').querySelector('[data-tile-count="7"]'),
+      screen.getByLabelText('Whole atlas preview').querySelector('[data-tile-count="7"]'),
     ).toBeInTheDocument())
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '0')
   })
@@ -469,7 +472,7 @@ describe('App canonical canvas behavior', () => {
 
     render(<App />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Canvas unavailable')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Atlas unavailable')
     expect(screen.getByRole('alert')).toHaveTextContent('Canonical world is unavailable (503)')
     expect(getStoredSessionIdMock).not.toHaveBeenCalled()
     expect(setStoredSessionIdMock).not.toHaveBeenCalled()
@@ -546,7 +549,7 @@ describe('App canonical canvas behavior', () => {
     }
     rerender(<App />)
 
-    await screen.findByText('Loading the canonical canvas...')
+    await screen.findByText('Tracing the canonical atlas...')
     expect(screen.queryByTestId('mosaic-scene')).not.toBeInTheDocument()
   })
 
@@ -1557,6 +1560,29 @@ describe('App canonical canvas behavior', () => {
 
     expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('radiogroup', { name: 'Shape' })).not.toBeInTheDocument()
+  })
+
+  it('starts minimap collapsed and exposes standalone canvas zoom controls', async () => {
+    listSessionsMock.mockResolvedValue(mockSessions)
+
+    render(<App />)
+
+    await enterCanonicalCanvas()
+
+    await waitFor(() => {
+      expect(screen.getByRole('group', { name: 'Canvas zoom controls' })).toBeInTheDocument()
+    })
+
+    const minimapToggle = screen.getByRole('button', { name: 'Expand minimap' })
+    expect(minimapToggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('application', { name: 'Drag or click to glide across atlas patches' })).not.toBeInTheDocument()
+
+    fireEvent.click(minimapToggle)
+
+    expect(screen.getByRole('button', { name: 'Minimize minimap' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('application', { name: 'Drag or click to glide across atlas patches' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeInTheDocument()
   })
 
   it.skip('retains the selected grid pattern while hidden and preserves settled tiles', async () => {

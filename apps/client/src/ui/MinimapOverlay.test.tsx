@@ -42,9 +42,11 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Whole quilt preview').querySelectorAll('path')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
 
-    const track = screen.getByLabelText('Drag or click to pan the canvas')
+    expect(screen.getByLabelText('Whole atlas preview').querySelectorAll('path')).toHaveLength(2)
+
+    const track = screen.getByLabelText('Drag or click to glide across atlas patches')
     setTrackRect(track, { left: 10, top: 20, width: 200, height: 100 })
 
     fireEvent.pointerDown(track, { clientX: 110, clientY: 70 })
@@ -67,7 +69,9 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    const preview = screen.getByLabelText('Whole quilt preview')
+    fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
+
+    const preview = screen.getByLabelText('Whole atlas preview')
     expect(preview.querySelectorAll('rect.minimap-occupancy')).toHaveLength(2)
     expect(preview.querySelector('[data-tile-count="8"]')).toHaveAttribute('x', '75')
     expect(preview.querySelectorAll('path.minimap-tile')).toHaveLength(0)
@@ -87,7 +91,9 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    const track = screen.getByLabelText('Drag or click to pan the canvas')
+    fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
+
+    const track = screen.getByLabelText('Drag or click to glide across atlas patches')
     setTrackRect(track, { left: 10, top: 20, width: 200, height: 100 })
 
     const viewport = screen.getByLabelText('Current viewport')
@@ -97,9 +103,7 @@ describe('MinimapOverlay', () => {
     expect(onPanTo).toHaveBeenLastCalledWith({ x: 100, y: 50 })
   })
 
-  it('exposes zoom controls without assigned-patch marker', () => {
-    const onZoomTo = vi.fn()
-
+  it('renders without assigned-patch marker', () => {
     render(
       <MinimapOverlay
         worldBounds={{ minX: 0, maxX: 100, minY: 0, maxY: 100 }}
@@ -107,19 +111,12 @@ describe('MinimapOverlay', () => {
           center: { x: 50, y: 50 },
           viewport: { minX: 40, maxX: 60, minY: 40, maxY: 60 },
         }}
-        cameraZoom={60}
-        zoomRange={{ min: 20, max: 140 }}
-        onZoomTo={onZoomTo}
         onPanTo={vi.fn()}
       />,
     )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
     expect(screen.queryByLabelText('Your assigned patch')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
-
-    expect(onZoomTo).toHaveBeenNthCalledWith(1, 69)
-    expect(onZoomTo).toHaveBeenNthCalledWith(2, 51)
   })
 
   it('allows minimizing and expanding the minimap overlay', () => {
@@ -134,15 +131,19 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Drag or click to pan the canvas')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Drag or click to glide across atlas patches')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
+
+    expect(screen.getByLabelText('Drag or click to glide across atlas patches')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Minimize minimap' }))
 
-    expect(screen.queryByLabelText('Drag or click to pan the canvas')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Drag or click to glide across atlas patches')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Expand minimap' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
 
-    expect(screen.getByLabelText('Drag or click to pan the canvas')).toBeInTheDocument()
+    expect(screen.getByLabelText('Drag or click to glide across atlas patches')).toBeInTheDocument()
   })
 })

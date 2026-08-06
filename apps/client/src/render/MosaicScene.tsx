@@ -99,6 +99,11 @@ const DEFAULT_WORLD_BOUNDS = {
   maxY: 3.4,
 }
 
+const SCENE_BACKGROUND_COLOR = '#171523'
+const SCENE_FOG_COLOR = '#171523'
+const SCENE_SURFACE_COLOR = '#221f2f'
+const SCENE_OUTER_SURFACE_COLOR = '#14121d'
+
 const TILE_SETTLE_DURATION_SECONDS = 0.34
 
 const confidenceColor = (base: string, confidence: ConfidenceState): string => {
@@ -365,7 +370,7 @@ const CanvasBounds = ({ worldBounds }: { worldBounds?: MosaicSceneProps['worldBo
 
   return (
     <mesh geometry={geometry} position={[centerX, centerY, -0.12]} receiveShadow>
-      <meshStandardMaterial color="#f6f1e7" roughness={0.9} metalness={0.05} />
+      <meshStandardMaterial color={SCENE_SURFACE_COLOR} roughness={0.88} metalness={0.04} />
     </mesh>
   )
 }
@@ -490,16 +495,16 @@ const SceneContents = ({
         onZoomTierChanged={onZoomTierChanged}
         onCameraViewportChanged={setCameraViewport}
       />
-      <ambientLight intensity={0.58} color="#fff5e8" />
+      <ambientLight intensity={0.46} color="#f4e7d4" />
       <directionalLight
         castShadow
-        intensity={1.2}
-        color="#ffe1bf"
+        intensity={0.92}
+        color="#f0d3ab"
         position={[5, -5, 8]}
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
       />
-      <directionalLight intensity={0.38} color="#c8e1ff" position={[-4, 4, 6]} />
+      <directionalLight intensity={0.24} color="#9bb8d6" position={[-4, 4, 6]} />
 
       <group position={[0, 0, 0]}>
         <CanvasBounds worldBounds={worldBounds} />
@@ -572,7 +577,7 @@ const SceneContents = ({
             ((worldBounds ?? DEFAULT_WORLD_BOUNDS).maxY - (worldBounds ?? DEFAULT_WORLD_BOUNDS).minY) + 20,
           ]}
         />
-        <meshStandardMaterial color="#d5cfbf" roughness={1} metalness={0} />
+        <meshStandardMaterial color={SCENE_OUTER_SURFACE_COLOR} roughness={1} metalness={0} />
       </mesh>
 
       <OrbitControls
@@ -687,8 +692,8 @@ export const MosaicScene = ({
           dpr={[1, 1.8]}
           onContextMenu={(e) => e.preventDefault()}
         >
-          <color attach="background" args={['#e8e3d7']} />
-          <fog attach="fog" args={['#e8e3d7', 10, 24]} />
+          <color attach="background" args={[SCENE_BACKGROUND_COLOR]} />
+          <fog attach="fog" args={[SCENE_FOG_COLOR, 10, 24]} />
           <SceneContents
             tiles={tiles}
             clientId={clientId}
