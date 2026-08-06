@@ -1982,6 +1982,51 @@ button.active,
   padding: 0.65rem;
 }
 
+.grid-overlay-active-pattern {
+  color: var(--atlas-ink-muted);
+}
+
+.grid-overlay-toggle[aria-pressed='true'],
+.grid-pattern-options .ui-toggle-group-item[data-state='on'] {
+  color: var(--atlas-ink);
+  background: var(--atlas-selection);
+  border-color: var(--atlas-command);
+  box-shadow: inset 0 0 0 1px rgba(191, 100, 79, 0.24);
+}
+
+.grid-pattern-options .ui-toggle-group-item {
+  border-color: var(--atlas-line);
+  background: rgba(36, 32, 51, 0.88);
+  color: var(--atlas-ink);
+}
+
+.grid-pattern-options .ui-toggle-group-item:hover:not(:disabled) {
+  border-color: rgba(126, 190, 199, 0.72);
+  background: rgba(36, 32, 51, 0.98);
+}
+
+.palette-custom-input {
+  border-color: var(--atlas-line);
+  background: rgba(36, 32, 51, 0.72);
+  color: var(--atlas-ink);
+}
+
+.palette-custom-input-body label,
+.palette-custom-input-help {
+  color: var(--atlas-ink-muted);
+}
+
+.palette-custom-input-error {
+  color: var(--color-feedback-error);
+}
+
+.palette-custom-input-row input[type='color'],
+.palette-custom-input-row input[type='text'] {
+  border-color: var(--atlas-line);
+  background: rgba(19, 17, 27, 0.88);
+  color: var(--atlas-ink);
+}
+
 .canvas-interaction-guide {
   position: absolute;
   left: 1rem;
