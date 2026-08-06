@@ -1562,11 +1562,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
             onPanTo={(center) => {
               setCameraPan(center)
             }}
-            onZoomTo={(zoom) => {
-              const clamped = Math.min(cameraPolicy.maxZoom, Math.max(cameraPolicy.minZoom, zoom))
-              setCameraZoom(clamped)
-              setCameraZoomOverride(clamped)
-            }}
           />
           <aside className="canvas-zoom-controls" aria-label="Canvas zoom controls">
             <div className="canvas-zoom-controls-actions" role="group" aria-label="Canvas zoom controls">
