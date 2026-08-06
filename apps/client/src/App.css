@@ -2103,10 +2103,10 @@ button.active,
 }
 
 .canvas-zoom-controls-actions button {
-  width: var(--touch-target-min);
-  height: var(--touch-target-min);
-  min-width: var(--touch-target-min);
-  min-height: var(--touch-target-min);
+  width: 1.75rem;
+  height: 1.75rem;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
   border-radius: 5px;
   border-color: var(--atlas-line);
   background: rgba(36, 32, 51, 0.94);
@@ -2116,8 +2116,8 @@ button.active,
 }
 
 .canvas-zoom-controls-actions button svg {
-  width: 0.8rem;
-  height: 0.8rem;
+  width: 0.65rem;
+  height: 0.65rem;
 }
 
 .canvas-zoom-coordinate {
