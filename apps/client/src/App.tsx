@@ -65,6 +65,7 @@ import { resolvePaletteColorSelection } from './ui/palettes'
 import type { PaletteName } from './ui/palettes'
 import { TooltipProvider } from './ui/primitives/Tooltip'
 import { AppErrorBoundary } from './ui/AppErrorBoundary'
+import type { ThemeMode } from './ui/AppHeader'
 import { useAuthSession } from './auth/useAuthSession'
 import {
   COLLABORATOR_CLEANUP_INTERVAL_MS,
@@ -103,6 +104,7 @@ const QUILT_OCCUPANCY_REFRESH_MS = 10_000
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
 const INTERACTION_GUIDE_DISMISSED_KEY = 'zzyix.interactionGuideDismissed'
+const THEME_MODE_KEY = 'zzyix.themeMode'
 
 const MosaicScene = lazy(async () => {
   const module = await import('./render/MosaicScene')
@@ -315,7 +317,7 @@ const expectedPatchRevisions = (
 
 const DEFAULT_WORLD_BOUNDS = DEFAULT_BOUNDED_WORLD_BOUNDS
 
-function ProtectedApp() {
+function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleTheme: () => void }) {
   const auth = useAuthSession()
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
@@ -1395,6 +1397,8 @@ function ProtectedApp() {
         collaboratorCount={activeCollaborators.length}
         profileName={auth.principal?.profile.displayName ?? auth.principal?.profile.email}
         onLogout={() => void auth.logout()}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
@@ -1628,8 +1632,17 @@ const isPostLogoutRoute = (postLogoutRedirectUri: string): boolean => {
 
 function App() {
   const auth = useAuthSession()
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') return 'dark'
+    return window.localStorage.getItem(THEME_MODE_KEY) === 'light' ? 'light' : 'dark'
+  })
   const logoutRequested = useRef(false)
   const isLogoutRoute = isPostLogoutRoute(auth.postLogoutRedirectUri)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    window.localStorage.setItem(THEME_MODE_KEY, theme)
+  }, [theme])
 
   useEffect(() => {
     if (isLogoutRoute && auth.status === 'authenticated' && !logoutRequested.current) {
@@ -1711,7 +1724,12 @@ function App() {
     )
   }
 
-  return <ProtectedApp />
+  return (
+    <ProtectedApp
+      theme={theme}
+      onToggleTheme={() => setTheme((previous) => previous === 'dark' ? 'light' : 'dark')}
+    />
+  )
 }
 
 export default App

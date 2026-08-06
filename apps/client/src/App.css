@@ -1634,6 +1634,22 @@ button:focus-visible,
   box-shadow: none;
 }
 
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0;
+}
+
+.theme-toggle svg {
+  width: 1rem;
+  height: 1rem;
+}
+
 .account-signout {
   border-radius: 999px;
   color: var(--workshop-ink);
@@ -1668,6 +1684,104 @@ button:focus-visible,
   background:
     radial-gradient(circle at 80% 0%, rgba(203, 154, 58, 0.08), transparent 48%),
     linear-gradient(180deg, rgba(22, 18, 31, 0.97) 0%, rgba(17, 14, 25, 0.97) 100%);
+}
+
+:root[data-theme='light'] {
+  --workshop-ink: #193c48;
+  --workshop-blue: #286f7d;
+  --workshop-paper: #f5f0e4;
+  --workshop-paper-deep: #e9dfca;
+  --workshop-copper: #a44b3f;
+  --workshop-yellow: #a66d08;
+  --workshop-line: rgba(25, 60, 72, 0.22);
+  --workshop-soft-line: rgba(25, 60, 72, 0.14);
+  --ink: var(--workshop-ink);
+  --warm: var(--workshop-paper);
+  --panel: rgba(255, 252, 244, 0.94);
+  --panel-border: var(--workshop-line);
+  --color-text-primary: var(--workshop-ink);
+  --color-surface-primary: var(--workshop-paper);
+  --color-surface-panel: var(--panel);
+  --color-border-subtle: var(--workshop-line);
+  --color-accent-primary: var(--workshop-yellow);
+}
+
+:root[data-theme='light'] .app-shell,
+:root[data-theme='light'] .auth-shell,
+:root[data-theme='light'] .lobby-shell,
+:root[data-theme='light'] .app-error-page {
+  color: var(--workshop-ink);
+  background-color: var(--workshop-paper);
+  background-image:
+    radial-gradient(circle at 12% 20%, rgba(79, 141, 154, 0.12), transparent 36%),
+    radial-gradient(circle at 84% 6%, rgba(159, 67, 55, 0.1), transparent 30%),
+    linear-gradient(rgba(25, 60, 72, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(25, 60, 72, 0.035) 1px, transparent 1px);
+}
+
+:root[data-theme='light'] .backdrop-gradient {
+  background:
+    radial-gradient(circle at 78% 10%, rgba(79, 141, 154, 0.14), transparent 34%),
+    radial-gradient(circle at 18% 65%, rgba(159, 67, 55, 0.1), transparent 40%),
+    linear-gradient(156deg, #e9dfca 0%, #f5f0e4 55%, #dce8e5 100%);
+}
+
+:root[data-theme='light'] .app-header {
+  color: var(--workshop-ink);
+  background: linear-gradient(180deg, rgba(255, 252, 244, 0.98), rgba(239, 233, 218, 0.96));
+}
+
+:root[data-theme='light'] .canvas-workspace {
+  background: linear-gradient(180deg, rgba(232, 238, 233, 0.78), rgba(220, 232, 229, 0.95));
+}
+
+:root[data-theme='light'] .canvas-shell {
+  background: radial-gradient(circle at 60% 20%, rgba(240, 244, 235, 0.9), rgba(214, 226, 222, 0.96));
+}
+
+:root[data-theme='light'] .palette-region {
+  background:
+    radial-gradient(circle at 80% 0%, rgba(203, 154, 58, 0.1), transparent 48%),
+    linear-gradient(180deg, rgba(255, 252, 244, 0.98) 0%, rgba(239, 233, 218, 0.98) 100%);
+}
+
+:root[data-theme='light'] .status-strip,
+:root[data-theme='light'] .collaborator-chip,
+:root[data-theme='light'] .canonical-navigation,
+:root[data-theme='light'] .grid-overlay-controls,
+:root[data-theme='light'] .minimap-overlay,
+:root[data-theme='light'] .canvas-interaction-guide,
+:root[data-theme='light'] .canvas-zoom-coordinate {
+  color: var(--workshop-ink);
+  background: rgba(255, 252, 244, 0.94);
+  border-color: var(--workshop-line);
+  box-shadow: 0 8px 18px rgba(16, 47, 61, 0.12);
+}
+
+:root[data-theme='light'] button,
+:root[data-theme='light'] .canvas-zoom-controls-actions button {
+  color: var(--workshop-ink);
+  background: rgba(255, 252, 244, 0.92);
+  border-color: var(--workshop-line);
+  box-shadow: 0 2px 5px rgba(16, 47, 61, 0.08);
+}
+
+:root[data-theme='light'] button:hover:not(:disabled),
+:root[data-theme='light'] .canvas-zoom-controls-actions button:hover:not(:disabled) {
+  background: #e9dfca;
+  border-color: var(--workshop-blue);
+}
+
+:root[data-theme='light'] .palette-region .ui-toggle-group-item:not(.tile-palette-swatch) {
+  color: var(--workshop-ink);
+  background: rgba(255, 252, 244, 0.86);
+  border-color: var(--workshop-line);
+}
+
+:root[data-theme='light'] .palette-region .ui-toggle-group-item[data-state='on']:not(.tile-palette-swatch) {
+  color: var(--workshop-ink);
+  background: rgba(203, 154, 58, 0.24);
+  border-color: rgba(166, 109, 8, 0.72);
 }
 
 .palette-header-row {
