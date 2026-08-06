@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Maximize2, Minimize2, Minus, Plus } from 'lucide-react'
+import { Maximize2, Minimize2 } from 'lucide-react'
 import type { TileShape } from '../domain/tileGeometry'
 
 export type MinimapViewport = {
@@ -28,9 +28,6 @@ type MinimapOverlayProps = {
   occupancy?: MinimapOccupancyChunk[]
   chunkWorldSize?: number
   onPanTo: (center: { x: number; y: number }) => void
-  cameraZoom?: number
-  zoomRange?: { min: number; max: number }
-  onZoomTo?: (zoom: number) => void
   topology?: {
     patchRows: number
     patchColumns: number
@@ -93,14 +90,11 @@ export const MinimapOverlay = ({
   occupancy,
   chunkWorldSize,
   onPanTo,
-  cameraZoom,
-  zoomRange,
-  onZoomTo,
   topology,
 }: MinimapOverlayProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null)
-  const [minimized, setMinimized] = useState(false)
+  const [minimized, setMinimized] = useState(true)
 
   const width = worldBounds.maxX - worldBounds.minX
   const height = worldBounds.maxY - worldBounds.minY
@@ -265,25 +259,6 @@ export const MinimapOverlay = ({
     })
   }, [normalizedViewport, pointerToWorld])
 
-  const zoomOutDisabled = cameraZoom === undefined || !zoomRange || !onZoomTo
-  const zoomInDisabled = cameraZoom === undefined || !zoomRange || !onZoomTo
-
-  const handleZoomOut = useCallback(() => {
-    if (cameraZoom === undefined || !zoomRange || !onZoomTo) {
-      return
-    }
-
-    onZoomTo(Math.max(zoomRange.min, cameraZoom * 0.85))
-  }, [cameraZoom, onZoomTo, zoomRange])
-
-  const handleZoomIn = useCallback(() => {
-    if (cameraZoom === undefined || !zoomRange || !onZoomTo) {
-      return
-    }
-
-    onZoomTo(Math.min(zoomRange.max, cameraZoom * 1.15))
-  }, [cameraZoom, onZoomTo, zoomRange])
-
   useEffect(() => {
     const onPointerMove = (event: PointerEvent): void => {
       if (dragOffset === null) {
@@ -307,11 +282,11 @@ export const MinimapOverlay = ({
   }, [applyPanToPointer, dragOffset])
 
   return (
-    <aside className={`minimap-overlay${minimized ? ' minimap-overlay--minimized' : ''}`} aria-label="World minimap">
+    <aside className={`minimap-overlay${minimized ? ' minimap-overlay--minimized' : ''}`} aria-label="Galaxy minimap">
       <div className="minimap-header">
-        <h3>Minimap</h3>
+        <h3>Galaxy map</h3>
         <div className="minimap-header-actions">
-          {!minimized && <span>Drag viewport</span>}
+          {!minimized && <span>Drift viewport</span>}
           <button
             type="button"
             className="minimap-minimize-toggle"
@@ -331,14 +306,10 @@ export const MinimapOverlay = ({
           ref={containerRef}
           className="minimap-track"
           role="application"
-          aria-label="Drag or click to pan the canvas"
+          aria-label="Drag or click to glide across mosaic enclaves"
           onPointerDown={handleTrackPointerDown}
         >
-          <div className="minimap-corner-controls" role="group" aria-label="Minimap zoom controls">
-            <button type="button" onClick={handleZoomOut} disabled={zoomOutDisabled} aria-label="Zoom out"><Minus aria-hidden="true" /></button>
-            <button type="button" onClick={handleZoomIn} disabled={zoomInDisabled} aria-label="Zoom in"><Plus aria-hidden="true" /></button>
-          </div>
-          <svg className="minimap-quilt-render" viewBox="0 0 100 100" aria-label="Whole quilt preview" preserveAspectRatio="none">
+          <svg className="minimap-quilt-render" viewBox="0 0 100 100" aria-label="Whole galaxy preview" preserveAspectRatio="none">
             {occupancyCells.map((cell) => (
               <rect
                 key={cell.id}

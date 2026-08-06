@@ -10,6 +10,6 @@ describe('CanvasLoadingFallback', () => {
     const spinner = document.querySelector('.canvas-loading-spinner')
     expect(spinner).not.toBeNull()
     expect(spinner).toHaveAttribute('aria-hidden', 'true')
-    expect(screen.getByText('Loading canvas...')).toBeInTheDocument()
+    expect(screen.getByText('Unearthing relic field...')).toBeInTheDocument()
   })
 })

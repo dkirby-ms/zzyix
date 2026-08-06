@@ -28,9 +28,12 @@ export const AppHeader = ({
       <div className="app-brand">
         <span className="app-brand-mark" aria-hidden="true">Z</span>
         <span className="app-header-title">zzyix</span>
-        <span className="app-brand-subtitle">Shared mosaic atlas</span>
+        <span className="app-brand-subtitle">Living relic mosaic galaxy</span>
       </div>
       <div className="app-header-meta">
+        <span className="observer-invite" title="Observers can pan and explore without editing">
+          Observer lanes open
+        </span>
         {collaboratorCount > 0 && (
           <span className="collaborator-summary" title={`${collaboratorCount} collaborators active`}>
             <Users aria-hidden="true" />

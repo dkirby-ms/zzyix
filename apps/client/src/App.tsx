@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { Minus, Plus } from 'lucide-react'
 import {
   applyChunkSubscriptionBudgets,
   shouldRecomputeVisibleChunks,
@@ -101,6 +102,7 @@ const QUILT_CACHE_PATCH_BUDGET = 64
 const QUILT_OCCUPANCY_REFRESH_MS = 10_000
 const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
+const INTERACTION_GUIDE_DISMISSED_KEY = 'zzyix.interactionGuideDismissed'
 
 const MosaicScene = lazy(async () => {
   const module = await import('./render/MosaicScene')
@@ -339,6 +341,13 @@ function ProtectedApp() {
     maxZoom: 140,
     panSensitivity: 0.02,
   })
+  const [interactionGuideVisible, setInteractionGuideVisible] = useState(() => {
+    if (typeof window === 'undefined') {
+      return true
+    }
+
+    return window.localStorage.getItem(INTERACTION_GUIDE_DISMISSED_KEY) !== 'true'
+  })
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
   const [canonicalError, setCanonicalError] = useState<string | null>(null)
@@ -398,6 +407,20 @@ function ProtectedApp() {
     minY: canonicalDescriptor.originY + canonicalDescriptor.assignedPatch.row * canonicalDescriptor.patchHeight,
     maxY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 1) * canonicalDescriptor.patchHeight,
   } : undefined, [canonicalDescriptor])
+  const viewportPatch = useMemo(() => {
+    if (!canonicalDescriptor || !cameraViewport) {
+      return null
+    }
+
+    const wrapIndex = (index: number, count: number): number => ((index % count) + count) % count
+    const column = Math.floor((cameraViewport.center.x - canonicalDescriptor.originX) / canonicalDescriptor.patchWidth)
+    const row = Math.floor((cameraViewport.center.y - canonicalDescriptor.originY) / canonicalDescriptor.patchHeight)
+
+    return {
+      row: wrapIndex(row, canonicalDescriptor.patchRows),
+      column: wrapIndex(column, canonicalDescriptor.patchColumns),
+    }
+  }, [cameraViewport, canonicalDescriptor])
   const visibleTiles = useMemo(
     () => isQuiltV2 ? selectQuiltTiles(quiltCache) : sequencedState.tiles,
     [isQuiltV2, quiltCache, sequencedState.tiles],
@@ -432,6 +455,20 @@ function ProtectedApp() {
 
   const handlePaletteChange = useCallback((name: PaletteName): void => {
     dispatchActiveTileUi({ type: 'set-palette', paletteName: name })
+  }, [])
+
+  const dismissInteractionGuide = useCallback((): void => {
+    setInteractionGuideVisible(false)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(INTERACTION_GUIDE_DISMISSED_KEY, 'true')
+    }
+  }, [])
+
+  const restoreInteractionGuide = useCallback((): void => {
+    setInteractionGuideVisible(true)
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(INTERACTION_GUIDE_DISMISSED_KEY)
+    }
   }, [])
 
   useEffect(() => {
@@ -1342,12 +1379,12 @@ function ProtectedApp() {
   ])
 
   const content = mode === 'canonical-loading' ? (
-    <main className="auth-shell" aria-live="polite">Loading the canonical canvas...</main>
+    <main className="auth-shell" aria-live="polite">Tracing the canonical galaxy...</main>
   ) : mode === 'canonical-unavailable' ? (
     <main className="auth-shell" role="alert">
       <section className="auth-panel">
-        <h1>Canvas unavailable</h1>
-        <p>{canonicalError ?? 'The canonical canvas is temporarily unavailable.'}</p>
+        <h1>Galaxy unavailable</h1>
+        <p>{canonicalError ?? 'The canonical mosaic galaxy is temporarily unavailable.'}</p>
       </section>
     </main>
   ) : (
@@ -1374,11 +1411,11 @@ function ProtectedApp() {
             <section className="canonical-navigation" aria-label="Canonical patch navigation">
               <div className="canonical-navigation-heading">
                 <div>
-                  <h2>World Mosaic</h2>
+                  <h2>Mosaic Galaxy</h2>
                   <p>
                     {focusedCanonicalPatch
-                      ? `Patch ${focusedCanonicalPatch.row}, ${focusedCanonicalPatch.column}`
-                      : 'Choose a patch to focus'}
+                      ? `Enclave ${focusedCanonicalPatch.row}, ${focusedCanonicalPatch.column}`
+                      : 'Choose an enclave to focus'}
                   </p>
                 </div>
                 <button
@@ -1392,7 +1429,7 @@ function ProtectedApp() {
                     centerY: canonicalDescriptor.originY + (canonicalDescriptor.assignedPatch.row + 0.5) * canonicalDescriptor.patchHeight,
                   })}
                 >
-                  Root
+                  Home Enclave
                 </button>
               </div>
             </section>
@@ -1417,6 +1454,27 @@ function ProtectedApp() {
               setGridOverlayAnnouncement(pattern ? `Grid pattern changed to ${pattern.label}.` : '')
             }}
           />
+          {interactionGuideVisible ? (
+            <section className="canvas-interaction-guide" aria-label="Canvas interaction guide">
+              <p className="canvas-interaction-guide-title">Canvas controls</p>
+              <ul>
+                <li>Place tile: left click</li>
+                <li>Rotate tile: right drag</li>
+                <li>Pan camera: middle drag</li>
+                <li>Fine rotate: [ and ] keys</li>
+              </ul>
+              <button type="button" onClick={dismissInteractionGuide}>Hide tips</button>
+            </section>
+          ) : (
+            <button
+              type="button"
+              className="canvas-interaction-guide-toggle"
+              onClick={restoreInteractionGuide}
+              aria-label="Show canvas interaction tips"
+            >
+              Show tips
+            </button>
+          )}
           <AppErrorBoundary
             title="Canvas failed to load"
             description="Reload the canvas to try again. If this repeats, include the diagnostic details below when reporting it."
@@ -1492,8 +1550,6 @@ function ProtectedApp() {
               rotation: tile.transform.rotation,
               mirrored: tile.transform.mirrored,
             }))}
-            cameraZoom={cameraZoom}
-            zoomRange={{ min: cameraPolicy.minZoom, max: cameraPolicy.maxZoom }}
             topology={isQuiltV2 && quiltProtocol?.topology ? {
               patchRows: quiltProtocol.topology.patchRows,
               patchColumns: quiltProtocol.topology.patchColumns,
@@ -1508,6 +1564,39 @@ function ProtectedApp() {
               setCameraZoomOverride(clamped)
             }}
           />
+          <aside className="canvas-zoom-controls" aria-label="Canvas zoom controls">
+            <div className="canvas-zoom-controls-actions" role="group" aria-label="Canvas zoom controls">
+              <button
+                type="button"
+                aria-label="Zoom out"
+                disabled={cameraZoom <= cameraPolicy.minZoom}
+                onClick={() => {
+                  const clamped = Math.max(cameraPolicy.minZoom, cameraZoom * 0.85)
+                  setCameraZoom(clamped)
+                  setCameraZoomOverride(clamped)
+                }}
+              >
+                <Minus aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                aria-label="Zoom in"
+                disabled={cameraZoom >= cameraPolicy.maxZoom}
+                onClick={() => {
+                  const clamped = Math.min(cameraPolicy.maxZoom, cameraZoom * 1.15)
+                  setCameraZoom(clamped)
+                  setCameraZoomOverride(clamped)
+                }}
+              >
+                <Plus aria-hidden="true" />
+              </button>
+            </div>
+            <span className="canvas-zoom-coordinate" aria-live="polite">
+              Patch ({viewportPatch
+                ? `${viewportPatch.row}, ${viewportPatch.column}`
+                : 'n/a'})
+            </span>
+          </aside>
         </section>
         {mutationControlsEnabled && (
           <TilePalette
@@ -1575,7 +1664,7 @@ function App() {
   }
 
   if (auth.status === 'loading') {
-    return <main className="auth-shell">Loading your secure workspace...</main>
+    return <main className="auth-shell">Opening your secure galaxy workspace...</main>
   }
 
   if (auth.status !== 'authenticated' || !auth.principal) {
@@ -1583,7 +1672,7 @@ function App() {
       <main className="auth-shell">
         <section className="auth-panel">
           <h1>zzyix</h1>
-          <p>{auth.error ?? 'Sign in to enter the shared mosaic atlas.'}</p>
+          <p>{auth.error ?? 'Sign in to enter the living relic mosaic galaxy.'}</p>
           {auth.testIdentity && (
             <div className="test-identity-control">
               <label htmlFor="test-identity">Local test user</label>

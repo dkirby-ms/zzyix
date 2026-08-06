@@ -42,9 +42,9 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Whole quilt preview').querySelectorAll('path')).toHaveLength(2)
+    expect(screen.getByLabelText('Whole galaxy preview').querySelectorAll('path')).toHaveLength(2)
 
-    const track = screen.getByLabelText('Drag or click to pan the canvas')
+    const track = screen.getByLabelText('Drag or click to glide across mosaic enclaves')
     setTrackRect(track, { left: 10, top: 20, width: 200, height: 100 })
 
     fireEvent.pointerDown(track, { clientX: 110, clientY: 70 })
@@ -67,7 +67,7 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    const preview = screen.getByLabelText('Whole quilt preview')
+    const preview = screen.getByLabelText('Whole galaxy preview')
     expect(preview.querySelectorAll('rect.minimap-occupancy')).toHaveLength(2)
     expect(preview.querySelector('[data-tile-count="8"]')).toHaveAttribute('x', '75')
     expect(preview.querySelectorAll('path.minimap-tile')).toHaveLength(0)
@@ -87,7 +87,7 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    const track = screen.getByLabelText('Drag or click to pan the canvas')
+    const track = screen.getByLabelText('Drag or click to glide across mosaic enclaves')
     setTrackRect(track, { left: 10, top: 20, width: 200, height: 100 })
 
     const viewport = screen.getByLabelText('Current viewport')
@@ -134,15 +134,15 @@ describe('MinimapOverlay', () => {
       />,
     )
 
-    expect(screen.getByLabelText('Drag or click to pan the canvas')).toBeInTheDocument()
+    expect(screen.getByLabelText('Drag or click to glide across mosaic enclaves')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Minimize minimap' }))
 
-    expect(screen.queryByLabelText('Drag or click to pan the canvas')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Drag or click to glide across mosaic enclaves')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Expand minimap' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand minimap' }))
 
-    expect(screen.getByLabelText('Drag or click to pan the canvas')).toBeInTheDocument()
+    expect(screen.getByLabelText('Drag or click to glide across mosaic enclaves')).toBeInTheDocument()
   })
 })
