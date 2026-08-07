@@ -135,6 +135,7 @@ test('release workflow produces one repository changelog', async () => {
     commits: [
       { hash: '1234567890abcdef', message: 'fix(client): preserve release details' },
       { hash: 'abcdef1234567890', message: 'test(server): cover changelog generation' },
+      { hash: 'fedcba0987654321', message: 'feat!: change release configuration\n\nBREAKING CHANGE: update release automation' },
     ],
     lastRelease: { gitTag: 'v1.0.0' },
     nextRelease: { gitTag: 'v1.0.1', version: '1.0.1' },
@@ -146,6 +147,8 @@ test('release workflow produces one repository changelog', async () => {
   assert.match(notes, /preserve release details/)
   assert.match(notes, /### Tests/)
   assert.match(notes, /cover changelog generation/)
+  assert.match(notes, /### ⚠ BREAKING CHANGE/)
+  assert.match(notes, /update release automation/)
 })
 
 test('deployment accepts only exact same-origin HTTPS client and CORS values', async () => {
