@@ -17,8 +17,8 @@ const defaultPipeline = Object.freeze({
     labEncoding: 'float32-little-endian',
   },
   resize: {
-    width: 2400,
-    height: 1126,
+    width: 1077,
+    height: 1616,
     fit: 'inside',
     kernel: 'lanczos3',
   },
@@ -41,7 +41,7 @@ const defaultPipeline = Object.freeze({
     contrastRadius: 3,
     contrastWeight: 0.35,
   },
-  retentionTargets: ['face', 'weapon', 'horse', 'contour'],
+  retentionTargets: ['face', 'weapon', 'armour', 'contour'],
 })
 
 const artifactNames = Object.freeze({
@@ -172,7 +172,7 @@ const getCrop = (image) => {
 const decodeSource = async ({ sourceBuffer, image, pipeline }) => {
   const target = getTargetDimensions(image, pipeline)
   const crop = getCrop(image)
-  let source = sharp(sourceBuffer, { limitInputPixels: false }).rotate()
+  let source = sharp(sourceBuffer, { limitInputPixels: false })
   if (crop) {
     source = source.extract(crop)
   }
@@ -425,6 +425,32 @@ const createMasks = ({ denoisedLab, width, height, params }) => {
   return { edgeMask, saliencyMask, threshold }
 }
 
+const calculateFeatureCoverage = ({ featureRegions = [], edgeMask, saliencyMask, width, height }) => featureRegions.map((region) => {
+  assert.ok(Number.isInteger(region.x) && Number.isInteger(region.y), `${region.target} region must use integer coordinates`)
+  assert.ok(Number.isInteger(region.width) && region.width > 0, `${region.target} region width must be a positive integer`)
+  assert.ok(Number.isInteger(region.height) && region.height > 0, `${region.target} region height must be a positive integer`)
+  assert.ok(region.x >= 0 && region.y >= 0 && region.x + region.width <= width && region.y + region.height <= height, `${region.target} region must stay within output dimensions`)
+
+  let edgePixelCount = 0
+  let saliencyTotal = 0
+  const pixelCount = region.width * region.height
+  for (let y = region.y; y < region.y + region.height; y += 1) {
+    for (let x = region.x; x < region.x + region.width; x += 1) {
+      const index = y * width + x
+      edgePixelCount += edgeMask[index] > 0 ? 1 : 0
+      saliencyTotal += saliencyMask[index]
+    }
+  }
+
+  assert.ok(edgePixelCount >= region.minimumEdgePixels, `${region.target} region must retain at least ${region.minimumEdgePixels} edge pixels`)
+  return {
+    target: region.target,
+    box: { x: region.x, y: region.y, width: region.width, height: region.height },
+    edgePixelCount,
+    saliencyMean: saliencyTotal / pixelCount / 255,
+  }
+})
+
 const pngFromRaw = async ({ raw, width, height, channels = 3 }) => sharp(raw, {
   raw: { width, height, channels },
 }).png({ compressionLevel: 9, palette: false }).toBuffer()
@@ -463,6 +489,13 @@ export const preprocessSource = async ({ sourceBuffer, outputDir, image, pipelin
     params: pipeline.denoising,
   })
   const masks = createMasks({ denoisedLab, width: decoded.width, height: decoded.height, params: pipeline.saliency })
+  const featureCoverage = calculateFeatureCoverage({
+    featureRegions: image?.preprocessing?.featureRegions,
+    edgeMask: masks.edgeMask,
+    saliencyMask: masks.saliencyMask,
+    width: decoded.width,
+    height: decoded.height,
+  })
 
   const luminancePng = await pngFromRaw({ raw: normalized.grayscale, width: decoded.width, height: decoded.height, channels: 1 })
   const denoisedPng = await pngFromRaw({ raw: labToRgb(denoisedLab), width: decoded.width, height: decoded.height, channels: 3 })
@@ -495,6 +528,7 @@ export const preprocessSource = async ({ sourceBuffer, outputDir, image, pipelin
         upper: normalized.high,
       },
       edgeThreshold: masks.threshold,
+      featureCoverage,
       artifacts,
     },
   }

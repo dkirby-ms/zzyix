@@ -84,8 +84,8 @@
           {
             "operation": "resize",
             "method": "lanczos3",
-            "width": 2400,
-            "height": 1126,
+            "width": 1077,
+            "height": 1616,
             "preserveAspectRatio": true
           },
           {
@@ -118,9 +118,43 @@
         ],
         "edgeRetentionTargets": [
           "face",
-          "helmet",
+          "weapon",
           "armour",
           "contour"
+        ],
+        "featureRegions": [
+          {
+            "target": "face",
+            "x": 390,
+            "y": 180,
+            "width": 320,
+            "height": 420,
+            "minimumEdgePixels": 40
+          },
+          {
+            "target": "weapon",
+            "x": 520,
+            "y": 160,
+            "width": 557,
+            "height": 110,
+            "minimumEdgePixels": 40
+          },
+          {
+            "target": "armour",
+            "x": 100,
+            "y": 500,
+            "width": 850,
+            "height": 800,
+            "minimumEdgePixels": 160
+          },
+          {
+            "target": "contour",
+            "x": 0,
+            "y": 100,
+            "width": 1077,
+            "height": 1400,
+            "minimumEdgePixels": 320
+          }
         ]
       },
       "mosaicInputs": {

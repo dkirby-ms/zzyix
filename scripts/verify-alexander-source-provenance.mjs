@@ -65,6 +65,18 @@ for (const image of manifest.benchmarkImages) {
     width: image.crop.width,
     height: image.crop.height,
   }, `${image.id} normalized source recipe must use the recorded crop`)
+  const orientationStep = workingSource.recipe.find((step) => step.operation === 'normalize-orientation')
+  assert.equal(orientationStep?.method, 'honor-decoded-pixel-order-no-rotation', `${image.id} normalized source recipe must preserve decoded pixel orientation`)
+  const resizeStep = workingSource.recipe.find((step) => step.operation === 'resize')
+  assert.deepEqual({
+    width: resizeStep?.width,
+    height: resizeStep?.height,
+    preserveAspectRatio: resizeStep?.preserveAspectRatio,
+  }, {
+    width: 1077,
+    height: 1616,
+    preserveAspectRatio: true,
+  }, `${image.id} close-up resize contract must use explicit portrait dimensions`)
 
   assert.equal(image.preprocessing.script, 'scripts/preprocess-alexander-source.mjs', `${image.id} must record the preprocessing generator`)
   assert.equal(isRuntimeBundlePath(image.preprocessing.expectedDirectory), false, `${image.id} preprocessing output must not target a runtime bundle path`)
@@ -78,10 +90,19 @@ for (const image of manifest.benchmarkImages) {
   ], `${image.id} preprocessing config must record deterministic parameters`)
   assert.deepEqual(image.preprocessing.edgeRetentionTargets, [
     'face',
-    'helmet',
+    'weapon',
     'armour',
     'contour',
   ], `${image.id} preprocessing must retain recognition-critical edge targets`)
+  assert.equal(image.preprocessing.featureRegions.length, image.preprocessing.edgeRetentionTargets.length, `${image.id} preprocessing must define one feature region per retention target`)
+  for (const region of image.preprocessing.featureRegions) {
+    assert.ok(image.preprocessing.edgeRetentionTargets.includes(region.target), `${image.id} feature region must name a retention target`)
+    assert.ok(Number.isInteger(region.x) && Number.isInteger(region.y), `${image.id} ${region.target} feature region must use integer coordinates`)
+    assert.ok(Number.isInteger(region.width) && region.width > 0, `${image.id} ${region.target} feature region width must be positive`)
+    assert.ok(Number.isInteger(region.height) && region.height > 0, `${image.id} ${region.target} feature region height must be positive`)
+    assert.ok(region.x >= 0 && region.y >= 0 && region.x + region.width <= 1077 && region.y + region.height <= 1616, `${image.id} ${region.target} feature region must stay within close-up output dimensions`)
+    assert.ok(Number.isInteger(region.minimumEdgePixels) && region.minimumEdgePixels > 0, `${image.id} ${region.target} feature region must require edge retention`)
+  }
   for (const [artifactName, artifactPath] of Object.entries(image.preprocessing.artifacts)) {
     assert.match(artifactPath, /^alexander-.+\.(bin|png)$/, `${image.id} preprocessing artifact ${artifactName} must be a generated Alexander artifact`)
   }

@@ -51,8 +51,11 @@ npm run preprocess:alexander-source -- --live
 The preprocessor verifies the source SHA-256, converts the decoded sRGB pixels to
 CIELAB, normalizes luminance with a fixed percentile stretch, applies a
 deterministic bilateral LAB denoising pass, and emits saliency and edge masks for
-recognition-critical face, helmet, armour, and contour features. Generated files
+recognition-critical face, weapon, armour, and contour features. Generated files
 are written under `offline/output/` and are excluded from source control.
+Each required feature has a fixed output-space region and minimum retained edge
+count recorded in the source manifest; generation fails when a region falls below
+its threshold.
 
 Generate the downstream palette and tile-candidate inputs from those
 preprocessing artifacts:
