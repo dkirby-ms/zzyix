@@ -23,6 +23,8 @@ const releaseNotesWriterOpts = {
     }
 
     return {
+      ...commit,
+      shortHash: commit.shortHash ?? commit.hash?.slice(0, 7),
       type: typeConfig?.section ?? 'Breaking Changes'
     };
   },
@@ -38,7 +40,7 @@ const releaseNotesWriterOpts = {
 `,
   headerPartial: `## {{#if linkCompare}}[{{version}}]({{host}}/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}){{else}}{{version}}{{/if}} ({{date}})
 `,
-  commitPartial: `* {{#if scope}}**{{scope}}:** {{/if}}{{subject}}
+  commitPartial: `* {{#if scope}}**{{scope}}:** {{/if}}{{subject}}{{#if hash}} ([{{shortHash}}]({{root.host}}/{{root.owner}}/{{root.repository}}/commit/{{hash}})){{/if}}
 `,
   footerPartial: `{{#each noteGroups}}
 ### ⚠ {{title}}

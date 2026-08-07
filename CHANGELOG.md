@@ -7,6 +7,30 @@ description: Release notes and notable changes by version.
 
 ## [1.6.0](https://github.com/dkirby-ms/zzyix/compare/v1.5.0...v1.6.0) (2026-08-06)
 
+### Features
+
+* **client:** light mode ([1b10a01](https://github.com/dkirby-ms/zzyix/commit/1b10a019d0b7f41b64308477d06e80152162b706))
+
+### Bug Fixes
+
+* **client:** reduce zoom control size ([02d1756](https://github.com/dkirby-ms/zzyix/commit/02d17565ea116db6f228fc7e6483d3b5aa77ff1b))
+* **client:** additional css bugs ([cde3d17](https://github.com/dkirby-ms/zzyix/commit/cde3d17e27b61d29e2a534fcafb9ee47119620b1))
+* **client:** stale prop ([17b7611](https://github.com/dkirby-ms/zzyix/commit/17b761105bd8cbd344f0462ae0d5754c9bfa5633))
+* **client:** ux alignments ([b5bfbe4](https://github.com/dkirby-ms/zzyix/commit/b5bfbe4393fbf7f4135df3f0491ba5135c3b6bf8))
+* **client:** design refinements ([589c888](https://github.com/dkirby-ms/zzyix/commit/589c88872cce50cd9d3d57b91cf0b03ab29988a2))
+
+### Miscellaneous Chores
+
+* fantome design ([1dbab5f](https://github.com/dkirby-ms/zzyix/commit/1dbab5f193f456efea7b04b7925502c0e107abde))
+* fantome agent research ([a2f8280](https://github.com/dkirby-ms/zzyix/commit/a2f8280f1355919ec6f6e2ed8bbf551c9d5024a2))
+* remove unused import ([10f8c3d](https://github.com/dkirby-ms/zzyix/commit/10f8c3dfac18f9a3b3c1172e054e93d9fe4334b2))
+* **ci:** regressed e2e ([8973d00](https://github.com/dkirby-ms/zzyix/commit/8973d00a2a4c9fecc50fd0b4be9bdc88f7981f8b))
+* **deps:** bump @react-three/fiber from 9.6.1 to 9.7.0 ([b4478eb](https://github.com/dkirby-ms/zzyix/commit/b4478ebef40959fd5267e8c8ef545e5820ad4e0b))
+* **deps:** bump @azure/msal-browser from 5.17.1 to 5.17.3 ([f29955b](https://github.com/dkirby-ms/zzyix/commit/f29955b27ed47a8ee3686d6bc43411e2ef540ad1))
+* **deps-dev:** bump conventional-changelog-conventionalcommits ([4a9f821](https://github.com/dkirby-ms/zzyix/commit/4a9f821b982ee475608cf55fc968778733ea4021))
+* **deps:** bump jose from 6.2.4 to 6.2.7 ([f43a086](https://github.com/dkirby-ms/zzyix/commit/f43a086c3d59d87388b4ed9774ee7f56c06ee20f))
+* **deps-dev:** bump the safe-dev-dependencies group with 6 updates ([55335fe](https://github.com/dkirby-ms/zzyix/commit/55335fef4a8819def3e1d15c33a584a4e1e13202))
+
 ## [1.5.0](https://github.com/dkirby-ms/zzyix/compare/v1.4.2...v1.5.0) (2026-08-05)
 
 ### Features
