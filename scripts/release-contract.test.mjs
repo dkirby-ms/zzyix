@@ -145,6 +145,7 @@ test('release workflow produces one repository changelog', async () => {
 
   assert.match(notes, /### Bug Fixes/)
   assert.match(notes, /preserve release details/)
+  assert.match(notes, /\[1234567\]\(https:\/\/github\.com\/dkirby-ms\/zzyix\/commit\/1234567890abcdef\)/)
   assert.match(notes, /### Tests/)
   assert.match(notes, /cover changelog generation/)
   assert.match(notes, /### ⚠ BREAKING CHANGE/)
