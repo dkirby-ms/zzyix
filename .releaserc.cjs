@@ -13,6 +13,43 @@ const releaseNotesPresetConfig = {
   ]
 };
 
+const releaseNotesWriterOpts = {
+  transform: (commit) => {
+    const type = commit.revert ? 'revert' : commit.type?.toLowerCase();
+    const typeConfig = releaseNotesPresetConfig.types.find((entry) => entry.type === type);
+
+    if (!typeConfig && commit.notes.length === 0) {
+      return undefined;
+    }
+
+    return {
+      type: typeConfig?.section ?? 'Breaking Changes'
+    };
+  },
+  mainTemplate: `{{> header}}
+{{#each commitGroups}}
+### {{title}}
+
+{{#each commits}}
+{{> commit root=@root}}
+{{/each}}
+{{/each}}
+{{> footer}}
+`,
+  headerPartial: `## {{#if linkCompare}}[{{version}}]({{host}}/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}){{else}}{{version}}{{/if}} ({{date}})
+`,
+  commitPartial: `* {{#if scope}}**{{scope}}:** {{/if}}{{subject}}
+`,
+  footerPartial: `{{#each noteGroups}}
+### ⚠ {{title}}
+
+{{#each notes}}
+* {{text}}
+{{/each}}
+{{/each}}
+`
+};
+
 module.exports = {
   branches: ['main'],
   repositoryUrl: 'https://github.com/dkirby-ms/zzyix.git',
@@ -32,6 +69,7 @@ module.exports = {
       {
         preset: 'conventionalcommits',
         presetConfig: releaseNotesPresetConfig,
+        writerOpts: releaseNotesWriterOpts,
         parserOpts: {
           noteKeywords: ['BREAKING CHANGE', 'BREAKING CHANGES', 'BREAKING']
         }
