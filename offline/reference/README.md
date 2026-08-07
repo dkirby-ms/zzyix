@@ -38,3 +38,17 @@ npm run verify:alexander-source -- --live
 
 The live check downloads the original source URL and verifies the recorded
 SHA-256. It does not write image bytes to the workspace.
+
+## Preprocessing
+
+Generate deterministic preprocessing artifacts from the manifest source:
+
+```bash
+npm run preprocess:alexander-source -- --live
+```
+
+The preprocessor verifies the source SHA-256, converts the decoded sRGB pixels to
+CIELAB, normalizes luminance with a fixed percentile stretch, applies a
+deterministic bilateral LAB denoising pass, and emits saliency and edge masks for
+recognition-critical face, weapon, horse, and contour features. Generated files
+are written under `offline/output/` and are excluded from source control.

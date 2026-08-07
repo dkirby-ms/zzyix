@@ -96,6 +96,32 @@
           }
         ],
         "reproducibilityNote": "The normalized source is generated output, not runtime source. Regenerate it from the original URL, checksum, crop, and recipe before producing benchmark tiles."
+      },
+      "preprocessing": {
+        "expectedDirectory": "offline/output/alexander-preprocessed",
+        "script": "scripts/preprocess-alexander-source.mjs",
+        "configPath": "offline/output/alexander-preprocessed/alexander-preprocessing-config.json",
+        "artifacts": {
+          "normalized": "alexander-normalized-master.png",
+          "lab": "alexander-cielab-float32.bin",
+          "luminance": "alexander-luminance-normalized.png",
+          "denoised": "alexander-denoised-preview.png",
+          "saliency": "alexander-saliency-mask.png",
+          "edges": "alexander-edge-mask.png"
+        },
+        "configurationRecords": [
+          "colorSpace",
+          "normalization",
+          "denoising",
+          "saliency",
+          "generatorSeed"
+        ],
+        "edgeRetentionTargets": [
+          "face",
+          "weapon",
+          "horse",
+          "contour"
+        ]
       }
     }
   ]

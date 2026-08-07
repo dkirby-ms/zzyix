@@ -59,6 +59,26 @@ for (const image of manifest.benchmarkImages) {
   const downloadStep = workingSource.recipe.find((step) => step.operation === 'download-original')
   assert.equal(downloadStep?.verifySha256, image.checksums.sha256, `${image.id} download step must verify the recorded SHA-256`)
 
+  assert.equal(image.preprocessing.script, 'scripts/preprocess-alexander-source.mjs', `${image.id} must record the preprocessing generator`)
+  assert.equal(isRuntimeBundlePath(image.preprocessing.expectedDirectory), false, `${image.id} preprocessing output must not target a runtime bundle path`)
+  assert.equal(isRuntimeBundlePath(image.preprocessing.configPath), false, `${image.id} preprocessing config must not target a runtime bundle path`)
+  assert.deepEqual(image.preprocessing.configurationRecords, [
+    'colorSpace',
+    'normalization',
+    'denoising',
+    'saliency',
+    'generatorSeed',
+  ], `${image.id} preprocessing config must record deterministic parameters`)
+  assert.deepEqual(image.preprocessing.edgeRetentionTargets, [
+    'face',
+    'weapon',
+    'horse',
+    'contour',
+  ], `${image.id} preprocessing must retain recognition-critical edge targets`)
+  for (const [artifactName, artifactPath] of Object.entries(image.preprocessing.artifacts)) {
+    assert.match(artifactPath, /^alexander-.+\.(bin|png)$/, `${image.id} preprocessing artifact ${artifactName} must be a generated Alexander artifact`)
+  }
+
   if (liveCheck) {
     const remote = await hashRemote(image.originalUrl)
     assert.equal(remote.sha256, image.checksums.sha256, `${image.id} live SHA-256 mismatch`)

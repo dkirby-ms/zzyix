@@ -4,6 +4,7 @@ node_modules/
 apps/client/coverage/
 /playwright-report/
 /test-results/
+/offline/output/
 .env
 /.vscode
 infra/bicep/host.main.bicepparam
