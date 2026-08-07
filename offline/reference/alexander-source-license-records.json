@@ -1,0 +1,102 @@
+{
+  "manifestVersion": 1,
+  "project": "zzyix",
+  "purpose": "Alexander Mosaic benchmark source provenance for deterministic mosaic generation",
+  "retrievalDate": "2026-08-07",
+  "artwork": {
+    "title": "Alexander Mosaic, also known as the Battle of Issus Mosaic",
+    "origin": "House of the Faun, Pompeii",
+    "currentHolding": "National Archaeological Museum, Naples, inventory 10020",
+    "date": "Roman copy, circa 125-120 BCE, after an earlier Hellenistic painting traditionally attributed to Philoxenus of Eretria",
+    "publicDomainRationale": "The underlying ancient mosaic is a two-dimensional artwork from antiquity and is outside copyright term in the United States and other jurisdictions with comparable public-domain treatment for ancient works. The selected source file is also marked Public domain by Wikimedia Commons.",
+    "status": "public-domain"
+  },
+  "assetPolicy": {
+    "runtimeBundle": "excluded",
+    "originalSourceStorage": "Do not store source image bytes under apps/client, apps/server, public, dist, or other runtime bundle paths until an approved asset location is established.",
+    "workingSourceStorage": "Generated working files belong under offline/output/ or another non-runtime path and must remain reproducible from this manifest."
+  },
+  "benchmarkImages": [
+    {
+      "id": "alexander-mosaic-primary",
+      "role": "primary-source",
+      "fileName": "Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg",
+      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d9/Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg",
+      "mimeType": "image/jpeg",
+      "pixelDimensions": {
+        "width": 3625,
+        "height": 1700
+      },
+      "byteLength": 1300655,
+      "license": {
+        "name": "Public domain",
+        "reuseTerms": "Public domain",
+        "attributionRequired": false,
+        "attribution": "Marie-Lan Nguyen (2011)",
+        "metadataSource": "Wikimedia Commons imageinfo extmetadata"
+      },
+      "checksums": {
+        "commonsSha1": "6fa5bfb85c3b08f6de7eaaa81693a5ff51cf7e79",
+        "sha256": "f9c568e9822f9ba3454600abb3ae8e05872f7e6d2b72eaf05240b39ca8a5a35f"
+      },
+      "checksumVerification": {
+        "verifiedAt": "2026-08-07",
+        "command": "curl -fsSL https://upload.wikimedia.org/wikipedia/commons/d/d9/Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg | sha256sum",
+        "repeatRuns": 2,
+        "stable": true
+      },
+      "crop": {
+        "unit": "source-pixel",
+        "x": 0,
+        "y": 0,
+        "width": 3625,
+        "height": 1700,
+        "description": "Use the full source frame. No manual crop is applied before normalization."
+      },
+      "normalizedWorkingSource": {
+        "expectedPath": "offline/output/alexander-normalized-master.png",
+        "sourceImageId": "alexander-mosaic-primary",
+        "recipeVersion": 1,
+        "recipe": [
+          {
+            "operation": "download-original",
+            "urlField": "originalUrl",
+            "verifySha256": "f9c568e9822f9ba3454600abb3ae8e05872f7e6d2b72eaf05240b39ca8a5a35f"
+          },
+          {
+            "operation": "crop",
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 3625,
+              "height": 1700
+            }
+          },
+          {
+            "operation": "normalize-orientation",
+            "method": "honor-decoded-pixel-order-no-rotation"
+          },
+          {
+            "operation": "convert-color-space",
+            "to": "sRGB"
+          },
+          {
+            "operation": "resize",
+            "method": "lanczos3",
+            "width": 2400,
+            "height": 1126,
+            "preserveAspectRatio": true
+          },
+          {
+            "operation": "encode",
+            "format": "png",
+            "compressionLevel": 9,
+            "stripMetadata": true
+          }
+        ],
+        "reproducibilityNote": "The normalized source is generated output, not runtime source. Regenerate it from the original URL, checksum, crop, and recipe before producing benchmark tiles."
+      }
+    }
+  ]
+}

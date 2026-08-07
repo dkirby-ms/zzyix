@@ -45,6 +45,7 @@
     "test:e2e:delegated": "node -e \"console.error('Delegated and moderator acceptance remains deferred and must not be treated as complete.'); process.exit(1)\"",
     "test:e2e:install": "playwright install chromium",
     "test:e2e:preflight": "node ./scripts/verify-playwright-linux-deps.mjs",
+    "verify:alexander-source": "node scripts/verify-alexander-source-provenance.mjs",
     "test:watch:client": "npm run test:watch --workspace=apps/client",
     "test:watch:server": "npm run test:watch --workspace=apps/server",
     "release": "semantic-release --extends ./.releaserc.cjs"
