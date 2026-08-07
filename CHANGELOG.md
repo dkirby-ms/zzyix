@@ -5,6 +5,14 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.6.1](https://github.com/dkirby-ms/zzyix/compare/v1.6.0...v1.6.1) (2026-08-07)
+### Bug Fixes
+
+* **release:** restore 1.6.0 changelog entries ([ca2f8c8](https://github.com/dkirby-ms/zzyix/commit/ca2f8c848fa6f29faf32beaf9387785841350560))
+### Tests
+
+* **release:** cover changelog commit links ([e90234b](https://github.com/dkirby-ms/zzyix/commit/e90234b5136717119133cde720bd13c8740b8810))
+
 ## [1.6.0](https://github.com/dkirby-ms/zzyix/compare/v1.5.0...v1.6.0) (2026-08-06)
 
 ### Features
