@@ -48,6 +48,8 @@
     "verify:alexander-source": "node scripts/verify-alexander-source-provenance.mjs",
     "preprocess:alexander-source": "node scripts/preprocess-alexander-source.mjs",
     "test:preprocess-alexander-source": "node --test scripts/preprocess-alexander-source.test.mjs",
+    "generate:alexander-mosaic-inputs": "node scripts/generate-alexander-mosaic-inputs.mjs",
+    "test:alexander-mosaic-inputs": "node --test scripts/generate-alexander-mosaic-inputs.test.mjs",
     "test:watch:client": "npm run test:watch --workspace=apps/client",
     "test:watch:server": "npm run test:watch --workspace=apps/server",
     "release": "semantic-release --extends ./.releaserc.cjs"

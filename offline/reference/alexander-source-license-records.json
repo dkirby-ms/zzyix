@@ -20,29 +20,29 @@
     {
       "id": "alexander-mosaic-primary",
       "role": "primary-source",
-      "fileName": "Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg",
-      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg",
-      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d9/Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg",
+      "fileName": "Alexander_Mosaic_detail_of_Alexander_the_Great.jpg",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:Alexander_Mosaic_detail_of_Alexander_the_Great.jpg",
+      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Alexander_Mosaic_detail_of_Alexander_the_Great.jpg",
       "mimeType": "image/jpeg",
       "pixelDimensions": {
-        "width": 3625,
-        "height": 1700
+        "width": 2154,
+        "height": 3232
       },
-      "byteLength": 1300655,
+      "byteLength": 3377658,
       "license": {
         "name": "Public domain",
         "reuseTerms": "Public domain",
         "attributionRequired": false,
-        "attribution": "Marie-Lan Nguyen (2011)",
+        "attribution": "Unknown author; Wikimedia Commons detail extraction",
         "metadataSource": "Wikimedia Commons imageinfo extmetadata"
       },
       "checksums": {
-        "commonsSha1": "6fa5bfb85c3b08f6de7eaaa81693a5ff51cf7e79",
-        "sha256": "f9c568e9822f9ba3454600abb3ae8e05872f7e6d2b72eaf05240b39ca8a5a35f"
+        "commonsSha1": "1801fe8ebc4590aa289e3840dee2e41ba4f1e918",
+        "sha256": "6c3731140a79698818db392e7a0a1985a56dad1fbf034552bd214dd14fd4397b"
       },
       "checksumVerification": {
         "verifiedAt": "2026-08-07",
-        "command": "curl -fsSL https://upload.wikimedia.org/wikipedia/commons/d/d9/Battle_of_Issos_MAN_Napoli_Inv10020_n01.jpg | sha256sum",
+        "command": "curl -fsSL https://upload.wikimedia.org/wikipedia/commons/d/d0/Alexander_Mosaic_detail_of_Alexander_the_Great.jpg | sha256sum",
         "repeatRuns": 2,
         "stable": true
       },
@@ -50,9 +50,9 @@
         "unit": "source-pixel",
         "x": 0,
         "y": 0,
-        "width": 3625,
-        "height": 1700,
-        "description": "Use the full source frame. No manual crop is applied before normalization."
+        "width": 2154,
+        "height": 3232,
+        "description": "Use the full Wikimedia Commons close-up of Alexander the Great; no additional local crop is applied."
       },
       "normalizedWorkingSource": {
         "expectedPath": "offline/output/alexander-normalized-master.png",
@@ -62,15 +62,15 @@
           {
             "operation": "download-original",
             "urlField": "originalUrl",
-            "verifySha256": "f9c568e9822f9ba3454600abb3ae8e05872f7e6d2b72eaf05240b39ca8a5a35f"
+            "verifySha256": "6c3731140a79698818db392e7a0a1985a56dad1fbf034552bd214dd14fd4397b"
           },
           {
             "operation": "crop",
             "box": {
               "x": 0,
               "y": 0,
-              "width": 3625,
-              "height": 1700
+              "width": 2154,
+              "height": 3232
             }
           },
           {
@@ -95,7 +95,7 @@
             "stripMetadata": true
           }
         ],
-        "reproducibilityNote": "The normalized source is generated output, not runtime source. Regenerate it from the original URL, checksum, crop, and recipe before producing benchmark tiles."
+        "reproducibilityNote": "The normalized source is generated output, not runtime source. Regenerate it from the Wikimedia Commons close-up URL, checksum, and recipe before producing benchmark tiles."
       },
       "preprocessing": {
         "expectedDirectory": "offline/output/alexander-preprocessed",
@@ -118,9 +118,29 @@
         ],
         "edgeRetentionTargets": [
           "face",
-          "weapon",
-          "horse",
+          "helmet",
+          "armour",
           "contour"
+        ]
+      },
+      "mosaicInputs": {
+        "expectedDirectory": "offline/output/alexander-mosaic-inputs",
+        "script": "scripts/generate-alexander-mosaic-inputs.mjs",
+        "configPath": "offline/output/alexander-mosaic-inputs/alexander-mosaic-inputs-config.json",
+        "artifacts": {
+          "palette": "alexander-mosaic-palette.json",
+          "candidates": "alexander-tile-candidates.json"
+        },
+        "configurationRecords": [
+          "palette",
+          "candidates",
+          "generatorSeed"
+        ],
+        "sourceArtifacts": [
+          "lab",
+          "luminance",
+          "saliency",
+          "edges"
         ]
       }
     }

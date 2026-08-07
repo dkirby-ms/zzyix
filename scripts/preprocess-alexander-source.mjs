@@ -154,10 +154,30 @@ const getTargetDimensions = (image, pipeline) => {
   }
 }
 
+const getCrop = (image) => {
+  const cropStep = image?.normalizedWorkingSource?.recipe?.find((step) => step.operation === 'crop')
+  const crop = cropStep?.box ?? image?.crop
+  if (!crop) {
+    return undefined
+  }
+
+  return {
+    left: crop.x,
+    top: crop.y,
+    width: crop.width,
+    height: crop.height,
+  }
+}
+
 const decodeSource = async ({ sourceBuffer, image, pipeline }) => {
   const target = getTargetDimensions(image, pipeline)
-  const { data, info } = await sharp(sourceBuffer, { limitInputPixels: false })
-    .rotate()
+  const crop = getCrop(image)
+  let source = sharp(sourceBuffer, { limitInputPixels: false }).rotate()
+  if (crop) {
+    source = source.extract(crop)
+  }
+
+  const { data, info } = await source
     .resize({
       width: target.width,
       height: target.height,

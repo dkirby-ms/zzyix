@@ -40,14 +40,14 @@ for (const image of manifest.benchmarkImages) {
   assert.ok(image.license.attribution, `${image.id} must still record attribution metadata when present`)
   assert.ok(isSha1(image.checksums.commonsSha1), `${image.id} must record Commons SHA-1`)
   assert.ok(isSha256(image.checksums.sha256), `${image.id} must record SHA-256`)
-  assert.deepEqual(image.crop, {
-    unit: 'source-pixel',
-    x: 0,
-    y: 0,
-    width: image.pixelDimensions.width,
-    height: image.pixelDimensions.height,
-    description: 'Use the full source frame. No manual crop is applied before normalization.',
-  }, `${image.id} crop must match the full source frame`)
+  assert.equal(image.crop.unit, 'source-pixel', `${image.id} crop must use source pixels`)
+  assert.ok(Number.isInteger(image.crop.x) && image.crop.x >= 0, `${image.id} crop x must be a non-negative integer`)
+  assert.ok(Number.isInteger(image.crop.y) && image.crop.y >= 0, `${image.id} crop y must be a non-negative integer`)
+  assert.ok(Number.isInteger(image.crop.width) && image.crop.width > 0, `${image.id} crop width must be a positive integer`)
+  assert.ok(Number.isInteger(image.crop.height) && image.crop.height > 0, `${image.id} crop height must be a positive integer`)
+  assert.ok(image.crop.x + image.crop.width <= image.pixelDimensions.width, `${image.id} crop must stay within source width`)
+  assert.ok(image.crop.y + image.crop.height <= image.pixelDimensions.height, `${image.id} crop must stay within source height`)
+  assert.match(image.crop.description, /Wikimedia Commons close-up of Alexander/i, `${image.id} crop must describe the Wikimedia close-up source`)
 
   const workingSource = image.normalizedWorkingSource
   assert.ok(workingSource.expectedPath, `${image.id} must record the normalized working source path`)
@@ -58,6 +58,13 @@ for (const image of manifest.benchmarkImages) {
 
   const downloadStep = workingSource.recipe.find((step) => step.operation === 'download-original')
   assert.equal(downloadStep?.verifySha256, image.checksums.sha256, `${image.id} download step must verify the recorded SHA-256`)
+  const cropStep = workingSource.recipe.find((step) => step.operation === 'crop')
+  assert.deepEqual(cropStep?.box, {
+    x: image.crop.x,
+    y: image.crop.y,
+    width: image.crop.width,
+    height: image.crop.height,
+  }, `${image.id} normalized source recipe must use the recorded crop`)
 
   assert.equal(image.preprocessing.script, 'scripts/preprocess-alexander-source.mjs', `${image.id} must record the preprocessing generator`)
   assert.equal(isRuntimeBundlePath(image.preprocessing.expectedDirectory), false, `${image.id} preprocessing output must not target a runtime bundle path`)
@@ -71,12 +78,30 @@ for (const image of manifest.benchmarkImages) {
   ], `${image.id} preprocessing config must record deterministic parameters`)
   assert.deepEqual(image.preprocessing.edgeRetentionTargets, [
     'face',
-    'weapon',
-    'horse',
+    'helmet',
+    'armour',
     'contour',
   ], `${image.id} preprocessing must retain recognition-critical edge targets`)
   for (const [artifactName, artifactPath] of Object.entries(image.preprocessing.artifacts)) {
     assert.match(artifactPath, /^alexander-.+\.(bin|png)$/, `${image.id} preprocessing artifact ${artifactName} must be a generated Alexander artifact`)
+  }
+
+  assert.equal(image.mosaicInputs.script, 'scripts/generate-alexander-mosaic-inputs.mjs', `${image.id} must record the mosaic input generator`)
+  assert.equal(isRuntimeBundlePath(image.mosaicInputs.expectedDirectory), false, `${image.id} mosaic input output must not target a runtime bundle path`)
+  assert.equal(isRuntimeBundlePath(image.mosaicInputs.configPath), false, `${image.id} mosaic input config must not target a runtime bundle path`)
+  assert.deepEqual(image.mosaicInputs.configurationRecords, [
+    'palette',
+    'candidates',
+    'generatorSeed',
+  ], `${image.id} mosaic input config must record deterministic parameters`)
+  assert.deepEqual(image.mosaicInputs.sourceArtifacts, [
+    'lab',
+    'luminance',
+    'saliency',
+    'edges',
+  ], `${image.id} mosaic input generation must consume preprocessing artifacts`)
+  for (const [artifactName, artifactPath] of Object.entries(image.mosaicInputs.artifacts)) {
+    assert.match(artifactPath, /^alexander-.+\.json$/, `${image.id} mosaic input artifact ${artifactName} must be a generated Alexander JSON artifact`)
   }
 
   if (liveCheck) {
