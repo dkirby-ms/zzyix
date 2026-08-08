@@ -86,6 +86,7 @@ beforeAll(async () => {
     requiredScope: 'unused.delegated.scope',
     appTrustedIssuer: agentIssuer.issuer,
     appAudience: TEST_OIDC_AUDIENCE,
+    appJwksUri: new URL(agentIssuer.jwksUri),
     requiredAppRole: TEST_OIDC_APP_ROLE,
     acceptedAlgorithm: 'RS256',
     jwksUri: new URL(agentIssuer.jwksUri),

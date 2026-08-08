@@ -8,6 +8,7 @@ const validEnvironment = {
   AUTH_REQUIRED_SCOPE: 'quilt.access',
   AUTH_AGENT_TRUSTED_ISSUER: 'https://agent-issuer.example.test/tenant/v2.0',
   AUTH_AGENT_API_AUDIENCE: 'api://zzyix-agent-reader',
+  AUTH_AGENT_JWKS_URI: 'https://agent-issuer.example.test/keys',
   AUTH_JWKS_URI: 'https://issuer.example.test/keys',
   AUTH_ACCEPTED_ALGORITHM: 'RS256',
 }
@@ -24,6 +25,8 @@ describe('authentication configuration', () => {
       acceptedAlgorithm: 'RS256',
       testIssuer: false,
     })
+
+    expect(loadAuthenticationConfig(validEnvironment).appJwksUri.toString()).toBe(validEnvironment.AUTH_AGENT_JWKS_URI)
   })
 
   it('allows overriding app-only token issuer, audience, and role', () => {
@@ -39,6 +42,13 @@ describe('authentication configuration', () => {
       appAudience: 'api://agent-reader',
       requiredAppRole: 'agent.runtime.read',
     })
+  })
+
+  it('falls back to AUTH_JWKS_URI when AUTH_AGENT_JWKS_URI is omitted', () => {
+    const environment = { ...validEnvironment }
+    delete environment.AUTH_AGENT_JWKS_URI
+
+    expect(loadAuthenticationConfig(environment).appJwksUri.toString()).toBe(environment.AUTH_JWKS_URI)
   })
 
   it.each(['AUTH_AGENT_TRUSTED_ISSUER', 'AUTH_AGENT_API_AUDIENCE'])(

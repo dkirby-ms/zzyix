@@ -62,6 +62,7 @@ Optional environment variables:
   SERVER_CORS_ORIGIN
   OTEL_SAMPLING_RATIO
   AUTH_AGENT_TRUSTED_ISSUER
+  AUTH_AGENT_JWKS_URI
   AGENT_WORKER_MIN_REPLICAS
   AGENT_WORKER_MAX_REPLICAS
   AGENT_LEASE_TTL_SECONDS
@@ -95,8 +96,13 @@ Examples:
   AUTH_JWKS_URI=https://example.ciamlogin.com/example.onmicrosoft.com/discovery/v2.0/keys
   AUTH_ACCEPTED_ALGORITHM=RS256
   AUTH_AGENT_API_AUDIENCE=api://zzyix-agent-reader
+  # Optional when worker tokens use a different Entra tenant than human tokens.
+  # Defaults to AUTH_JWKS_URI when omitted.
+  AUTH_AGENT_JWKS_URI=https://login.microsoftonline.com/<worker-tenant-id>/discovery/v2.0/keys
   AUTH_AGENT_REQUIRED_ROLE=agent.runtime
   AGENT_SERVER_TOKEN_SCOPE=api://zzyix-agent-reader/.default
+  # Database principal UUID from principals.id for the mapped app:<application-id> subject.
+  # This is not the Container App managed identity principalId.
   AGENT_PRINCIPAL_ID=11111111-1111-4111-8111-111111111111
   FEATURE_AGENT_READS_ENABLED=false
   AGENT_FEATURE_MODEL_FREE_ENABLED=true
@@ -372,6 +378,10 @@ main() {
   if [[ -n "${AUTH_AGENT_TRUSTED_ISSUER:-}" ]]; then
     set_environment_variable "${repo}" "${environment_name}" \
       "AUTH_AGENT_TRUSTED_ISSUER" "${AUTH_AGENT_TRUSTED_ISSUER}"
+  fi
+  if [[ -n "${AUTH_AGENT_JWKS_URI:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AUTH_AGENT_JWKS_URI" "${AUTH_AGENT_JWKS_URI}"
   fi
   set_environment_variable "${repo}" "${environment_name}" \
     "AUTH_AGENT_API_AUDIENCE" "${AUTH_AGENT_API_AUDIENCE}"

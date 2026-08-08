@@ -129,7 +129,7 @@ export const createTokenVerifier = (
 
 export const createAppTokenVerifier = (
   config: AuthenticationConfig,
-  getKey: JWTVerifyGetKey = createRemoteJWKSet(config.jwksUri, {
+  getKey: JWTVerifyGetKey = createRemoteJWKSet(config.appJwksUri, {
     timeoutDuration: config.jwksTimeoutMs,
     cacheMaxAge: config.jwksCacheMaxAgeMs,
     cooldownDuration: config.jwksCooldownMs,

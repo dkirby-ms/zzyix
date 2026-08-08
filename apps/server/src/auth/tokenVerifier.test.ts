@@ -63,6 +63,7 @@ const configFor = (jwksUri = new URL('https://issuer.example.test/keys')): Authe
   requiredScope,
   appTrustedIssuer: issuer,
   appAudience: audience,
+  appJwksUri: jwksUri,
   requiredAppRole: 'agent.runtime',
   acceptedAlgorithm: 'RS256',
   jwksUri,

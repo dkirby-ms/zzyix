@@ -54,9 +54,11 @@ Collect these values before enabling worker server reads:
 | Tenant ID | `<tenant-id>` | Entra tenant that issues worker tokens |
 | Trusted issuer | `https://login.microsoftonline.com/<tenant-id>/v2.0` | Server app-only token validation |
 | Server API audience | `api://zzyix-agent-reader` | Exposed API app registration |
+| Agent JWKS URI | `https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys` | Signing keys for app-only token validation |
 | Server token scope | `api://zzyix-agent-reader/.default` | Worker managed identity token request |
 | Required app role | `agent.runtime` | App role required by server auth |
-| Worker principal ID | Deployment output | System-assigned managed identity object ID |
+| Worker principal ID | Deployment output | System-assigned managed identity object ID used for app role assignment |
+| Agent control principal ID | UUID from `principals.id` | Database principal used by `AGENT_PRINCIPAL_ID` in worker control-plane records |
 | Restricted control-plane DSN | Secret value | PostgreSQL role limited to `agent_control` |
 
 The server must receive matching auth configuration through its runtime
@@ -65,6 +67,7 @@ environment:
 ```text
 AUTH_AGENT_TRUSTED_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
 AUTH_AGENT_API_AUDIENCE=api://zzyix-agent-reader
+AUTH_AGENT_JWKS_URI=https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys
 AUTH_AGENT_REQUIRED_ROLE=agent.runtime
 ```
 
@@ -75,6 +78,7 @@ traceability and token acquisition:
 AGENT_SERVER_TOKEN_SCOPE=api://zzyix-agent-reader/.default
 AUTH_AGENT_TRUSTED_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
 AUTH_AGENT_API_AUDIENCE=api://zzyix-agent-reader
+AUTH_AGENT_JWKS_URI=https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys
 AUTH_AGENT_REQUIRED_ROLE=agent.runtime
 ```
 
@@ -172,9 +176,12 @@ The server rejects unknown or inactive agent identities. Before enabling worker
 reads, create an active `agent` principal that corresponds to the app identity
 the token verifier maps, typically `app:<application-id>`.
 
-Record the created principal ID as the `agentPrincipalId` deployment parameter
-and use that same principal in `agent_control.agent_assignments` for each quilt
-the worker may process.
+Record the created principal ID as the `agentPrincipalId` deployment parameter,
+set `AGENT_PRINCIPAL_ID` to that same value, and use the same principal in
+`agent_control.agent_assignments` for each quilt the worker may process.
+
+`AGENT_PRINCIPAL_ID` is the database principal UUID, not the worker Container
+App managed identity object ID.
 
 ## Enable server reads
 
