@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  pgSchema,
   pgTable,
   primaryKey,
   text,
@@ -37,6 +38,7 @@ const asSqlLiteralList = (values: readonly string[]) =>
   sql.raw(values.map((value) => `'${value}'`).join(', '))
 
 export const patchesParentBoundsConstraintName = 'patches_parent_bounds_check'
+const agentControl = pgSchema('agent_control')
 
 export const users = pgTable(
   'users',
@@ -217,6 +219,137 @@ export const quiltPresenceLeases = pgTable(
       table.expiresAt,
     ),
     expiryIndex: index('quilt_presence_leases_expiry_idx').on(table.expiresAt),
+  }),
+)
+
+export const agentRuns = agentControl.table(
+  'runs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    quiltId: uuid('quilt_id')
+      .notNull()
+      .references(() => quilts.id, { onDelete: 'cascade' }),
+    agentPrincipalId: uuid('agent_principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'restrict' }),
+    status: text('status').default('running').notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (table) => ({
+    quiltStatusStartedIndex: index('agent_control_runs_quilt_status_started_idx').on(
+      table.quiltId,
+      table.status,
+      table.startedAt,
+    ),
+    statusCheck: check(
+      'agent_control_runs_status_check',
+      sql`${table.status} in ('running', 'succeeded', 'failed', 'cancelled')`,
+    ),
+    completionCheck: check(
+      'agent_control_runs_completion_check',
+      sql`(${table.status} = 'running' and ${table.endedAt} is null)
+        or (${table.status} <> 'running' and ${table.endedAt} is not null)`,
+    ),
+  }),
+)
+
+export const agentQuiltLeases = agentControl.table(
+  'quilt_leases',
+  {
+    quiltId: uuid('quilt_id')
+      .primaryKey()
+      .references(() => quilts.id, { onDelete: 'cascade' }),
+    leaseOwnerPrincipalId: uuid('lease_owner_principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'restrict' }),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    acquiredAt: timestamp('acquired_at', { withTimezone: true }).defaultNow().notNull(),
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }).defaultNow().notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    generation: integer('generation').default(1).notNull(),
+  },
+  (table) => ({
+    runUnique: unique('agent_control_quilt_leases_run_id_unique').on(table.runId),
+    expiryIndex: index('agent_control_quilt_leases_expiry_idx').on(table.expiresAt),
+    generationCheck: check('agent_control_quilt_leases_generation_check', sql`${table.generation} > 0`),
+  }),
+)
+
+export const agentQueueLimits = agentControl.table(
+  'trigger_queue_limits',
+  {
+    singletonKey: text('singleton_key').primaryKey().default('default'),
+    pendingLimit: integer('pending_limit').default(500).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    singletonCheck: check('agent_control_trigger_queue_limits_singleton_check', sql`${table.singletonKey} = 'default'`),
+    pendingLimitCheck: check('agent_control_trigger_queue_limits_pending_limit_check', sql`${table.pendingLimit} > 0`),
+  }),
+)
+
+export const agentTriggerQueue = agentControl.table(
+  'trigger_queue',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    source: text('source').notNull(),
+    quiltId: uuid('quilt_id')
+      .notNull()
+      .references(() => quilts.id, { onDelete: 'cascade' }),
+    deduplicationKey: text('deduplication_key').notNull(),
+    priority: integer('priority').default(100).notNull(),
+    status: text('status').default('pending').notNull(),
+    coalescingPolicyVersion: text('coalescing_policy_version').notNull(),
+    payload: jsonb('payload').notNull(),
+    runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    quiltStatusPriorityIndex: index('agent_control_trigger_queue_quilt_status_priority_created_idx').on(
+      table.quiltId,
+      table.status,
+      table.priority,
+      table.createdAt,
+    ),
+    statusCreatedIndex: index('agent_control_trigger_queue_status_created_idx').on(table.status, table.createdAt),
+    statusCheck: check(
+      'agent_control_trigger_queue_status_check',
+      sql`${table.status} in ('pending', 'claimed', 'completed', 'failed', 'dropped')`,
+    ),
+    priorityCheck: check('agent_control_trigger_queue_priority_check', sql`${table.priority} >= 0 and ${table.priority} <= 1000`),
+  }),
+)
+
+export const agentCheckpoints = agentControl.table(
+  'checkpoints',
+  {
+    quiltId: uuid('quilt_id')
+      .notNull()
+      .references(() => quilts.id, { onDelete: 'cascade' }),
+    runId: uuid('run_id')
+      .notNull()
+      .references(() => agentRuns.id, { onDelete: 'cascade' }),
+    checkpointVersion: integer('checkpoint_version').default(1).notNull(),
+    workflowState: text('workflow_state').notNull(),
+    observedRevision: integer('observed_revision'),
+    pendingTriggerIds: jsonb('pending_trigger_ids').notNull().default(sql`'[]'::jsonb`),
+    policyVersion: text('policy_version').notNull(),
+    frameworkVersion: text('framework_version').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.quiltId, table.runId], name: 'agent_control_checkpoints_pk' }),
+    runUnique: unique('agent_control_checkpoints_run_id_unique').on(table.runId),
+    checkpointVersionCheck: check('agent_control_checkpoints_version_check', sql`${table.checkpointVersion} > 0`),
+    pendingTriggerIdsCheck: check(
+      'agent_control_checkpoints_pending_trigger_ids_check',
+      sql`jsonb_typeof(${table.pendingTriggerIds}) = 'array'`,
+    ),
   }),
 )
 

@@ -78,6 +78,20 @@
       "when": 1785626954568,
       "tag": "0010_new_tile_shapes",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785632400000,
+      "tag": "0011_agent_principal_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785726000000,
+      "tag": "0012_agent_control_plane",
+      "breakpoints": true
     }
   ]
 }

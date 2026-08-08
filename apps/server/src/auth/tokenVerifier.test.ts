@@ -12,7 +12,7 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AuthenticationConfig } from './config.js'
 import { AuthenticationError } from './errors.js'
-import { createTokenVerifier } from './tokenVerifier.js'
+import { createAppTokenVerifier, createTokenVerifier } from './tokenVerifier.js'
 
 const issuer = 'https://issuer.example.test/tenant/v2.0'
 const audience = 'api://zzyix'
@@ -61,6 +61,9 @@ const configFor = (jwksUri = new URL('https://issuer.example.test/keys')): Authe
   trustedIssuer: issuer,
   audience,
   requiredScope,
+  appTrustedIssuer: issuer,
+  appAudience: audience,
+  requiredAppRole: 'agent.runtime',
   acceptedAlgorithm: 'RS256',
   jwksUri,
   jwksTimeoutMs: 200,
@@ -87,9 +90,11 @@ describe('access token verification', () => {
     const identity = await verifierFor([trustedKey])(await signToken(trustedKey, { unrelated: 'discarded' }))
 
     expect(identity).toMatchObject({
+      kind: 'delegated_user',
       issuer,
       subject: 'external-subject-1',
       scope: [requiredScope],
+      roles: [],
       displayName: 'Canvas User',
       email: 'canvas@example.test',
     })
@@ -115,6 +120,68 @@ describe('access token verification', () => {
       code: 'insufficient_scope',
       status: 403,
     })
+  })
+
+  it('verifies app-only tokens by role and app identity instead of delegated scopes', async () => {
+    const token = await signToken(trustedKey, {
+      scp: undefined,
+      scope: undefined,
+      roles: ['agent.runtime', 'extra.role'],
+      azp: '00000000-0000-0000-0000-000000000999',
+    })
+
+    await expect(createAppTokenVerifier(configFor(), createLocalJWKSet({ keys: [trustedKey.publicJwk] }))(token))
+      .resolves
+      .toMatchObject({
+        kind: 'app_agent',
+        issuer,
+        subject: 'app:00000000-0000-0000-0000-000000000999',
+        applicationId: '00000000-0000-0000-0000-000000000999',
+        roles: ['agent.runtime', 'extra.role'],
+        scope: [],
+      })
+  })
+
+  it('rejects app-only tokens that do not include the required role even when delegated scope is present', async () => {
+    const token = await signToken(trustedKey, {
+      roles: ['other.role'],
+      scp: requiredScope,
+      azp: '00000000-0000-0000-0000-000000000998',
+    })
+
+    await expect(createAppTokenVerifier(configFor(), createLocalJWKSet({ keys: [trustedKey.publicJwk] }))(token))
+      .rejects
+      .toMatchObject({ code: 'insufficient_scope', status: 403 })
+  })
+
+  it.each([
+    ['issuer', { iss: 'https://wrong.example.test/' }],
+    ['audience', { aud: 'api://wrong' }],
+    ['expiration', { exp: Math.floor(Date.now() / 1_000) - 1 }],
+  ])('rejects app-only tokens with wrong %s', async (_label, payload) => {
+    const token = await signToken(trustedKey, {
+      roles: ['agent.runtime'],
+      azp: '00000000-0000-0000-0000-000000000997',
+      ...payload,
+    })
+
+    await expect(createAppTokenVerifier(configFor(), createLocalJWKSet({ keys: [trustedKey.publicJwk] }))(token))
+      .rejects
+      .toMatchObject({ code: 'invalid_token' })
+  })
+
+  it('rejects app-only tokens signed with an unaccepted algorithm', async () => {
+    const rs512Key = await generateSigningKey('rs512-agent-key', 'RS512')
+    const token = await signToken(rs512Key, {
+      roles: ['agent.runtime'],
+      azp: '00000000-0000-0000-0000-000000000996',
+      scope: undefined,
+      scp: undefined,
+    })
+
+    await expect(createAppTokenVerifier(configFor(), createLocalJWKSet({ keys: [rs512Key.publicJwk] }))(token))
+      .rejects
+      .toMatchObject({ code: 'invalid_token' })
   })
 
   it('rejects wrong algorithms, signatures, unknown keys, and malformed tokens', async () => {

@@ -13,7 +13,7 @@ export const materialVariantValues = ['ceramic', 'glass', 'stone'] as const
 
 export const operationTypeValues = ['tile_placed', 'tile_removed'] as const
 
-export const principalKindValues = ['human', 'system'] as const
+export const principalKindValues = ['human', 'system', 'agent'] as const
 
 export const principalStatusValues = ['active', 'disabled', 'deletion_pending', 'deleted'] as const
 

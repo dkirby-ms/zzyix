@@ -57,10 +57,12 @@ beforeAll(async () => {
   configureTokenVerifierForTests(async (token) => {
     if (token === 'denied') throw new AuthenticationError('insufficient_scope')
     return {
+      kind: 'delegated_user',
       issuer: TEST_ISSUER,
       subject: token === 'second' ? 'subject-b' : 'subject-a',
       expiresAt: new Date(Date.now() + 60_000),
       scope: ['access'],
+      roles: [],
     }
   })
   await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))

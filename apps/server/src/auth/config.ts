@@ -7,6 +7,9 @@ export type AuthenticationConfig = {
   trustedIssuer: string
   audience: string
   requiredScope: string
+  appTrustedIssuer: string
+  appAudience: string
+  requiredAppRole: string
   acceptedAlgorithm: string
   jwksUri: URL
   jwksTimeoutMs: number
@@ -80,6 +83,9 @@ export const loadAuthenticationConfig = (
     trustedIssuer,
     audience: required(environment, 'AUTH_API_AUDIENCE'),
     requiredScope: required(environment, 'AUTH_REQUIRED_SCOPE'),
+    appTrustedIssuer: environment.AUTH_AGENT_TRUSTED_ISSUER?.trim() || trustedIssuer,
+    appAudience: environment.AUTH_AGENT_API_AUDIENCE?.trim() || required(environment, 'AUTH_API_AUDIENCE'),
+    requiredAppRole: environment.AUTH_AGENT_REQUIRED_ROLE?.trim() || 'agent.runtime',
     acceptedAlgorithm,
     jwksUri: exactHttpsUrl(required(environment, 'AUTH_JWKS_URI'), 'AUTH_JWKS_URI', testIssuer),
     jwksTimeoutMs: positiveInteger(environment, 'AUTH_JWKS_TIMEOUT_MS', DEFAULT_JWKS_TIMEOUT_MS),

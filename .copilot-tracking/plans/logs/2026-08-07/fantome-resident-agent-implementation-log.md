@@ -42,6 +42,10 @@ Gaps and differences identified between research findings and the implementation
   * Research recommends: Use Python Agent Framework with explicit Workflow and defer Harness features that exceed the V1 threat model.
   * Plan implements: A Python supervisor around a graph Workflow, fake gateway first, governed model gateway second, and memory disabled.
   * Rationale: Supervisor-owned leases, retries, and checkpoints make failure behavior explicit and testable.
+* DD-05: Host Python validation command unavailable in current environment.
+  * Plan specifies: Run `python -m pytest apps/agent-worker/tests` during Phase 3 validation.
+  * Implementation differs: Worker tests were authored, but execution is blocked because the host lacks `python` alias and `pytest` tooling.
+  * Rationale: Proceeded with code implementation and alternate compile/docker validation to maintain phase momentum.
 
 ## Implementation Paths Considered
 
@@ -91,3 +95,21 @@ Items identified during planning that fall outside current scope.
 * WI-04: Verify ACA ingress and database role design - Confirm internal worker-to-server route access, private PostgreSQL connectivity, and least-privilege grant mechanics in the target deployment topology. (priority: medium, effort: medium)
   * Source: DR-04.
   * Dependency: Required before production deployment.
+* WI-05: Seed and operate agent principal provisioning - Define repeatable provisioning and deprovisioning for `app:<applicationId>` agent principals before runtime activation. (priority: high, effort: low)
+  * Source: Phase 1 implementation.
+  * Dependency: Required before worker authentication is enabled in shared environments.
+* WI-06: Align deployment configuration for app-only worker auth - Set and validate `AUTH_AGENT_TRUSTED_ISSUER`, `AUTH_AGENT_API_AUDIENCE`, and `AUTH_AGENT_REQUIRED_ROLE` for each environment. (priority: high, effort: low)
+  * Source: Phase 1 implementation.
+  * Dependency: Required before worker route rollout.
+* WI-07: Expand restricted-role negative coverage - Add explicit denial tests for worker role writes on additional canonical authorization and ownership tables. (priority: low, effort: low)
+  * Source: Phase 2 implementation.
+  * Dependency: Recommended before broad rollout.
+* WI-08: Normalize Python runtime tooling for CI and local validation - Ensure `python` alias and `pytest` are available so Phase 3 and Phase 5 required commands can run unchanged. (priority: high, effort: low)
+  * Source: Phase 3 validation execution.
+  * Dependency: Required before final validation sign-off.
+* WI-09: Confirm deployment activation prerequisites - Verify ACA internal ingress, restricted PostgreSQL grants, Entra app-role topology, and production operating limits before enabling worker gates. (priority: high, effort: medium)
+  * Source: Phase 4 deployment implementation.
+  * Dependency: Required before production activation.
+* WI-10: Add worker restart e2e fixture - Exercise a real worker process restart and checkpoint recovery in the multi-replica test environment. (priority: high, effort: medium)
+  * Source: Phase 5 validation.
+  * Dependency: Requires Python test tooling and worker process orchestration.

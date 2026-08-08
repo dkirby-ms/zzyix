@@ -21,6 +21,65 @@ param postgresDatabaseName string = 'zzyix'
 @description('Optional Azure region for Log Analytics and Application Insights. Defaults to deploymentLocation.')
 param monitoringLocation string = ''
 
+@description('Container image for the Python agent worker.')
+param agentWorkerImage string = 'ghcr.io/example/zzyix-agent-worker:latest'
+
+@description('Internal server base URL used by the worker for read-only API calls.')
+param agentServerBaseUrl string = 'http://zzyix-server'
+
+@description('Pre-provisioned principal identifier for the worker runtime.')
+param agentPrincipalId string = '11111111-1111-4111-8111-111111111111'
+
+@description('Optional restricted PostgreSQL DSN for the worker control-plane schema.')
+@secure()
+param agentControlPlaneDsn string?
+
+@description('Gateway mode for worker model calls.')
+@allowed([
+  'fake'
+  'foundry'
+])
+param agentGatewayMode string = 'fake'
+
+@description('Enable Foundry model calls for the worker. Disabled by default for safe rollout.')
+param agentFeatureFoundryEnabled bool = false
+
+@description('Enable structured proposal drafting in the worker. Disabled by default for safe rollout.')
+param agentFeatureStructuredProposalsEnabled bool = false
+
+@description('Enable the model-free deterministic read-only worker runtime.')
+param agentFeatureModelFreeEnabled bool = true
+
+@description('PostgreSQL schema exposed to the restricted worker control-plane role.')
+param agentControlPlaneSchema string = 'agent_control_plane'
+
+@description('Optional Foundry endpoint for worker model calls.')
+param agentFoundryEndpoint string?
+
+@description('Optional Foundry API key for worker model calls.')
+@secure()
+param agentFoundryApiKey string?
+
+@description('Minimum replica count for the worker container app.')
+@minValue(0)
+param agentWorkerMinReplicas int = 0
+
+@description('Maximum replica count for the worker container app.')
+@minValue(1)
+param agentWorkerMaxReplicas int = 2
+
+@description('Lease duration in seconds for one active quilt workflow.')
+@minValue(1)
+param agentLeaseTtlSeconds int = 20
+
+@description('Idle polling interval in seconds for trigger ingestion.')
+@minValue(1)
+param agentPollIntervalSeconds int = 1
+
+@description('Timeout in seconds for worker read tools.')
+@minValue(1)
+param agentToolTimeoutSeconds int = 5
+
 var deploymentStampSuffix = empty(deploymentStamp) ? '' : '-${toLower(deploymentStamp)}'
 var effectiveMonitoringLocation = empty(monitoringLocation) ? deploymentLocation : monitoringLocation
 var namePrefix = 'zzyix-${environmentName}${deploymentStampSuffix}'
@@ -70,6 +129,35 @@ module diagnostics 'modules/diagnostics.bicep' = {
   }
 }
 
+// ── Agent Worker ─────────────────────────────────────────────────────────────
+// Deploys the Python worker as an independently scalable Container App with
+// a managed identity and feature-gated model settings.
+module agentWorker 'modules/agent-worker.bicep' = {
+  name: 'agentWorker'
+  params: {
+    location: deploymentLocation
+    namePrefix: namePrefix
+    managedEnvironmentId: containerAppsEnvironment.outputs.environmentId
+    workerImage: agentWorkerImage
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
+    agentServerBaseUrl: agentServerBaseUrl
+    agentPrincipalId: agentPrincipalId
+    agentControlPlaneDsn: agentControlPlaneDsn
+    agentGatewayMode: agentGatewayMode
+    agentFeatureFoundryEnabled: agentFeatureFoundryEnabled
+    agentFeatureStructuredProposalsEnabled: agentFeatureStructuredProposalsEnabled
+    agentFeatureModelFreeEnabled: agentFeatureModelFreeEnabled
+    agentControlPlaneSchema: agentControlPlaneSchema
+    agentFoundryEndpoint: agentFoundryEndpoint
+    agentFoundryApiKey: agentFoundryApiKey
+    minReplicas: agentWorkerMinReplicas
+    maxReplicas: agentWorkerMaxReplicas
+    leaseTtlSeconds: agentLeaseTtlSeconds
+    pollIntervalSeconds: agentPollIntervalSeconds
+    toolTimeoutSeconds: agentToolTimeoutSeconds
+  }
+}
+
 // ── PostgreSQL Flexible Server ────────────────────────────────────────────────
 // Burstable B1ms (cheapest dev SKU), private-only (no public endpoint).
 // ACA containers connect using the FQDN resolved via the private DNS zone.
@@ -93,3 +181,5 @@ output acaDefaultDomain string = containerAppsEnvironment.outputs.defaultDomain
 output appInsightsConnectionString string = monitoring.outputs.appInsightsConnectionString
 output postgresServerName string = postgresql.outputs.postgresServerName
 output postgresServerFqdn string = postgresql.outputs.postgresServerFqdn
+output agentWorkerContainerAppName string = agentWorker.outputs.containerAppName
+output agentWorkerPrincipalId string = agentWorker.outputs.principalId

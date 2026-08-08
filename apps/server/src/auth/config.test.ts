@@ -16,8 +16,26 @@ describe('authentication configuration', () => {
       trustedIssuer: validEnvironment.AUTH_TRUSTED_ISSUER,
       audience: validEnvironment.AUTH_API_AUDIENCE,
       requiredScope: validEnvironment.AUTH_REQUIRED_SCOPE,
+      appTrustedIssuer: validEnvironment.AUTH_TRUSTED_ISSUER,
+      appAudience: validEnvironment.AUTH_API_AUDIENCE,
+      requiredAppRole: 'agent.runtime',
       acceptedAlgorithm: 'RS256',
       testIssuer: false,
+    })
+  })
+
+  it('allows overriding app-only token issuer, audience, and role', () => {
+    const custom = loadAuthenticationConfig({
+      ...validEnvironment,
+      AUTH_AGENT_TRUSTED_ISSUER: 'https://agent-issuer.example.test/tenant/v2.0',
+      AUTH_AGENT_API_AUDIENCE: 'api://agent-reader',
+      AUTH_AGENT_REQUIRED_ROLE: 'agent.runtime.read',
+    })
+
+    expect(custom).toMatchObject({
+      appTrustedIssuer: 'https://agent-issuer.example.test/tenant/v2.0',
+      appAudience: 'api://agent-reader',
+      requiredAppRole: 'agent.runtime.read',
     })
   })
 

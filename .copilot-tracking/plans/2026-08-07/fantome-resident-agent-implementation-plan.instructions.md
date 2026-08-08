@@ -57,32 +57,32 @@ Implement the read-only Fantome resident-agent MVP as a separate Python Microsof
 
 ## Implementation Checklist
 
-### [ ] Implementation Phase 1: Server Identity and Read Contracts
+### [x] Implementation Phase 1: Server Identity and Read Contracts
 
 <!-- parallelizable: false -->
 
 Sequential because worker read contracts depend on principal-kind support and app-only auth before they can be safely exposed.
 
-* [ ] Step 1.1: Extend principal model for agents.
+* [x] Step 1.1: Extend principal model for agents.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 12-37)
-* [ ] Step 1.2: Add app-only authentication branch.
+* [x] Step 1.2: Add app-only authentication branch.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 38-64)
-* [ ] Step 1.3: Create worker-only HTTP read routes.
+* [x] Step 1.3: Create worker-only HTTP read routes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 65-90)
-* [ ] Step 1.4: Validate server phase changes.
+* [x] Step 1.4: Validate server phase changes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 91-99)
 
-### [ ] Implementation Phase 2: Agent Control Plane and Trigger Semantics
+### [x] Implementation Phase 2: Agent Control Plane and Trigger Semantics
 
 <!-- parallelizable: false -->
 
 Sequential because control-plane assignments and leases depend on the final agent principal representation from Phase 1.
 
-* [ ] Step 2.1: Add control-plane schema and restricted role.
+* [x] Step 2.1: Add control-plane schema and restricted role.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 105-132)
-* [ ] Step 2.2: Define initial trigger ingestion contract.
+* [x] Step 2.2: Define initial trigger ingestion contract.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 133-156)
-* [ ] Step 2.3: Validate control-plane phase changes.
+* [x] Step 2.3: Validate control-plane phase changes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 157-164)
 
 ### [ ] Implementation Phase 3: Python Worker MVP
@@ -91,24 +91,24 @@ Sequential because control-plane assignments and leases depend on the final agen
 
 Sequential because the worker needs the app-only server read route and control-plane schema contracts before its supervisor and tools can be tested realistically.
 
-* [ ] Step 3.1: Scaffold the Python Agent Framework worker.
+* [x] Step 3.1: Scaffold the Python Agent Framework worker.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 170-204)
-* [ ] Step 3.2: Add governed model gateway integration.
+* [x] Step 3.2: Add governed model gateway integration.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 205-231)
 * [ ] Step 3.3: Validate worker phase changes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 232-239)
 
-### [ ] Implementation Phase 4: Deployment, Telemetry, and Feature Gates
+### [x] Implementation Phase 4: Deployment, Telemetry, and Feature Gates
 
 <!-- parallelizable: false -->
 
 Sequential because deployment must consume the worker image, managed identity requirements, restricted database role, and feature-gated runtime settings from earlier phases.
 
-* [ ] Step 4.1: Add worker deployment resources.
+* [x] Step 4.1: Add worker deployment resources.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 245-271)
-* [ ] Step 4.2: Add telemetry and operational evidence.
+* [x] Step 4.2: Add telemetry and operational evidence.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 272-296)
-* [ ] Step 4.3: Validate deployment phase changes.
+* [x] Step 4.3: Validate deployment phase changes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 297-304)
 
 ### [ ] Implementation Phase 5: End-to-End Validation and Activation
@@ -117,13 +117,13 @@ Sequential because deployment must consume the worker image, managed identity re
 
 Sequential final validation because it verifies behavior across server auth, PostgreSQL leases, worker recovery, infrastructure, telemetry, and e2e fixtures.
 
-* [ ] Step 5.1: Add multi-replica and recovery tests.
+* [x] Step 5.1: Add multi-replica and recovery tests.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 310-336)
-* [ ] Step 5.2: Run full project validation.
+* [x] Step 5.2: Run full project validation.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 337-348)
-* [ ] Step 5.3: Fix minor validation issues.
+* [x] Step 5.3: Fix minor validation issues.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 349-352)
-* [ ] Step 5.4: Report blocking issues.
+* [x] Step 5.4: Report blocking issues.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 353-355)
 
 ## Planning Log

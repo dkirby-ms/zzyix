@@ -18,3 +18,22 @@ param postgresAdminLogin = 'pgadmin'
 // The placeholder below will fail the @minLength(8) validation check if deployed as-is.
 param postgresAdminPassword = 'REPLACE_ME'
 // Replace this placeholder before deployment.
+
+// Worker image and internal server route configuration.
+param agentWorkerImage = 'ghcr.io/example/zzyix-agent-worker:latest'
+param agentServerBaseUrl = 'http://zzyix-server'
+param agentPrincipalId = '11111111-1111-4111-8111-111111111111'
+
+// Safe rollout defaults: model calls and structured proposals remain disabled.
+param agentGatewayMode = 'fake'
+param agentFeatureFoundryEnabled = false
+param agentFeatureStructuredProposalsEnabled = false
+param agentFeatureModelFreeEnabled = true
+param agentControlPlaneSchema = 'agent_control_plane'
+
+// Scale worker independently from the server.
+param agentWorkerMinReplicas = 0
+param agentWorkerMaxReplicas = 2
+param agentLeaseTtlSeconds = 20
+param agentPollIntervalSeconds = 1
+param agentToolTimeoutSeconds = 5
