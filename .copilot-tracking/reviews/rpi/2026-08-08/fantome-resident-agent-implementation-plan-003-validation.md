@@ -23,7 +23,7 @@ This validation covers Implementation Phase 3, Steps 3.1 through 3.3 in [the imp
 | Worker syntax | Passed | `python3 -m compileall -q apps/agent-worker/src apps/agent-worker/tests` exited successfully on 2026-08-08. |
 | Required worker tests | Not run | `python3 -m pytest apps/agent-worker/tests` failed before collection with `/usr/bin/python3: No module named pytest`. |
 | Real Agent Framework import | Not run | Host Python reported `ModuleNotFoundError: No module named 'agent_framework'`. The prior API research verified the package and symbols in a disposable Python 3.11 image, but this session did not independently execute that image smoke test. |
-| Docker validation | Recorded pass, not rerun in this session | The changes log records a successful `docker build -f apps/agent-worker/Dockerfile apps/agent-worker`; the Dockerfile installs the package at [Dockerfile](../../../../apps/agent-worker/Dockerfile#L1-L15). |
+| Docker validation | Historical pass; current rerun incomplete | The changes log records a successful `docker build -f apps/agent-worker/Dockerfile apps/agent-worker`. A fresh build plus container import smoke check was attempted on 2026-08-08 but interrupted with exit code 130 before completion, so current image-level framework evidence is unavailable. The Dockerfile installs the package at [Dockerfile](../../../../apps/agent-worker/Dockerfile#L1-L15). |
 | Product source scope | Informational | `git status --short -- apps/agent-worker .copilot-tracking/reviews/rpi/2026-08-08` showed existing worker changes and validation artifacts in the worktree. This session did not modify those product files; only this requested validation document was created. |
 
 ## Phase Requirements Compared With Evidence
@@ -105,14 +105,14 @@ The prior implementation review's Phase 3 status of Partial remains accurate. It
 | Resume after process loss | Same-run in-memory and skip-gated PostgreSQL test present | Not independently executed; real worker process restart absent |
 | Phase 3 validation command | `compileall` passed | Partial because pytest is unavailable |
 
-Overall Phase 3 coverage is approximately **partial and below activation readiness**. The worker has the intended security and operational boundaries by inspection, but the checkpoint state defect and unverified production adapter path prevent a Passed status.
+Overall Phase 3 coverage is **partial and below activation readiness**. The worker has the intended security and operational boundaries by inspection, but the checkpoint state defect, omitted governed-model context, unverified real adapter execution, and unavailable prescribed pytest run prevent a Passed status.
 
 ## Remaining Gaps And Recommended Next Validations
 
 * Persist serializable tool outputs and any proposal/gateway state needed by each checkpoint, or define and test a deliberate replay policy for each resumable suffix.
 * Include the bounded redacted `tool_context` in the governed provider payload and add a test that asserts it is present while sensitive fields remain absent.
 * Install the declared development extra and run `python -m pytest apps/agent-worker/tests`.
-* Run a real `agent-framework==1.13.0` smoke test from the worker image that executes all nodes, verifies handler routing and output extraction, and exercises the synchronous bridge.
+* Complete the container-level `agent-framework==1.13.0` smoke test that was interrupted in this validation, then execute all nodes, verify handler routing and output extraction, and exercise the synchronous bridge.
 * Set `AGENT_WORKER_POSTGRES_TEST_DSN` to a migrated database and execute [test_control_plane_postgres.py](../../../../apps/agent-worker/tests/test_control_plane_postgres.py#L1-L145).
 * Add a two-process worker restart fixture that persists a checkpoint, terminates the first worker, and verifies same-run PostgreSQL-backed resume.
 * Add timing-controlled lease-loss tests for blocked HTTP and provider calls.

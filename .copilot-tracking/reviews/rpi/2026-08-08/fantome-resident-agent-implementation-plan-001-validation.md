@@ -1,9 +1,7 @@
 ---
-title: Fantome Resident Agent Implementation Phase 1 Validation
 description: Evidence-based validation of Phase 1 server identity and read contracts.
 ms.date: 2026-08-08
 ---
-
 ## Validation Status
 
 **Partial**
@@ -38,7 +36,7 @@ coverage, and live route coverage were added afterward.
 | 1.1 Extend principal model for agents | `agent` is present in the TypeScript principal-kind values and migration; active, unknown, and inactive agent mapping cases are covered | Pass |
 | 1.2 Add app-only authentication branch | Separate app verifier validates app issuer, audience, algorithm, expiry, application identity, and configured role in `roles`; delegated scopes do not substitute for the role | Pass |
 | 1.3 Create worker-only HTTP reads | Versioned routes use server repository reads, app-only middleware, active assignment predicates, typed inputs, replay limits, tile/patch limits, and a total JSON byte bound; patch assignment granularity and durable audit remain deficient | Partial |
-| 1.4 Validate server phase changes | Focused auth, route, startup, live app-role, principal integration, and build checks passed in this validation | Pass |
+| 1.4 Validate server phase changes | Focused auth, route, startup, live app-role, principal integration, and build checks were attempted, but the processes were interrupted with exit code 130 | Partial |
 
 ## Verified Passes
 
@@ -153,17 +151,17 @@ This is a validation-evidence gap rather than an observed unbounded response.
 
 | Command | Result |
 | --- | --- |
-| `npm --prefix apps/server test -- --run src/auth/tokenVerifier.test.ts src/routes/agentReads.test.ts src/routes/agentReads.auth.test.ts src/index.test.ts src/index.integration.test.ts` | Passed: 5 files, 64 tests |
-| `npm --prefix apps/server test -- --run src/auth/principalContext.postgres.integration.test.ts` | Passed: 1 file, 10 tests |
-| `npm --prefix apps/server run build` | Passed: TypeScript compilation succeeded |
+| Focused auth, route, startup, live app-role, and principal integration tests | Attempted, then interrupted with exit code 130; no fresh pass can be claimed |
+| `npm --prefix apps/server run build` | Attempted, then interrupted with exit code 130; no fresh pass can be claimed |
+| Source and test inspection | Completed; implementation evidence and test assertions were reviewed |
 
 ## Coverage Assessment
 
-Phase 1 coverage is **substantial but incomplete**. All four phase steps have
-current implementation evidence, and the principal, auth, startup, live route,
-focused route, and build validations pass. The phase cannot be marked Passed
-because the implemented assignment boundary is broader than the specified
-assigned-patch contract and durable worker-read auditing is absent. The missing
+Phase 1 coverage is **substantial but incomplete**. Steps 1.1 and 1.2 have
+strong implementation and test evidence. Step 1.3 is partial because the
+implemented assignment boundary is broader than the specified assigned-patch
+contract and durable worker-read auditing is absent. Step 1.4 is partial
+because the focused commands did not complete in this session. The missing
 overflow tests reduce confidence but do not by themselves change the overall
 status.
 

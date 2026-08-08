@@ -28,8 +28,13 @@ server and worker tests. No product source, plan, changes log, or research file
 was modified.
 
 The focused command `npm --prefix apps/server test --
-src/db/agentControlPlane.postgres.integration.test.ts` passed with 4 tests.
-`python3 -m compileall apps/agent-worker/src apps/agent-worker/tests` passed.
+src/db/agentControlPlane.postgres.integration.test.ts` passed with 4 tests on
+2026-08-08. `npm --prefix apps/server run build` also passed. The worker
+source and tests are syntactically compilable according to the recorded
+`python3 -m compileall apps/agent-worker/src apps/agent-worker/tests` check,
+but the worker PostgreSQL test remains skip-gated by
+`AGENT_WORKER_POSTGRES_TEST_DSN` and the host currently has no `pytest`
+module.
 The worker PostgreSQL test remains skip-gated by
 `AGENT_WORKER_POSTGRES_TEST_DSN`; the environment also lacks the
 `agent_framework` import needed for the full worker test path.
@@ -44,6 +49,7 @@ The worker PostgreSQL test remains skip-gated by
 | Assignment and lifecycle ownership | [Assignment uniqueness](../../../../apps/server/migrations/0012_agent_control_plane.sql#L15-L21) gives one assignment per quilt and principal. However, the worker role receives DML on every control-plane table ([grants](../../../../apps/server/migrations/0012_agent_control_plane.sql#L256-L264)), and the adapter's [run and lease methods](../../../../apps/agent-worker/src/control_plane.py#L319-L367) do not independently require an active assignment. | Major gap. |
 | Active trigger deduplication | The [partial unique index](../../../../apps/server/migrations/0012_agent_control_plane.sql#L198-L203) covers `pending` and `claimed`; the [concurrent same-key test](../../../../apps/server/src/db/agentControlPlane.postgres.integration.test.ts#L165-L209) observes one inserted row. | Passed for active duplicate keys. |
 | Configurable bounded pending queue | The [singleton limit](../../../../apps/server/migrations/0012_agent_control_plane.sql#L119-L132) and [serialized insert trigger](../../../../apps/server/migrations/0013_agent_control_recovery.sql#L24-L52) enforce the limit on inserts. The worker [requeue update](../../../../apps/agent-worker/src/control_plane.py#L510-L519) changes `claimed` to `pending` without invoking that insert trigger or checking the limit. | Failed for requeue transitions. |
+| Initial trigger ingestion contract | The [persisted trigger model](../../../../apps/server/migrations/0012_agent_control_plane.sql#L116-L141) carries source, quilt, deduplication key, priority, status, policy version, payload, and timestamps. The [worker claim adapter](../../../../apps/agent-worker/src/control_plane.py#L262-L316) consumes those rows. No production trigger producer or policy-backed coalescing operation is present; the unresolved producer and coalescing decisions remain documented as DR-02. | Partially covered. |
 | Pending IDs before workflow execution | The checkpoint schema persists `pending_trigger_ids` ([0012 migration](../../../../apps/server/migrations/0012_agent_control_plane.sql#L81-L99)); worker checkpoint serialization validates a string list ([checkpoints.py](../../../../apps/agent-worker/src/checkpoints.py#L26-L55)); the workflow path emits the initial checkpoint before tool work. | Covered in code; PostgreSQL-backed supervisor execution is not demonstrated. |
 | Checkpoint compare-and-set | The adapter [updates only the expected version](../../../../apps/agent-worker/src/control_plane.py#L448-L501), and the [server test](../../../../apps/server/src/db/agentControlPlane.postgres.integration.test.ts#L242-L286) verifies version advance, pending IDs, and stale-write rejection. | Passed for same-run CAS. |
 | Stale reclaim and cross-process recovery | The [claim query](../../../../apps/agent-worker/src/control_plane.py#L262-L316) records the claimant and reclaims an expired claim. The adapter [resumes running, failed, or cancelled runs](../../../../apps/agent-worker/src/control_plane.py#L319-L336), and the skip-gated [worker PostgreSQL test](../../../../apps/agent-worker/tests/test_control_plane_postgres.py#L73-L132) verifies the original run and checkpoint are restored after claim and lease expiry. | Implemented; execution evidence is environment-gated. |
@@ -74,6 +80,12 @@ work outside its assigned quilt.
 The current negative test proves only that the role cannot update `patches`
 ([agentControlPlane.postgres.integration.test.ts](../../../../apps/server/src/db/agentControlPlane.postgres.integration.test.ts#L289-L327));
 it does not test assignment mutation or an unassigned run/lease.
+
+The implementation does not expose a producer-side ingestion API or a
+coalescing decision function. That is consistent with the research decision to
+defer producer policy, but it means Step 2.2 validates the storage and claim
+contract only. Non-test trigger producers should remain disabled until DR-02
+is resolved.
 
 ### Major: Requeue Bypasses The Pending Queue Limit
 
@@ -163,6 +175,9 @@ closed.
   acquisition using separate connections.
 * Add denial tests for `quilts`, `tiles`, ownership, authorization, and
   assignment/provisioning mutations under the worker role.
+* Keep production trigger producers disabled until the source, coalescing key,
+  policy version, and payload contract are approved; then add producer-level
+  ingestion tests.
 * Run `apps/agent-worker/tests/test_control_plane_postgres.py` with a migrated
   `AGENT_WORKER_POSTGRES_TEST_DSN`, then run the full worker pytest suite in an
   environment with its declared dependencies, including `agent_framework`.

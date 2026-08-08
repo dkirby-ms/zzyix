@@ -7,8 +7,8 @@
 * Related plan: `.copilot-tracking/plans/2026-08-07/fantome-resident-agent-implementation-plan.instructions.md`
 * Changes log: `.copilot-tracking/changes/2026-08-07/fantome-resident-agent-implementation-changes.md`
 * Research: `.copilot-tracking/research/2026-08-07/fantome-resident-agent-implementation-research.md`
-* Review method: Fresh validation of the implementation rework against the plan, research, and prior review findings.
-* Status: In progress
+* Review method: Fresh phase validation, implementation-quality review, executable checks, and comparison with prior review findings.
+* Status: Complete
 
 ## Summary
 
@@ -21,15 +21,15 @@ safe default feature gates. It remains **Needs Rework** for activation.
 | Severity | Count |
 |----------|-------|
 | Critical | 2 |
-| Major    | 11 |
-| Minor    | 4 |
+| Major    | 12 |
+| Minor    | 5 |
 
 The critical findings are missing deployed identity/RBAC bindings and missing
-real worker-process restart evidence. Major findings cover authorization
-scope, control-plane authority, queue enforcement, checkpoint fidelity,
-provider context, runtime verification, database-role binding, worker
-telemetry export, worker PostgreSQL coverage, worker-inclusive e2e coverage,
-issuer/audience separation, and durable worker-read auditing.
+real worker-process restart evidence. Major findings cover authorization scope,
+queue enforcement, checkpoint fidelity, provider context, runtime
+verification, database-role binding, worker telemetry export, worker
+PostgreSQL coverage, worker-inclusive e2e coverage, issuer/audience
+separation, durable worker-read auditing, and unresolved activation limits.
 
 ## Per-Phase Validation
 
@@ -38,18 +38,18 @@ issuer/audience separation, and durable worker-read auditing.
 | 1. Server identity and reads | Partial | [Phase 1 validation](../rpi/2026-08-08/fantome-resident-agent-implementation-plan-001-validation.md) verifies startup registration, app-role auth, principal mapping, and bounds, but finds quilt-wide rather than patch-scoped assignment and no durable worker-read audit. |
 | 2. Control plane and triggers | Partial | [Phase 2 validation](../rpi/2026-08-08/fantome-resident-agent-implementation-plan-002-validation.md) verifies lease/CAS/deduplication and reclaim paths, but finds worker assignment authority and requeue queue-bound bypass. |
 | 3. Python worker MVP | Partial | [Phase 3 validation](../rpi/2026-08-08/fantome-resident-agent-implementation-plan-003-validation.md) verifies the production adapter by inspection, but finds incomplete checkpoint state, omitted Foundry context, and no real framework runtime evidence. |
-| 4. Deployment and telemetry | Partial | [Phase 4 validation](../rpi/2026-08-08/fantome-resident-agent-implementation-plan-004-validation.md) verifies ACA structure, safe gates, and redaction, but finds missing app-role/RBAC assignment, DSN binding, and worker telemetry export. |
+| 4. Deployment and telemetry | Partial | [Phase 4 validation](../rpi/2026-08-08/fantome-resident-agent-implementation-plan-004-validation.md) confirms imperative CD deployment, but finds missing app-role/RBAC assignment, an opaque DSN, and no worker telemetry export. |
 | 5. End-to-end validation | Partial | [Phase 5 validation](../rpi/2026-08-08/fantome-resident-agent-implementation-plan-005-validation.md) verifies focused lower-level coverage, but finds no real worker restart, no executed worker PostgreSQL test, no worker-inclusive multi-replica e2e, and no full worker pytest run. |
 
 ## Critical Findings
 
-### C1: Deployment does not bind worker identity permissions
+### C1: Deployed identity permissions are missing
 
-The worker ACA has a system-assigned identity, but neither Bicep nor CD
+The CD step creates the worker system identity, but neither CD nor Bicep
 assigns the protected server `agent.runtime` app role or Foundry RBAC. The
 manual runbook does not constitute deployment evidence. See
-[agent-worker.bicep](../../../infra/bicep/modules/agent-worker.bicep#L202-L207)
-and [fantome-agent-entra-setup.md](../../../docs/fantome-agent-entra-setup.md#L172-L194).
+[cd.yml](../../../.github/workflows/cd.yml#L814) and
+[fantome-agent-entra-setup.md](../../../docs/fantome-agent-entra-setup.md#L172-L194).
 
 ### C2: Durable process-level restart recovery is unverified
 
@@ -80,7 +80,7 @@ against PostgreSQL. See
 	[workflow.py](../../../apps/agent-worker/src/workflow.py#L215-L242).
 * The deployed DSN is opaque and is not proven to authenticate as
 	`agent_control_worker`. See
-	[agent-worker.bicep](../../../infra/bicep/modules/agent-worker.bicep#L96-L100).
+	[cd.yml](../../../.github/workflows/cd.yml#L744-L794).
 * Worker telemetry does not configure an Azure Monitor/OpenTelemetry exporter.
 	See [telemetry.py](../../../apps/agent-worker/src/telemetry.py#L10-L31).
 * Worker PostgreSQL contention/recovery tests were not executed, and the
@@ -102,6 +102,8 @@ against PostgreSQL. See
 * PostgreSQL tests do not directly cover requeue-at-capacity, assignment
 	ownership, or competing lease acquisition.
 * The worker telemetry export and gate paths lack focused tests.
+* The ignored local environment file contains live-looking credentials that
+  require rotation and removal as operational security hygiene.
 
 ## Implementation Quality
 
@@ -116,16 +118,17 @@ path are closed by the current changes or focused evidence.
 
 | Command | Status | Result |
 |---------|--------|--------|
-| `npm --prefix apps/server test` | Passed | 40 files passed, 1 skipped; 247 tests passed, 1 skipped. |
+| `npm --prefix apps/server test` | Passed | 40 files passed, 1 skipped; 247 tests passed, 1 skipped in the current review. |
 | `npm --prefix apps/server run build` | Passed | TypeScript compilation succeeded. |
 | `az bicep build --file infra/bicep/main.bicep` | Passed | Bicep compilation succeeded. |
 | `az bicep build-params --file infra/bicep/main.bicepparam` | Passed | Parameter compilation succeeded. |
 | `python3 -m compileall apps/agent-worker/src apps/agent-worker/tests` | Passed | Worker source and tests compiled. |
-| `docker build -f apps/agent-worker/Dockerfile apps/agent-worker` | Passed | Worker image built successfully. |
+| `docker build -f apps/agent-worker/Dockerfile apps/agent-worker` | Historical pass | The changes log records a successful build; no fresh Docker build was completed in this review. |
 | `bash -n scripts/bootstrap-cd-environment.sh` | Passed | Deployment script syntax is valid. |
 | `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/cd.yml'))"` | Passed | CD workflow parsed successfully. |
 | `git diff --check` | Passed | No whitespace errors in the worktree diff. |
 | `python3 -m pytest apps/agent-worker/tests` | Blocked | Host Python reports `No module named pytest`. |
+| `get_errors` on touched server and worker files | Passed | No language-service errors reported. |
 
 ## Missing Work And Deviations
 
@@ -158,6 +161,9 @@ path are closed by the current changes or focused evidence.
 * Resolve patch-versus-quilt authorization and add sibling-patch denial tests.
 * Add a worker telemetry exporter and verify ingestion/redaction.
 * Install worker test dependencies and run the full pytest suite.
+* Rotate and remove the live-looking credentials present in the ignored local
+	`scripts/gh-vars.env`; this file is not tracked, but its contents should be
+	treated as exposed operational material.
 
 ### Deferred From Scope Or Environment
 
@@ -171,6 +177,6 @@ path are closed by the current changes or focused evidence.
 ## Overall Status
 
 **Needs Rework.** The implementation is suitable for continued development and
-focused validation, but the critical identity and restart gaps plus the major
-authorization, durability, and observability findings block production
-activation.
+focused validation, but the missing worker deployment and identity bindings,
+process-level recovery gap, and major authorization, durability, and
+observability findings block production activation.

@@ -18,6 +18,12 @@ The evidence is classified as follows:
 * **Focused only:** The test proves a lower-level contract without proving the required process-level or end-to-end behavior.
 * **Missing:** No fixture or test implements the requested evidence.
 
+### Current Validation Run
+
+* `python3 -m pytest apps/agent-worker/tests` was attempted and failed before test discovery because the host has no `pytest` module.
+* `npm --prefix apps/server test -- src/routes/agentReads.auth.test.ts src/index.integration.test.ts` was attempted but interrupted with exit code 130 before a passing result was produced in this run.
+* Repository inspection confirms that the PostgreSQL worker test requires `AGENT_WORKER_POSTGRES_TEST_DSN` and that the configured multi-replica Playwright harness starts only the two TypeScript server replicas.
+
 ## Phase 5 Requirements Compared With Evidence
 
 | Requirement | Verified evidence | Assessment |
@@ -46,6 +52,10 @@ The worker package declares pytest only as a development extra ([pyproject.toml]
 Phase 5 requires recovery after worker loss, not only restoration inside an in-memory supervisor call. The current restart-named test uses `InMemoryControlPlane` and invokes `process_once` in one Python process ([test_supervisor.py](../../../../../apps/agent-worker/tests/test_supervisor.py#L231)). The changes log explicitly retains a real two-process PostgreSQL fixture as outstanding ([changes log](../../../../../.copilot-tracking/changes/2026-08-07/fantome-resident-agent-implementation-changes.md#L105)). Therefore the implementation does not yet have evidence that a terminated production worker resumes the latest durable checkpoint and completes safely after restart.
 
 ### Major
+
+#### V5-06: Current focused server validation did not produce a fresh passing result
+
+The changes log records earlier passing app-role route and startup integration runs, but the same focused command was interrupted in the current validation run. The prior recorded evidence remains relevant, while this review does not treat the interrupted rerun as an independent pass. A clean rerun is required before final sign-off.
 
 #### V5-02: Worker PostgreSQL contention and lease-loss recovery were not executed
 
