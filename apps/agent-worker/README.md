@@ -18,3 +18,16 @@ python -m main
 ```
 
 The worker acquires and refreshes app-only tokens through its managed identity. Static server or Foundry tokens are not supported.
+
+## Test-only static server token mode
+
+For local integration tests, the worker can bypass managed identity and send a fixed bearer token:
+
+```bash
+export NODE_ENV=test
+export AGENT_USE_STATIC_SERVER_TOKEN=true
+export AGENT_TEST_STATIC_SERVER_TOKEN='test-worker-token'
+python -m main
+```
+
+`AGENT_USE_STATIC_SERVER_TOKEN` is rejected unless `NODE_ENV=test`.

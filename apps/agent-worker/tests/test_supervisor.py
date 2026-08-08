@@ -160,7 +160,7 @@ def test_given_model_free_gate_disabled_when_processing_then_does_not_claim() ->
     control_plane = InMemoryControlPlane()
     quilt_id = "40000000-0000-4000-8000-000000000001"
     trigger_id = control_plane.enqueue_trigger(quilt_id=quilt_id, payload={})
-    control_plane.assign_quilt(quilt_id, worker_id)
+    control_plane.assign_quilt(quilt_id, "11111111-1111-4111-8111-111111111111")
 
     supervisor = AgentSupervisor(
         config=WorkerConfig(

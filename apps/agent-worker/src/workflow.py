@@ -41,7 +41,6 @@ class GraphWorkflow:
         policy_version: str,
         framework_version: str,
         structured_proposals_enabled: bool,
-        allow_test_runtime: bool = False,
         framework_runtime: Any | None = None,
     ) -> None:
         self._tools = tools
@@ -50,8 +49,7 @@ class GraphWorkflow:
         self._framework_version = framework_version
         self._structured_proposals_enabled = structured_proposals_enabled
         self._framework_runtime = framework_runtime if framework_runtime is not None else _load_framework_runtime()
-        self._allow_test_runtime = allow_test_runtime
-        if self._framework_runtime is None and not allow_test_runtime:
+        if self._framework_runtime is None:
             raise FrameworkRuntimeUnavailable(
                 "Microsoft Agent Framework workflow execution is not available in this build; "
                 "install agent-framework>=1.13.0,<1.14.0 before starting the worker"
@@ -65,123 +63,13 @@ class GraphWorkflow:
         checkpoint: WorkerCheckpoint | None = None,
         checkpoint_callback: Callable[[WorkerCheckpoint], None] | None = None,
     ) -> WorkflowResult:
-        if self._framework_runtime is not None:
-            return _run_sync(self._run_framework_graph(
-                run_id=run_id,
-                trigger=trigger,
-                lease_guard=lease_guard,
-                checkpoint=checkpoint,
-                checkpoint_callback=checkpoint_callback,
-            ))
-
-        if not self._allow_test_runtime:
-            raise FrameworkRuntimeUnavailable("Agent Framework runtime is required for production workflow execution")
-
-        return self._run_test_graph(run_id, trigger, lease_guard, checkpoint, checkpoint_callback)
-
-    def _run_test_graph(
-        self,
-        run_id: str,
-        trigger: WorkflowTrigger,
-        lease_guard: Callable[[], bool],
-        checkpoint: WorkerCheckpoint | None,
-        checkpoint_callback: Callable[[WorkerCheckpoint], None] | None,
-    ) -> WorkflowResult:
-        state: dict[str, Any] = {
-            "trigger": trigger,
-            "tool_outputs": {},
-            "proposal": {
-                "summary": "No proposal generated.",
-                "actions": [{"type": "observe", "target": trigger.quilt_id}],
-            },
-            "gateway": None,
-        }
-
-        node: str | None = _resume_node(checkpoint)
-        if node in {"completed", "lease_lost"}:
-            node = None
-
-        if checkpoint_callback is not None and checkpoint is None:
-            checkpoint_callback(self._checkpoint_for(run_id, trigger.quilt_id, "load_context", [trigger.trigger_id]))
-
-        while node is not None:
-            if not lease_guard():
-                checkpoint = self._checkpoint_for(run_id, trigger.quilt_id, "lease_lost", [trigger.trigger_id])
-                if checkpoint_callback is not None:
-                    checkpoint_callback(checkpoint)
-                return WorkflowResult(
-                    status="lease_lost",
-                    proposal=state["proposal"],
-                    checkpoint=checkpoint,
-                    gateway=state["gateway"],
-                )
-
-            if node == "load_context":
-                state["tool_outputs"]["context"] = self._tools.get_quilt_context(QuiltContextInput(quilt_id=trigger.quilt_id))
-                next_node = "load_events"
-            elif node == "load_events":
-                patch_id = trigger.payload.get("patchId")
-                if isinstance(patch_id, str):
-                    state["tool_outputs"]["events"] = self._tools.get_patch_events(
-                        PatchEventsInput(patch_id=patch_id, after_op_seq=0, limit=50)
-                    )
-                else:
-                    state["tool_outputs"]["events"] = {"operations": [], "operationCount": 0}
-                next_node = "draft_proposal"
-            elif node == "draft_proposal":
-                if not self._structured_proposals_enabled:
-                    state["gateway"] = GatewayResponse(
-                        provider="feature-gate",
-                        model="structured-proposals-disabled",
-                        request_id=f"gate-{run_id[:8]}",
-                        structured_output=state["proposal"],
-                        used_fallback=True,
-                        fallback_reason="structured_proposals_disabled",
-                    )
-                else:
-                    gateway_response = self._gateway.generate(
-                        GatewayRequest(
-                            run_id=run_id,
-                            quilt_id=trigger.quilt_id,
-                            prompt="Generate an observation-only proposal from supplied context.",
-                            tool_context=state["tool_outputs"],
-                        )
-                    )
-                    state["gateway"] = gateway_response
-                    state["proposal"] = gateway_response.structured_output
-                next_node = None
-            else:
-                raise RuntimeError(f"unknown graph node: {node}")
-
-            if not lease_guard():
-                checkpoint = self._checkpoint_for(run_id, trigger.quilt_id, "lease_lost", [trigger.trigger_id])
-                if checkpoint_callback is not None:
-                    checkpoint_callback(checkpoint)
-                return WorkflowResult(
-                    status="lease_lost",
-                    proposal=state["proposal"],
-                    checkpoint=checkpoint,
-                    gateway=state["gateway"],
-                )
-
-            node = next_node
-            if checkpoint_callback is not None:
-                checkpoint_callback(
-                    self._checkpoint_for(
-                        run_id,
-                        trigger.quilt_id,
-                        node or "completed",
-                        [] if node is None else [trigger.trigger_id],
-                    )
-                )
-
-        checkpoint = self._checkpoint_for(run_id, trigger.quilt_id, "completed", [])
-        return WorkflowResult(
-            status="completed",
-            proposal=state["proposal"],
+        return _run_sync(self._run_framework_graph(
+            run_id=run_id,
+            trigger=trigger,
+            lease_guard=lease_guard,
             checkpoint=checkpoint,
-            gateway=state["gateway"],
-        )
+            checkpoint_callback=checkpoint_callback,
+        ))
 
     async def _run_framework_graph(
         self,
@@ -231,7 +119,7 @@ class GraphWorkflow:
         ]
         builder = self._framework_runtime.WorkflowBuilder(start_executor=executors[0])
         if len(executors) > 1:
-            builder.add_chain(executors[1:])
+            builder.add_chain(executors)
         result = await builder.build().run(state)
         output = result.get_outputs()[-1]
         return WorkflowResult(
@@ -317,6 +205,9 @@ class GraphWorkflow:
                 await self._emit_framework_result(context, state, run_id, trigger, None, "completed")
             else:
                 await _maybe_await(context.send_message(message))
+
+        if hasattr(runtime, "WorkflowContext"):
+            execute.__annotations__["context"] = runtime.WorkflowContext
 
         decorated = runtime.handler(execute, input=dict, output=dict, workflow_output=dict)
         executor_type = type(

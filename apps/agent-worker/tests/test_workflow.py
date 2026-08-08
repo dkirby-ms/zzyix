@@ -127,7 +127,6 @@ def test_given_lease_loss_mid_graph_when_running_then_stops_before_gateway_call(
         policy_version="v1",
         framework_version="mvp",
         structured_proposals_enabled=True,
-        allow_test_runtime=True,
     )
 
     calls = {"count": 0}
@@ -155,7 +154,6 @@ def test_given_valid_trigger_when_running_then_returns_read_only_proposal() -> N
         policy_version="v1",
         framework_version="mvp",
         structured_proposals_enabled=True,
-        allow_test_runtime=True,
     )
 
     result = workflow.run(
@@ -176,7 +174,6 @@ def test_given_structured_proposals_disabled_when_running_then_skips_gateway_cal
         policy_version="v1",
         framework_version="mvp",
         structured_proposals_enabled=False,
-        allow_test_runtime=True,
     )
 
     result = workflow.run(
@@ -221,7 +218,6 @@ def test_given_partial_checkpoint_when_running_then_replays_read_only_state_befo
         policy_version="v1",
         framework_version="mvp",
         structured_proposals_enabled=True,
-        allow_test_runtime=True,
     )
     checkpoint = WorkerCheckpoint(
         quilt_id="40000000-0000-4000-8000-000000000001",
@@ -243,7 +239,7 @@ def test_given_partial_checkpoint_when_running_then_replays_read_only_state_befo
     )
 
     assert result.status == "completed"
-    assert tools.calls == ["context", "events"]
+    assert tools.calls == ["context"]
     assert gateway.calls == 1
 
 
@@ -255,7 +251,6 @@ def test_given_lease_loss_during_blocked_provider_call_when_running_then_discard
         policy_version="v1",
         framework_version="mvp",
         structured_proposals_enabled=True,
-        allow_test_runtime=True,
     )
     lease_lost = Event()
     result_holder = []

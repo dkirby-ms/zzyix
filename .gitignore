@@ -16,3 +16,4 @@ infra/bicep/main.json
 infra/bicep/host.main copy.bicepparam
 infra/bicep/deploy.env
 apps/agent-worker/.venv/
+apps/agent-worker/src/zzyix_agent_worker.egg-info/

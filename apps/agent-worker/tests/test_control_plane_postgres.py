@@ -326,7 +326,7 @@ def test_given_production_worker_process_restart_when_checkpoint_committed_then_
 def _start_test_worker(postgres_dsn: str, base_url: str) -> subprocess.Popen[str]:
     environment = os.environ | {
         "NODE_ENV": "test",
-        "AGENT_WORKER_TEST_RUNTIME": "true",
+        "AGENT_USE_STATIC_SERVER_TOKEN": "true",
         "AGENT_TEST_STATIC_SERVER_TOKEN": "test-worker-token",
         "AGENT_PRINCIPAL_ID": AGENT_PRINCIPAL_ID,
         "AGENT_CONTROL_PLANE_DSN": postgres_dsn,

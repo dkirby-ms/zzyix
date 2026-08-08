@@ -36,16 +36,16 @@ def parse_bool_flag(name: str, default: bool) -> bool:
     return default
 
 
-def is_test_runtime_enabled() -> bool:
-    enabled = parse_bool_flag("AGENT_WORKER_TEST_RUNTIME", False)
+def is_static_server_token_enabled() -> bool:
+    enabled = parse_bool_flag("AGENT_USE_STATIC_SERVER_TOKEN", False)
     if enabled and os.getenv("NODE_ENV") != "test":
-        raise ValueError("AGENT_WORKER_TEST_RUNTIME is only permitted when NODE_ENV=test")
+        raise ValueError("AGENT_USE_STATIC_SERVER_TOKEN is only permitted when NODE_ENV=test")
     return enabled
 
 
 def build_supervisor() -> AgentSupervisor:
     config = load_config_from_env()
-    test_runtime_enabled = is_test_runtime_enabled()
+    static_server_token_enabled = is_static_server_token_enabled()
 
     control_plane_dsn = os.getenv("AGENT_CONTROL_PLANE_DSN")
     if not control_plane_dsn:
@@ -57,7 +57,7 @@ def build_supervisor() -> AgentSupervisor:
         raise ValueError("AGENT_SERVER_TOKEN_SCOPE is required for managed identity server reads")
     token_provider = (
         StaticAccessTokenProvider(os.getenv("AGENT_TEST_STATIC_SERVER_TOKEN", ""))
-        if test_runtime_enabled
+        if static_server_token_enabled
         else ManagedIdentityTokenProvider(server_token_scope)
     )
 
@@ -109,7 +109,6 @@ def build_supervisor() -> AgentSupervisor:
         policy_version=os.getenv("AGENT_POLICY_VERSION", "v1"),
         framework_version=os.getenv("AGENT_FRAMEWORK_VERSION", "mvp"),
         structured_proposals_enabled=structured_proposals_enabled,
-        allow_test_runtime=test_runtime_enabled,
     )
 
     return AgentSupervisor(config=config, control_plane=control_plane, workflow=workflow)
