@@ -18,10 +18,12 @@ The Fantome worker uses a system-assigned managed identity from Azure Container
 Apps. That identity calls the server with an app-only token and, later, calls
 Foundry when model execution is enabled.
 
-The first additive Bicep deployment can create the worker Container App and its
-managed identity. The app-role grant to that managed identity usually happens
-after that deployment, because the identity principal ID does not exist until
-Azure creates the Container App.
+The additive infrastructure deployment provisions the shared Container Apps
+environment, networking, PostgreSQL, and monitoring resources. GitHub CD is the
+sole owner of the worker Container App: it creates or updates the worker image,
+managed identity, secrets, environment variables, and replica settings. The
+app-role grant to that managed identity happens after CD creates the Container
+App, because the identity principal ID does not exist beforehand.
 
 ## Current identity model
 
@@ -66,39 +68,41 @@ AUTH_AGENT_API_AUDIENCE=api://zzyix-agent-reader
 AUTH_AGENT_REQUIRED_ROLE=agent.runtime
 ```
 
-The worker deployment parameters carry the same contract values for operational
+GitHub environment variables carry the same contract values for operational
 traceability and token acquisition:
 
 ```text
-agentServerTokenScope=api://zzyix-agent-reader/.default
-agentAuthTrustedIssuer=https://login.microsoftonline.com/<tenant-id>/v2.0
-agentAuthApiAudience=api://zzyix-agent-reader
-agentAuthRequiredRole=agent.runtime
+AGENT_SERVER_TOKEN_SCOPE=api://zzyix-agent-reader/.default
+AUTH_AGENT_TRUSTED_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+AUTH_AGENT_API_AUDIENCE=api://zzyix-agent-reader
+AUTH_AGENT_REQUIRED_ROLE=agent.runtime
 ```
 
 ## Pre-deployment setup
 
 Create or verify the server API app registration before deployment.
 
-1. Confirm the API application ID URI matches the Bicep parameter value, for
-   example `api://zzyix-agent-reader`.
+1. Confirm the API application ID URI matches `AUTH_AGENT_API_AUDIENCE`, for
+  example `api://zzyix-agent-reader`.
 2. Confirm the API exposes an application role with value `agent.runtime`.
 3. Confirm the server runtime can validate app-only tokens for the issuer,
    audience, and role listed above.
 4. Create or retrieve the restricted PostgreSQL DSN for the `agent_control_worker`
-   role. Store it outside source control and pass it as `agentControlPlaneDsn`.
+  role. Store it outside source control as the GitHub environment secret
+  `AGENT_CONTROL_PLANE_DSN`.
 
-You can deploy the worker before assigning `agent.runtime` to the worker managed
-identity, but keep these gates disabled until the grant is complete:
+GitHub CD can deploy the worker before assigning `agent.runtime` to its managed
+identity, but keep these environment variables disabled until the grant is
+complete:
 
-```bicep
-param agentFeatureServerReadsEnabled = false
-param agentFeatureFoundryEnabled = false
-param agentFeatureStructuredProposalsEnabled = false
-param agentGatewayMode = 'fake'
+```text
+FEATURE_AGENT_READS_ENABLED=false
+AGENT_FEATURE_FOUNDRY_ENABLED=false
+AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED=false
+AGENT_GATEWAY_MODE=fake
 ```
 
-## Additive deployment
+## Additive infrastructure deployment
 
 Run a what-if first so the existing environment receives only the expected
 additive changes:
@@ -107,29 +111,28 @@ additive changes:
 az deployment group what-if \
   --resource-group <resource-group> \
   --template-file infra/bicep/main.bicep \
-  --parameters infra/bicep/host.main.bicepparam \
-  --parameters agentControlPlaneDsn='<restricted-agent-control-dsn>'
+  --parameters infra/bicep/host.main.bicepparam
 ```
 
-Deploy when the what-if output matches the expected worker resources and
-configuration changes:
+Deploy when the what-if output matches the expected shared infrastructure
+changes. The worker Container App is deployed separately by GitHub CD:
 
 ```bash
 az deployment group create \
   --resource-group <resource-group> \
   --name fantome-agent-worker \
   --template-file infra/bicep/main.bicep \
-  --parameters infra/bicep/host.main.bicepparam \
-  --parameters agentControlPlaneDsn='<restricted-agent-control-dsn>'
+  --parameters infra/bicep/host.main.bicepparam
 ```
 
-Capture the worker managed identity principal ID from the deployment output:
+GitHub CD then creates or updates the worker Container App. Capture its managed
+identity principal ID after the CD run:
 
 ```bash
-WORKER_PRINCIPAL_ID=$(az deployment group show \
+WORKER_PRINCIPAL_ID=$(az containerapp show \
   --resource-group <resource-group> \
-  --name fantome-agent-worker \
-  --query properties.outputs.agentWorkerPrincipalId.value \
+  --name <agent-worker-container-app-name> \
+  --query identity.principalId \
   -o tsv)
 ```
 
@@ -178,8 +181,8 @@ the worker may process.
 After the app-role assignment and principal provisioning are complete, redeploy
 or update configuration with server reads enabled:
 
-```bicep
-param agentFeatureServerReadsEnabled = true
+```text
+FEATURE_AGENT_READS_ENABLED=true
 ```
 
 Keep Foundry disabled until the Foundry RBAC assignment and model gateway
@@ -227,7 +230,7 @@ Use this checklist before turning on production worker behavior:
   principal.
 * The restricted DSN authenticates as a role with access to `agent_control` and
   no canonical quilt write access.
-* `agentFeatureServerReadsEnabled` remains false until the identity and
+* `FEATURE_AGENT_READS_ENABLED` remains false until the identity and
   principal checks pass.
 * Foundry settings remain disabled until Foundry RBAC and gateway policy values
   are confirmed.
