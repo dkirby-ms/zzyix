@@ -6,9 +6,9 @@ import sys
 
 from control_plane import PostgresControlPlane
 from gateway import FakeGateway, GatewayLimits, GovernedGateway
-from identity import ManagedIdentityTokenProvider
+from identity import ManagedIdentityTokenProvider, StaticAccessTokenProvider
 from supervisor import AgentSupervisor, load_config_from_env
-from telemetry import emit_event
+from telemetry import configure_azure_monitor_from_env, emit_event
 from tools import AgentReadTools
 from workflow import GraphWorkflow
 
@@ -36,8 +36,16 @@ def parse_bool_flag(name: str, default: bool) -> bool:
     return default
 
 
+def is_test_runtime_enabled() -> bool:
+    enabled = parse_bool_flag("AGENT_WORKER_TEST_RUNTIME", False)
+    if enabled and os.getenv("NODE_ENV") != "test":
+        raise ValueError("AGENT_WORKER_TEST_RUNTIME is only permitted when NODE_ENV=test")
+    return enabled
+
+
 def build_supervisor() -> AgentSupervisor:
     config = load_config_from_env()
+    test_runtime_enabled = is_test_runtime_enabled()
 
     control_plane_dsn = os.getenv("AGENT_CONTROL_PLANE_DSN")
     if not control_plane_dsn:
@@ -47,7 +55,11 @@ def build_supervisor() -> AgentSupervisor:
     server_token_scope = os.getenv("AGENT_SERVER_TOKEN_SCOPE")
     if not server_token_scope:
         raise ValueError("AGENT_SERVER_TOKEN_SCOPE is required for managed identity server reads")
-    token_provider = ManagedIdentityTokenProvider(server_token_scope)
+    token_provider = (
+        StaticAccessTokenProvider(os.getenv("AGENT_TEST_STATIC_SERVER_TOKEN", ""))
+        if test_runtime_enabled
+        else ManagedIdentityTokenProvider(server_token_scope)
+    )
 
     tools = AgentReadTools(
         base_url=os.getenv("AGENT_SERVER_BASE_URL", "http://127.0.0.1:3001"),
@@ -97,7 +109,7 @@ def build_supervisor() -> AgentSupervisor:
         policy_version=os.getenv("AGENT_POLICY_VERSION", "v1"),
         framework_version=os.getenv("AGENT_FRAMEWORK_VERSION", "mvp"),
         structured_proposals_enabled=structured_proposals_enabled,
-        allow_test_runtime=False,
+        allow_test_runtime=test_runtime_enabled,
     )
 
     return AgentSupervisor(config=config, control_plane=control_plane, workflow=workflow)
@@ -107,6 +119,7 @@ def main() -> int:
     configure_logging()
 
     try:
+        configure_azure_monitor_from_env()
         supervisor = build_supervisor()
     except ValueError as exc:
         logging.error("configuration_error: %s", exc)

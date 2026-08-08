@@ -305,8 +305,8 @@ describe('agent read HTTP contract', () => {
       values (${agentIssuer.issuer}, ${`app:${AGENT_APPLICATION_ID}`}, ${AGENT_PRINCIPAL})
     `)
     await attemptDatabase.db.execute(sql`
-      insert into agent_control.agent_assignments (quilt_id, agent_principal_id, policy_version)
-      values (${QUILT_ID}, ${AGENT_PRINCIPAL}, 'test-policy')
+      insert into agent_control.agent_assignments (quilt_id, patch_id, agent_principal_id, policy_version)
+      values (${QUILT_ID}, ${PATCH_A}, ${AGENT_PRINCIPAL}, 'test-policy')
     `)
     const token = await agentIssuer.issueToken({
       subject: 'agent-worker',
@@ -321,7 +321,7 @@ describe('agent read HTTP contract', () => {
     await expect(agentRead.json()).resolves.toMatchObject({
       principalId: AGENT_PRINCIPAL,
       topology: { quiltId: QUILT_ID },
-      patches: [{ id: PATCH_A }, { id: PATCH_B }],
+      patches: [{ id: PATCH_A }],
     })
   })
 })

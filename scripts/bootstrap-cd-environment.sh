@@ -105,7 +105,7 @@ Examples:
   AGENT_GATEWAY_MODE=fake
   APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=<key>;IngestionEndpoint=https://<region>.in.applicationinsights.azure.com/;ApplicationId=<app-id>
   SERVER_DATABASE_URL=postgres://...
-  AGENT_CONTROL_PLANE_DSN=postgres://...
+  AGENT_CONTROL_PLANE_DSN=postgresql://agent_control_worker:<password>@<server>:5432/zzyix?sslmode=verify-full
   # Optional: override auto-resolved CORS origin
   # SERVER_CORS_ORIGIN=https://client.example.com
   EOF

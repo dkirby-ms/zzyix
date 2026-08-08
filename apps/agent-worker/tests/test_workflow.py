@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from threading import Event, Thread
+
+from checkpoints import WorkerCheckpoint
 from gateway import GatewayRequest, GatewayResponse, ModelGateway
 from workflow import GraphWorkflow, WorkflowTrigger
 
@@ -89,6 +93,26 @@ class _GatewayStub(ModelGateway):
                 "summary": "observe only",
                 "actions": [{"type": "observe", "target": request.quilt_id}],
             },
+            used_fallback=False,
+            fallback_reason=None,
+        )
+
+
+class _BlockingGateway(ModelGateway):
+    def __init__(self) -> None:
+        self.started = Event()
+        self.release = Event()
+        self.calls = 0
+
+    def generate(self, request: GatewayRequest) -> GatewayResponse:
+        self.calls += 1
+        self.started.set()
+        assert self.release.wait(timeout=1)
+        return GatewayResponse(
+            provider="fake",
+            model="deterministic-v1",
+            request_id="req-1",
+            structured_output={"summary": "observe only", "actions": [{"type": "observe", "target": request.quilt_id}]},
             used_fallback=False,
             fallback_reason=None,
         )
@@ -186,3 +210,70 @@ def test_given_injected_framework_when_running_without_test_flag_then_uses_frame
 
     assert result.status == "completed"
     assert gateway.calls == 1
+
+
+def test_given_partial_checkpoint_when_running_then_replays_read_only_state_before_proposal() -> None:
+    gateway = _GatewayStub()
+    tools = _ToolsStub()
+    workflow = GraphWorkflow(
+        tools=tools,
+        gateway=gateway,
+        policy_version="v1",
+        framework_version="mvp",
+        structured_proposals_enabled=True,
+        allow_test_runtime=True,
+    )
+    checkpoint = WorkerCheckpoint(
+        quilt_id="40000000-0000-4000-8000-000000000001",
+        run_id="run-recovery",
+        checkpoint_version=2,
+        workflow_state="draft_proposal",
+        observed_revision=None,
+        pending_trigger_ids=("t1",),
+        policy_version="v1",
+        framework_version="mvp",
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    result = workflow.run(
+        run_id="run-recovery",
+        trigger=WorkflowTrigger(trigger_id="t1", quilt_id=checkpoint.quilt_id, payload={}),
+        lease_guard=lambda: True,
+        checkpoint=checkpoint,
+    )
+
+    assert result.status == "completed"
+    assert tools.calls == ["context", "events"]
+    assert gateway.calls == 1
+
+
+def test_given_lease_loss_during_blocked_provider_call_when_running_then_discards_provider_result() -> None:
+    gateway = _BlockingGateway()
+    workflow = GraphWorkflow(
+        tools=_ToolsStub(),
+        gateway=gateway,
+        policy_version="v1",
+        framework_version="mvp",
+        structured_proposals_enabled=True,
+        allow_test_runtime=True,
+    )
+    lease_lost = Event()
+    result_holder = []
+
+    def run_workflow() -> None:
+        result_holder.append(workflow.run(
+            run_id="run-lease-loss",
+            trigger=WorkflowTrigger(trigger_id="t1", quilt_id="40000000-0000-4000-8000-000000000001", payload={}),
+            lease_guard=lambda: not lease_lost.is_set(),
+        ))
+
+    thread = Thread(target=run_workflow)
+    thread.start()
+    assert gateway.started.wait(timeout=1)
+    lease_lost.set()
+    gateway.release.set()
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    assert gateway.calls == 1
+    assert result_holder[0].status == "lease_lost"

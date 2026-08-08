@@ -40,6 +40,11 @@ Implementation rework is complete through the worker runtime. Phase 4 and Phase 
 * apps/server/src/routes/agentReads.auth.test.ts - Added app-only internal route authentication coverage that rejects delegated tokens and accepts agent app-role tokens.
 * docs/fantome-agent-entra-setup.md - Added dedicated Entra ID and Azure RBAC runbook for worker identity activation.
 * apps/agent-worker/tests/test_control_plane_postgres.py - Added skip-gated PostgreSQL worker control-plane contention and checkpoint resume coverage.
+* apps/server/migrations/0015_patch_scoped_agent_assignments.sql - Added patch-scoped agent assignments for worker read authorization.
+* apps/server/migrations/0016_agent_control_permissions_and_queue_guards.sql - Added restricted worker grants and requeue capacity enforcement.
+* apps/agent-worker/tests/test_telemetry.py - Added Azure Monitor telemetry bootstrap coverage.
+* apps/agent-worker/src/control_plane_access_verification.py - Added deploy-time restricted-role and canonical-write-denial verification.
+* apps/agent-worker/tests/test_control_plane_access_verification.py - Added restricted-role verifier unit coverage.
 
 ### Modified
 
@@ -83,6 +88,18 @@ Implementation rework is complete through the worker runtime. Phase 4 and Phase 
 * apps/server/src/auth/testOidcIssuer.test.ts - Added coverage for app-role worker token issuance.
 * e2e/support/testOidcIssuer.ts - Added local app-role token issuance support with `roles`, `azp`, and `appid` claims.
 * .copilot-tracking/research/subagents/2026-08-07/microsoft-agent-framework-python-api.md - Recorded the verified Agent Framework 1.13.0 workflow API used by the worker adapter.
+* apps/server/src/auth/config.ts - Require dedicated agent issuer and audience configuration without delegated-user fallback.
+* apps/server/src/routes/agentReads.ts - Enforce patch-scoped reads and write durable worker-read authorization audit records.
+* apps/server/src/db/repository.ts - Added patch assignment and authorization-audit persistence helpers.
+* apps/server/src/db/schema.ts - Added patch-scoped assignment schema support.
+* apps/agent-worker/src/control_plane.py - Enforced active assignments for run and lease ownership, requeue capacity, and corrected lease-claim parameter binding.
+* apps/agent-worker/src/checkpoints.py - Preserved replay semantics for incomplete workflow checkpoints.
+* apps/agent-worker/src/gateway.py - Added bounded redacted tool context to governed requests.
+* apps/agent-worker/src/telemetry.py - Added Azure Monitor OpenTelemetry bootstrap.
+* apps/agent-worker/src/main.py - Limited static-token and local workflow adapters to explicit test mode.
+* .github/workflows/cd.yml - Added a post-deployment worker-container execution of the restricted-role verifier.
+* scripts/bootstrap-cd-environment.sh - Added bootstrap validation for the restricted worker DSN secret.
+* scripts/release-contract.test.mjs - Added the CD contract assertion for restricted worker database access verification.
 
 ### Removed
 
@@ -112,7 +129,13 @@ Implementation rework is complete through the worker runtime. Phase 4 and Phase 
 * Phase 5 validation rework added live app-role route coverage and PostgreSQL-gated worker control-plane recovery coverage.
 	* Passed: `npm --prefix apps/server test -- src/auth/testOidcIssuer.test.ts`, `npm --prefix apps/server test -- src/index.integration.test.ts`, `npm --prefix apps/server test -- src/routes/agentReads.auth.test.ts`, `npm --prefix apps/server run build`, `python3 -m compileall apps/agent-worker/src apps/agent-worker/tests`, and `npx playwright test --config playwright.multi-replica.config.ts e2e/quilt-reconnect.spec.ts`.
 	* Blocked: `python3 -m pytest apps/agent-worker/tests` because `pytest` is not installed; local virtual environment creation is unavailable because `ensurepip`/`python3.12-venv` is missing; `AGENT_WORKER_POSTGRES_TEST_DSN` was not available to execute the new PostgreSQL worker integration test.
+* Review remediation addressed C2 and all code-remediable major findings.
+	* Passed: focused server tests (27 tests), server TypeScript build, worker source/test compilation, Docker worker-image build, `git diff --check`, and editor diagnostics.
+	* Blocked: worker pytest cannot be installed in the existing isolated environment because its Python build lacks `ensurepip`; PostgreSQL subprocess restart evidence requires `AGENT_WORKER_POSTGRES_TEST_DSN`.
+* The deployment flow now verifies the configured worker DSN role after Container App deployment.
+	* Passed: the CD release-contract suite (11 tests), shell syntax, verifier compilation, and Docker worker-image build.
+	* Blocked: the CD verification itself requires GitHub Environment secret `AGENT_CONTROL_PLANE_DSN` and Azure access to execute the deployed Container App.
 
 ## Release Summary
 
-Implemented the read-only Fantome resident-agent MVP and completed targeted rework across the TypeScript server, PostgreSQL control plane, Python worker, infrastructure, telemetry, and recovery surfaces. Added durable checkpointed framework workflows, stale-trigger reclaim, lease renewal and loss handling, managed-identity token acquisition, production model-free gating, and a pinned Agent Framework adapter. Added app-token route authentication coverage for internal worker reads, live startup-registered route coverage, skip-gated PostgreSQL worker control-plane recovery coverage, and refreshed validation evidence for server, worker syntax, Docker, and reconnect e2e. Full worker pytest execution, deployment-specific Entra/RBAC configuration, and a dedicated PostgreSQL-backed worker-process restart fixture remain required before production activation.
+Implemented the read-only Fantome resident-agent MVP and completed targeted rework across the TypeScript server, PostgreSQL control plane, Python worker, infrastructure, telemetry, and recovery surfaces. Added durable checkpointed framework workflows, stale-trigger reclaim, lease renewal and loss handling, managed-identity token acquisition, production model-free gating, and a pinned Agent Framework adapter. The review remediation now scopes worker reads to individual patches, persists worker-read authorization decisions, separates app-token trust settings, restricts control-plane writes, verifies the deployed worker DSN role and canonical write denial, preserves restart replay context, sends bounded provider context, configures worker telemetry export, and adds a PostgreSQL-backed subprocess restart fixture. Full worker pytest execution, PostgreSQL restart-fixture execution, deployed DSN verification, and deployment-specific Entra/RBAC configuration remain required before production activation.

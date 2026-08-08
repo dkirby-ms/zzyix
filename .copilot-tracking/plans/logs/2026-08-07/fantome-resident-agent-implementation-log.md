@@ -66,6 +66,11 @@ Gaps and differences identified between research findings and the implementation
   * Implementation differs: Added app-only route-auth tests, a live app-role request through the startup-registered worker route, and skip-gated PostgreSQL `PostgresControlPlane` contention and checkpoint resume coverage. Reran server/build/worker syntax/reconnect validations successfully, but `python3 -m pytest apps/agent-worker/tests` remains blocked due to missing `pytest`, the new PostgreSQL worker test needs `AGENT_WORKER_POSTGRES_TEST_DSN`, and no two-process worker restart fixture is in place yet.
   * Rationale: Local host Python tooling lacks pytest and worker-process orchestration remains follow-on scope.
 
+* DD-10: Review remediation completed in code, with execution evidence partially environment-bound.
+  * Plan specifies: Activation evidence includes worker test execution and PostgreSQL-backed restart recovery.
+  * Implementation differs: Added the restart subprocess fixture, a deployment-time restricted-DSN verifier, and all identified authorization, control-plane, recovery, provider-context, and telemetry repairs, but cannot execute pytest because local Python lacks `ensurepip` and `pytest`; no PostgreSQL DSN is configured.
+  * Rationale: The remaining work is validation environment provisioning, not a code-path omission.
+
 ## Implementation Paths Considered
 
 ### Selected: Separate Python worker with restricted control plane and server-owned reads
@@ -138,3 +143,6 @@ Items identified during planning that fall outside current scope.
 * WI-12: Add two-process worker recovery fixture - Race two worker processes against PostgreSQL, issue app-only tokens, kill the first worker after checkpoint persistence, and verify same-run resume plus route authorization. The local OIDC issuer can now issue app-role tokens and route authorization has live integration coverage. (priority: critical, effort: high)
   * Source: Phase 5 validation and implementation review.
   * Dependency: PostgreSQL test environment, worker process orchestration, and runnable worker pytest tooling.
+* WI-13: Execute worker recovery evidence - Provision Python test tooling and a disposable migrated `AGENT_WORKER_POSTGRES_TEST_DSN`, then run the full worker pytest suite including the subprocess restart fixture. (priority: critical, effort: low)
+  * Source: Phase 6 review remediation.
+  * Dependency: Python environment with `pytest` and PostgreSQL test DSN.

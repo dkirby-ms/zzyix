@@ -97,7 +97,7 @@ class GraphWorkflow:
             "gateway": None,
         }
 
-        node: str | None = checkpoint.workflow_state if checkpoint is not None else "load_context"
+        node: str | None = _resume_node(checkpoint)
         if node in {"completed", "lease_lost"}:
             node = None
 
@@ -200,7 +200,7 @@ class GraphWorkflow:
             },
             "gateway": None,
         }
-        node = checkpoint.workflow_state if checkpoint is not None else "load_context"
+        node = _resume_node(checkpoint)
         if node == "completed":
             return WorkflowResult("completed", state["proposal"], checkpoint or self._checkpoint_for(run_id, trigger.quilt_id, "completed", []), None)
         if node == "lease_lost":
@@ -362,6 +362,17 @@ class GraphWorkflow:
             framework_version=self._framework_version,
             updated_at=datetime.now(timezone.utc),
         )
+
+
+def _resume_node(checkpoint: WorkerCheckpoint | None) -> str:
+    if checkpoint is None:
+        return "load_context"
+    if checkpoint.workflow_state in {"completed", "lease_lost"}:
+        return checkpoint.workflow_state
+
+    # Intermediate state contains only a graph cursor. Replay read-only tools and proposal generation
+    # from fresh server data instead of resuming with incomplete ephemeral tool or proposal state.
+    return "load_context"
 
 
 def detect_graph_runtime() -> str:

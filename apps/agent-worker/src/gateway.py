@@ -87,8 +87,9 @@ class GovernedGateway(ModelGateway):
         self._window_lock = threading.Lock()
 
     def generate(self, request: GatewayRequest) -> GatewayResponse:
-        self._apply_preflight_limits(request)
-        tool_bytes = len(_canonical_json(request.tool_context).encode("utf-8"))
+        tool_context = _validated_tool_context(request.tool_context)
+        self._apply_preflight_limits(request, tool_context)
+        tool_bytes = len(_canonical_json(tool_context).encode("utf-8"))
         emit_event(
             "gateway_preflight",
             run_id=request.run_id,
@@ -105,9 +106,9 @@ class GovernedGateway(ModelGateway):
 
         try:
             if self._mode == "fake":
-                return FakeGateway().generate(request)
+                return FakeGateway().generate(_with_tool_context(request, tool_context))
 
-            return self._generate_foundry(request)
+            return self._generate_foundry(_with_tool_context(request, tool_context))
         finally:
             self._active.release()
 
@@ -115,7 +116,13 @@ class GovernedGateway(ModelGateway):
         payload = {
             "messages": [
                 {"role": "system", "content": "Return read-only JSON output."},
-                {"role": "user", "content": request.prompt},
+                {
+                    "role": "user",
+                    "content": _canonical_json({
+                        "task": request.prompt,
+                        "tool_context": request.tool_context,
+                    }),
+                },
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0,
@@ -166,11 +173,11 @@ class GovernedGateway(ModelGateway):
         except OSError as exc:
             raise TimeoutError("gateway timeout") from exc
 
-    def _apply_preflight_limits(self, request: GatewayRequest) -> None:
+    def _apply_preflight_limits(self, request: GatewayRequest, tool_context: dict[str, Any]) -> None:
         if len(request.prompt) > self._limits.max_prompt_chars:
             raise ValueError("prompt exceeds max_prompt_chars")
 
-        tool_bytes = len(_canonical_json(request.tool_context).encode("utf-8"))
+        tool_bytes = len(_canonical_json(tool_context).encode("utf-8"))
         if tool_bytes > self._limits.max_tool_bytes:
             raise ValueError("tool_context exceeds max_tool_bytes")
 
@@ -244,3 +251,59 @@ def _fallback_response(request: GatewayRequest, reason: str) -> GatewayResponse:
 
 def _canonical_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def _validated_tool_context(tool_context: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(tool_context, dict):
+        raise ValueError("tool_context must be an object")
+
+    safe_context: dict[str, Any] = {}
+    context = tool_context.get("context")
+    if context is not None:
+        if not isinstance(context, dict):
+            raise ValueError("tool_context.context must be an object")
+        topology = context.get("topology", {})
+        if not isinstance(topology, dict):
+            raise ValueError("tool_context.context.topology must be an object")
+        safe_context["context"] = {
+            "topology": _copy_fields(topology, ("quiltId", "protocolVersion", "topology", "patchRows", "patchColumns")),
+            "patchCount": _safe_scalar(context.get("patchCount")),
+        }
+
+    events = tool_context.get("events")
+    if events is not None:
+        if not isinstance(events, dict):
+            raise ValueError("tool_context.events must be an object")
+        operations = events.get("operations", [])
+        if not isinstance(operations, list) or len(operations) > 500:
+            raise ValueError("tool_context.events.operations must contain at most 500 objects")
+        if not all(isinstance(operation, dict) for operation in operations):
+            raise ValueError("tool_context.events.operations must contain objects")
+        safe_context["events"] = {
+            "operations": [_copy_fields(operation, ("eventId", "opSeq", "opType", "createdAt")) for operation in operations],
+            "operationCount": _safe_scalar(events.get("operationCount")),
+        }
+
+    if not safe_context:
+        raise ValueError("tool_context must contain redacted context or events")
+
+    return safe_context
+
+
+def _copy_fields(payload: dict[str, Any], fields: tuple[str, ...]) -> dict[str, str | int | float | bool | None]:
+    return {field: _safe_scalar(payload.get(field)) for field in fields if field in payload}
+
+
+def _safe_scalar(value: Any) -> str | int | float | bool | None:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise ValueError("tool_context values must be scalar")
+
+
+def _with_tool_context(request: GatewayRequest, tool_context: dict[str, Any]) -> GatewayRequest:
+    return GatewayRequest(
+        run_id=request.run_id,
+        quilt_id=request.quilt_id,
+        prompt=request.prompt,
+        tool_context=tool_context,
+    )

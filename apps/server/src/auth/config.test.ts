@@ -6,6 +6,8 @@ const validEnvironment = {
   AUTH_TRUSTED_ISSUER: 'https://issuer.example.test/tenant/v2.0',
   AUTH_API_AUDIENCE: 'api://zzyix',
   AUTH_REQUIRED_SCOPE: 'quilt.access',
+  AUTH_AGENT_TRUSTED_ISSUER: 'https://agent-issuer.example.test/tenant/v2.0',
+  AUTH_AGENT_API_AUDIENCE: 'api://zzyix-agent-reader',
   AUTH_JWKS_URI: 'https://issuer.example.test/keys',
   AUTH_ACCEPTED_ALGORITHM: 'RS256',
 }
@@ -16,8 +18,8 @@ describe('authentication configuration', () => {
       trustedIssuer: validEnvironment.AUTH_TRUSTED_ISSUER,
       audience: validEnvironment.AUTH_API_AUDIENCE,
       requiredScope: validEnvironment.AUTH_REQUIRED_SCOPE,
-      appTrustedIssuer: validEnvironment.AUTH_TRUSTED_ISSUER,
-      appAudience: validEnvironment.AUTH_API_AUDIENCE,
+      appTrustedIssuer: validEnvironment.AUTH_AGENT_TRUSTED_ISSUER,
+      appAudience: validEnvironment.AUTH_AGENT_API_AUDIENCE,
       requiredAppRole: 'agent.runtime',
       acceptedAlgorithm: 'RS256',
       testIssuer: false,
@@ -38,6 +40,16 @@ describe('authentication configuration', () => {
       requiredAppRole: 'agent.runtime.read',
     })
   })
+
+  it.each(['AUTH_AGENT_TRUSTED_ISSUER', 'AUTH_AGENT_API_AUDIENCE'])(
+    'requires %s instead of falling back to the human token setting',
+    (name) => {
+      const environment = { ...validEnvironment }
+      delete environment[name]
+
+      expect(() => loadAuthenticationConfig(environment)).toThrow(`${name} is required`)
+    },
+  )
 
   it.each([
     ['E2E mode', { E2E_TEST_MODE: 'true' }],

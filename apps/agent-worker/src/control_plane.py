@@ -82,6 +82,7 @@ class InMemoryControlPlane(ControlPlaneStore):
         self._checkpoints: dict[tuple[str, str], WorkerCheckpoint] = {}
         self._runs: dict[str, str] = {}
         self._run_agents: dict[str, str] = {}
+        self._run_quilts: dict[str, str] = {}
         self._assignments: dict[str, str] = {}
 
     def assign_quilt(self, quilt_id: str, agent_principal_id: str) -> None:
@@ -138,16 +139,21 @@ class InMemoryControlPlane(ControlPlaneStore):
         )
 
     def start_run(self, quilt_id: str, agent_principal_id: str) -> str:
-        del quilt_id
+        if self._assignments.get(quilt_id) != agent_principal_id:
+            raise RuntimeError("active assignment is required to start a run")
+
         run_id = str(uuid4())
         self._runs[run_id] = "running"
         self._run_agents[run_id] = agent_principal_id
+        self._run_quilts[run_id] = quilt_id
         return run_id
 
     def start_or_resume_run(self, quilt_id: str, agent_principal_id: str, run_id: str | None) -> str:
         if (
             run_id is not None
             and self._run_agents.get(run_id) == agent_principal_id
+            and self._run_quilts.get(run_id) == quilt_id
+            and self._assignments.get(quilt_id) == agent_principal_id
             and run_id in self._runs
         ):
             self._runs[run_id] = "running"
@@ -155,6 +161,13 @@ class InMemoryControlPlane(ControlPlaneStore):
         return self.start_run(quilt_id, agent_principal_id)
 
     def claim_lease(self, quilt_id: str, run_id: str, owner_principal_id: str, ttl_seconds: int) -> LeaseHandle | None:
+        if (
+            self._assignments.get(quilt_id) != owner_principal_id
+            or self._run_agents.get(run_id) != owner_principal_id
+            or self._run_quilts.get(run_id) != quilt_id
+        ):
+            return None
+
         now = datetime.now(timezone.utc)
         existing = self._leases.get(quilt_id)
         if existing and existing.expires_at > now:
@@ -308,36 +321,57 @@ returning candidate.id, candidate.quilt_id, candidate.source, candidate.deduplic
     def start_run(self, quilt_id: str, agent_principal_id: str) -> str:
         sql = """
 insert into agent_control.runs (quilt_id, agent_principal_id)
-values (%s, %s)
+select %s, %s
+where exists (
+    select 1
+    from agent_control.agent_assignments
+    where quilt_id = %s
+      and agent_principal_id = %s
+      and status = 'active'
+)
 returning id
 """
-        row = self._fetchone(sql, (quilt_id, agent_principal_id))
+        row = self._fetchone(sql, (quilt_id, agent_principal_id, quilt_id, agent_principal_id))
         if row is None:
-            raise RuntimeError("failed to start run")
+            raise RuntimeError("active assignment is required to start a run")
         return str(row[0])
 
     def start_or_resume_run(self, quilt_id: str, agent_principal_id: str, run_id: str | None) -> str:
         if run_id is not None:
             existing = self._fetchone(
-                     """select id from agent_control.runs
-                         where id = %s and quilt_id = %s and agent_principal_id = %s
-                            and status in ('running', 'failed', 'cancelled')""",
+                     """update agent_control.runs as run
+                         set status = 'running', ended_at = null
+                         where run.id = %s
+                           and run.quilt_id = %s
+                           and run.agent_principal_id = %s
+                           and run.status in ('running', 'failed', 'cancelled')
+                           and exists (
+                               select 1
+                               from agent_control.agent_assignments as assignment
+                               where assignment.quilt_id = run.quilt_id
+                                 and assignment.agent_principal_id = run.agent_principal_id
+                                 and assignment.status = 'active'
+                           )
+                         returning run.id""",
                 (run_id, quilt_id, agent_principal_id),
             )
             if existing is not None:
-                self._execute(
-                    """update agent_control.runs
-                       set status = 'running', ended_at = null
-                       where id = %s""",
-                    (run_id,),
-                )
                 return str(existing[0])
         return self.start_run(quilt_id, agent_principal_id)
 
     def claim_lease(self, quilt_id: str, run_id: str, owner_principal_id: str, ttl_seconds: int) -> LeaseHandle | None:
         sql = """
 insert into agent_control.quilt_leases (quilt_id, lease_owner_principal_id, run_id, expires_at)
-values (%s, %s, %s, now() + (%s || ' seconds')::interval)
+select %s, %s, %s, now() + (%s || ' seconds')::interval
+from agent_control.runs as run
+join agent_control.agent_assignments as assignment
+    on assignment.quilt_id = run.quilt_id
+ and assignment.agent_principal_id = run.agent_principal_id
+ and assignment.status = 'active'
+where run.id = %s
+    and run.quilt_id = %s
+    and run.agent_principal_id = %s
+    and run.status = 'running'
 on conflict (quilt_id) do update
 set lease_owner_principal_id = excluded.lease_owner_principal_id,
     run_id = excluded.run_id,
@@ -348,7 +382,15 @@ set lease_owner_principal_id = excluded.lease_owner_principal_id,
 where agent_control.quilt_leases.expires_at <= now()
 returning quilt_id, run_id, lease_owner_principal_id, generation, expires_at
 """
-        row = self._fetchone(sql, (quilt_id, owner_principal_id, run_id, ttl_seconds))
+        row = self._fetchone(sql, (
+            quilt_id,
+            owner_principal_id,
+            run_id,
+            ttl_seconds,
+            run_id,
+            quilt_id,
+            owner_principal_id,
+        ))
         if row is None:
             return None
 

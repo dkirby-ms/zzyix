@@ -130,6 +130,17 @@ Sequential final validation because it verifies behavior across server auth, Pos
 * [x] Step 5.4: Report blocking issues.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 353-355)
 
+### [ ] Implementation Phase 6: Review Remediation
+
+* [x] Step 6.1: Restrict agent reads to assigned patches and record durable authorization audit events.
+* [x] Step 6.2: Separate agent issuer and audience configuration from delegated-user settings.
+* [x] Step 6.3: Harden control-plane grants, assignment ownership, and queue requeue limits.
+* [x] Step 6.4: Repair checkpoint replay, governed provider context, worker telemetry export, and lease-loss coverage.
+* [x] Step 6.5: Add a PostgreSQL-backed subprocess restart recovery fixture.
+* [x] Step 6.6: Verify the deployed worker DSN uses `agent_control_worker` and cannot write canonical tables.
+* [ ] Step 6.7: Execute worker pytest and PostgreSQL restart recovery validation.
+  * Blocked: The local Python build lacks `ensurepip` and `pytest`, and `AGENT_WORKER_POSTGRES_TEST_DSN` is unset.
+
 ## Planning Log
 
 See .copilot-tracking/plans/logs/2026-08-07/fantome-resident-agent-implementation-log.md for discrepancy tracking, implementation paths considered, and suggested follow-on work.

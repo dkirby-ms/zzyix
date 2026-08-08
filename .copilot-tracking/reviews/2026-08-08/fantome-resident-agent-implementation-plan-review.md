@@ -43,13 +43,25 @@ separation, durable worker-read auditing, and unresolved activation limits.
 
 ## Critical Findings
 
-### C1: Deployed identity permissions are missing
+### C1: BLOCKING HUMAN INTERVENTION REQUIRED: Deployed identity permissions are missing
 
 The CD step creates the worker system identity, but neither CD nor Bicep
 assigns the protected server `agent.runtime` app role or Foundry RBAC. The
-manual runbook does not constitute deployment evidence. See
+This cannot be closed by application code alone. A platform or identity owner
+must configure and verify the tenant- and resource-specific assignments before
+the worker can be activated. The manual runbook does not constitute deployment
+evidence. See
 [cd.yml](../../../.github/workflows/cd.yml#L814) and
 [fantome-agent-entra-setup.md](../../../docs/fantome-agent-entra-setup.md#L172-L194).
+
+Required human closure evidence:
+
+* The deployed worker principal or system-assigned identity resource ID.
+* A confirmed `agent.runtime` app-role assignment on the protected server API.
+* A confirmed Foundry data-plane RBAC assignment for the worker identity, if
+	the Foundry gate will be enabled.
+* A successful protected-read token check and an authorization denial when the
+	required app role is absent.
 
 ### C2: Durable process-level restart recovery is unverified
 
@@ -139,8 +151,9 @@ path are closed by the current changes or focused evidence.
 * Phase 3 is not complete until checkpoint recovery preserves or deliberately
 	replays required state, provider context is included, and the real pinned
 	framework path is executed.
-* Phase 4 is not complete until identity/RBAC, restricted DSN binding, and
-	worker telemetry export are deployed and verified.
+* Phase 4 is not complete until the human-owned identity/RBAC blocker is
+	closed, and restricted DSN binding and worker telemetry export are deployed
+	and verified.
 * Phase 5 is not complete until worker pytest, worker PostgreSQL integration,
 	and real process-level restart evidence are available. The current e2e
 	harness does not include a worker.
@@ -149,8 +162,8 @@ path are closed by the current changes or focused evidence.
 
 ### Required Rework
 
-* Automate or externally attest the server app-role and Foundry RBAC bindings
-	for the deployed worker identity.
+* Human intervention required: configure and externally attest the server
+  app-role and Foundry RBAC bindings for the deployed worker identity.
 * Bind and verify the worker DSN as `agent_control_worker`, including canonical
 	write denial.
 * Add a real two-process PostgreSQL worker restart fixture.
@@ -177,6 +190,6 @@ path are closed by the current changes or focused evidence.
 ## Overall Status
 
 **Needs Rework.** The implementation is suitable for continued development and
-focused validation, but the missing worker deployment and identity bindings,
-process-level recovery gap, and major authorization, durability, and
-observability findings block production activation.
+focused validation, but the human-owned identity/RBAC blocker, process-level
+recovery gap, and major authorization, durability, and observability findings
+block production activation.

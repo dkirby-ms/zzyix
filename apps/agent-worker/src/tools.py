@@ -14,6 +14,7 @@ from telemetry import emit_event
 
 UUID_PATTERN = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.IGNORECASE)
 MAX_EVENT_LIMIT = 500
+MAX_TOOL_RESPONSE_BYTES = 64_000
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +46,7 @@ class AgentReadTools:
         _require_uuid(request.quilt_id, "quilt_id")
 
         payload = self._read_json(f"/quilts/{request.quilt_id}/context", "get_quilt_context")
-        redacted = _redact_quilt_context(_require_object(payload))
+        redacted = _bounded_response(_redact_quilt_context(_require_object(payload)), "quilt context")
         emit_event(
             "worker_tool_call",
             tool="get_quilt_context",
@@ -63,7 +64,7 @@ class AgentReadTools:
 
         suffix = "" if not query else f"?{urlencode(query)}"
         payload = self._read_json(f"/patches/{request.patch_id}/snapshot{suffix}", "get_patch_snapshot")
-        redacted = _redact_snapshot(_require_object(payload))
+        redacted = _bounded_response(_redact_snapshot(_require_object(payload)), "patch snapshot")
         emit_event(
             "worker_tool_call",
             tool="get_patch_snapshot",
@@ -82,7 +83,7 @@ class AgentReadTools:
 
         query = urlencode({"afterOpSeq": request.after_op_seq, "limit": request.limit})
         payload = self._read_json(f"/patches/{request.patch_id}/events?{query}", "get_patch_events")
-        redacted = _redact_events(_require_object(payload))
+        redacted = _bounded_response(_redact_events(_require_object(payload)), "patch events")
         emit_event(
             "worker_tool_call",
             tool="get_patch_events",
@@ -174,3 +175,10 @@ def _redact_events(payload: dict[str, Any]) -> dict[str, Any]:
         "operations": safe_operations,
         "operationCount": len(safe_operations),
     }
+
+
+def _bounded_response(payload: dict[str, Any], response_name: str) -> dict[str, Any]:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(serialized) > MAX_TOOL_RESPONSE_BYTES:
+        raise ValueError(f"{response_name} exceeds max serialized response bytes")
+    return payload

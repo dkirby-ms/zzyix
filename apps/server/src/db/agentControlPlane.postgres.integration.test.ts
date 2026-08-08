@@ -2,6 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
 import type { QueryResultRow } from 'pg'
+import {
+  isAgentAssignedPatch,
+  loadAgentAssignedPatchIds,
+  writeAgentReadAuthorizationAudit,
+} from './repository.js'
+import { authorizationAuditEvents } from './schema.js'
 
 const QUILT_ID = 'd1000000-0000-4000-8000-000000000001'
 const AGENT_PRINCIPAL_ID = 'd2000000-0000-4000-8000-000000000001'
@@ -9,6 +15,7 @@ const SECOND_AGENT_PRINCIPAL_ID = 'd2000000-0000-4000-8000-000000000002'
 const RUN_ID = 'd3000000-0000-4000-8000-000000000001'
 const SECOND_RUN_ID = 'd3000000-0000-4000-8000-000000000002'
 const PATCH_ID = 'd4000000-0000-4000-8000-000000000001'
+const SIBLING_PATCH_ID = 'd4000000-0000-4000-8000-000000000002'
 
 describe('agent control-plane PostgreSQL constraints', () => {
   let database: PostgresTestDatabase
@@ -35,11 +42,15 @@ describe('agent control-plane PostgreSQL constraints', () => {
     `)
     await query(`
       insert into quilts (id, patch_rows, patch_columns, patch_width, patch_height, topology, protocol_version)
-      values ('${QUILT_ID}', 1, 1, 10, 10, 'toroidal', 2)
+      values ('${QUILT_ID}', 1, 2, 10, 10, 'toroidal', 2)
     `)
     await query(`
       insert into patches (id, quilt_id, row, "column", state, revision)
       values ('${PATCH_ID}', '${QUILT_ID}', 0, 0, 'unclaimed', 0)
+    `)
+    await query(`
+      insert into patches (id, quilt_id, row, "column", state, revision)
+      values ('${SIBLING_PATCH_ID}', '${QUILT_ID}', 0, 1, 'unclaimed', 0)
     `)
   }, 30_000)
 
@@ -239,6 +250,39 @@ describe('agent control-plane PostgreSQL constraints', () => {
     )).rejects.toThrow(/pending trigger queue limit exceeded/)
   })
 
+  it('requires a patch-scoped assignment and durably audits worker-read authorization', async () => {
+    await query(
+      `insert into agent_control.agent_assignments (quilt_id, patch_id, agent_principal_id, policy_version)
+       values ($1, $2, $3, 'test-policy')`,
+      [QUILT_ID, PATCH_ID, AGENT_PRINCIPAL_ID],
+    )
+
+    await expect(isAgentAssignedPatch(AGENT_PRINCIPAL_ID, PATCH_ID)).resolves.toBe(true)
+    await expect(isAgentAssignedPatch(AGENT_PRINCIPAL_ID, SIBLING_PATCH_ID)).resolves.toBe(false)
+    await expect(loadAgentAssignedPatchIds(AGENT_PRINCIPAL_ID, QUILT_ID)).resolves.toEqual([PATCH_ID])
+
+    await writeAgentReadAuthorizationAudit({
+      actorPrincipalId: AGENT_PRINCIPAL_ID,
+      attemptedAction: 'read_patch_snapshot',
+      outcome: 'denied',
+      reasonCode: 'ASSIGNMENT_REQUIRED',
+      patchId: SIBLING_PATCH_ID,
+      requestId: 'agent-read-audit-test',
+    })
+
+    const [audit] = await database.db.select().from(authorizationAuditEvents)
+    expect(audit).toMatchObject({
+      eventType: 'agent_worker_read',
+      attemptedAction: 'read_patch_snapshot',
+      outcome: 'denied',
+      reasonCode: 'ASSIGNMENT_REQUIRED',
+      actorPrincipalId: AGENT_PRINCIPAL_ID,
+      patchId: SIBLING_PATCH_ID,
+      requestId: 'agent-read-audit-test',
+      sourceChannel: 'http',
+    })
+  })
+
   it('uses compare-and-set checkpoint updates and persists pending trigger identifiers', async () => {
     const triggerIdA = randomUUID()
     const triggerIdB = randomUUID()
@@ -286,7 +330,7 @@ describe('agent control-plane PostgreSQL constraints', () => {
     expect(staleWrite.rowCount).toBe(0)
   })
 
-  it('allows control-plane writes for the worker role while rejecting canonical writes', async () => {
+  it('allows execution metadata writes for the worker role while rejecting control-plane authority and canonical writes', async () => {
     const pool = database.createConnection()
     const client = await pool.connect()
 
@@ -306,10 +350,26 @@ describe('agent control-plane PostgreSQL constraints', () => {
         [QUILT_ID, RUN_ID, AGENT_PRINCIPAL_ID],
       )).resolves.toBeDefined()
 
+      await client.query('SAVEPOINT reject_canonical_write')
       await expect(client.query(
         'update patches set revision = revision + 1 where id = $1',
         [PATCH_ID],
       )).rejects.toThrow(/permission denied|must be owner/i)
+      await client.query('ROLLBACK TO SAVEPOINT reject_canonical_write')
+
+      await client.query('SAVEPOINT reject_assignment_write')
+      await expect(client.query(
+        "update agent_control.agent_assignments set status = 'disabled' where quilt_id = $1",
+        [QUILT_ID],
+      )).rejects.toThrow(/permission denied|must be owner/i)
+      await client.query('ROLLBACK TO SAVEPOINT reject_assignment_write')
+
+      await client.query('SAVEPOINT reject_lifecycle_write')
+      await expect(client.query(
+        "insert into agent_control.lifecycle_events (quilt_id, agent_principal_id, event_type) values ($1, $2, 'assignment_changed')",
+        [QUILT_ID, AGENT_PRINCIPAL_ID],
+      )).rejects.toThrow(/permission denied|must be owner/i)
+      await client.query('ROLLBACK TO SAVEPOINT reject_lifecycle_write')
 
       await client.query('ROLLBACK')
     } finally {

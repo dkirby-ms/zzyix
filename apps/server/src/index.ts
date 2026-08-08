@@ -63,7 +63,8 @@ import {
   releaseQuiltPresenceLease,
   reapExpiredQuiltPresenceLeases,
   isAgentAssignedPatch,
-  isAgentAssignedQuilt,
+  loadAgentAssignedPatchIds,
+  writeAgentReadAuthorizationAudit,
 } from './db/index.js'
 import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
 import { ResourceNotFoundError } from './db/repository.js'
@@ -877,7 +878,8 @@ export const registerAgentReadRoutes = (
     loadPatchSnapshot: loadPatchDeliverySnapshot,
     loadPatchOperationsAfter: loadPatchDeliveryOperationsAfter,
     isAgentAssignedPatch,
-    isAgentAssignedQuilt,
+    loadAssignedPatchIds: loadAgentAssignedPatchIds,
+    writeAuthorizationAudit: writeAgentReadAuthorizationAudit,
   }))
 }
 

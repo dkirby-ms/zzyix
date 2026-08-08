@@ -16,7 +16,8 @@ const loadQuiltContext = vi.fn()
 const loadPatchSnapshot = vi.fn()
 const loadPatchOperationsAfter = vi.fn()
 const isAgentAssignedPatch = vi.fn().mockResolvedValue(true)
-const isAgentAssignedQuilt = vi.fn().mockResolvedValue(true)
+const loadAssignedPatchIds = vi.fn().mockResolvedValue([PATCH_ID])
+const writeAuthorizationAudit = vi.fn().mockResolvedValue(undefined)
 
 const verifyToken = vi.fn(async (token: string): Promise<VerifiedExternalIdentity> => {
   const expiresAt = new Date(Date.now() + 60_000)
@@ -70,7 +71,8 @@ app.use('/internal/v1/agent', testReadRateLimiter, createHttpAuth(verifyToken, r
   loadPatchSnapshot,
   loadPatchOperationsAfter,
   isAgentAssignedPatch,
-  isAgentAssignedQuilt,
+  loadAssignedPatchIds,
+  writeAuthorizationAudit,
 }))
 
 let baseUrl = ''

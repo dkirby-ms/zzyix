@@ -229,6 +229,7 @@ export const agentAssignments = agentControl.table(
     quiltId: uuid('quilt_id')
       .notNull()
       .references(() => quilts.id, { onDelete: 'cascade' }),
+    patchId: uuid('patch_id').references(() => patches.id, { onDelete: 'cascade' }),
     agentPrincipalId: uuid('agent_principal_id')
       .notNull()
       .references(() => principals.id, { onDelete: 'restrict' }),
@@ -238,8 +239,10 @@ export const agentAssignments = agentControl.table(
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
-    quiltUnique: uniqueIndex('agent_control_agent_assignments_quilt_id_unique').on(table.quiltId),
-    agentUnique: uniqueIndex('agent_control_agent_assignments_agent_principal_id_unique').on(table.agentPrincipalId),
+    patchAgentUnique: uniqueIndex('agent_control_agent_assignments_patch_agent_unique').on(
+      table.patchId,
+      table.agentPrincipalId,
+    ),
     statusCheck: check(
       'agent_control_agent_assignments_status_check',
       sql`${table.status} in ('active', 'paused', 'disabled')`,

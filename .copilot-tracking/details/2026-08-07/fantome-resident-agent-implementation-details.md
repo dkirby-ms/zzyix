@@ -354,6 +354,36 @@ Iterate on lint, type, test, and infrastructure validation failures when correct
 
 When validation exposes unresolved tenant setup, ingress policy, Foundry provider configuration, production operating limits, or mutation/security scope expansion, document those blockers and return them for additional research and planning rather than expanding the MVP implementation inline.
 
+## Implementation Phase 6: Review Remediation
+
+### Step 6.1: Repair server authorization boundaries and audit
+
+Scope agent assignments to individual patches, require distinct app-token issuer and audience settings, and persist allowed and denied worker-read authorization decisions in the existing audit store. Cover sibling-patch denial, bounded responses, and durable audit persistence.
+
+### Step 6.2: Harden control-plane authority and queue transitions
+
+Revoke worker mutations for assignment and lifecycle-control rows. Require an active assignment for run and lease acquisition, and apply the pending-trigger capacity guard when claimed work is requeued. Add PostgreSQL coverage for ownership, queue capacity, and lease races.
+
+### Step 6.3: Repair worker recovery, provider context, and telemetry
+
+Deliberately replay read-only workflow context from incomplete checkpoints, include only bounded and redacted validated tool context in provider payloads, and configure Azure Monitor OpenTelemetry through the worker connection string. Add overflow and in-flight lease-loss coverage.
+
+### Step 6.4: Add process restart recovery evidence
+
+Add a skip-gated PostgreSQL integration fixture that starts the production worker process, terminates it after a durable checkpoint, expires abandoned work, and verifies a restarted process completes the original run. Execute it only when a disposable migrated PostgreSQL DSN and Python test tooling are available.
+
+### Step 6.5: Verify the deployed restricted database role
+
+Run a post-deployment worker-container verification using `AGENT_CONTROL_PLANE_DSN`. Require `current_user` to equal `agent_control_worker`, then attempt a canonical-table insert inside a rollback-only transaction and require PostgreSQL to deny it.
+
+Validation commands:
+
+* `npm --prefix apps/server test -- src/auth/config.test.ts src/routes/agentReads.test.ts src/db/agentControlPlane.postgres.integration.test.ts`
+* `npm --prefix apps/server run build`
+* `python3 -m compileall apps/agent-worker/src apps/agent-worker/tests`
+* `python3 -m pytest apps/agent-worker/tests`
+* `docker build -f apps/agent-worker/Dockerfile apps/agent-worker`
+
 ## Dependencies
 
 * Node.js and npm for the existing TypeScript server, migrations, and e2e tests.

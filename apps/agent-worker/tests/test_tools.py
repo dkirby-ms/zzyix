@@ -4,7 +4,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
-from tools import AgentReadTools, PatchEventsInput
+from tools import AgentReadTools, PatchEventsInput, PatchSnapshotInput, QuiltContextInput
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -87,5 +87,29 @@ def test_given_invalid_event_limit_when_fetching_then_raises() -> None:
         )
     except ValueError as exc:
         assert "limit" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_given_oversized_context_when_fetching_then_rejects_serialized_response(monkeypatch) -> None:
+    tools = AgentReadTools(base_url="http://127.0.0.1:1")
+    monkeypatch.setattr(tools, "_read_json", lambda *_args: {"topology": {"topology": "x" * 64_000}, "patches": []})
+
+    try:
+        tools.get_quilt_context(QuiltContextInput(quilt_id="40000000-0000-4000-8000-000000000001"))
+    except ValueError as exc:
+        assert "serialized response bytes" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_given_oversized_snapshot_when_fetching_then_rejects_serialized_response(monkeypatch) -> None:
+    tools = AgentReadTools(base_url="http://127.0.0.1:1")
+    monkeypatch.setattr(tools, "_read_json", lambda *_args: {"patchId": "x" * 64_000})
+
+    try:
+        tools.get_patch_snapshot(PatchSnapshotInput(patch_id="50000000-0000-4000-8000-000000000001"))
+    except ValueError as exc:
+        assert "serialized response bytes" in str(exc)
     else:
         raise AssertionError("expected ValueError")

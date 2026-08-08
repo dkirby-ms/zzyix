@@ -13,7 +13,8 @@ const loadQuiltContext = vi.fn()
 const loadPatchSnapshot = vi.fn()
 const loadPatchOperationsAfter = vi.fn()
 const isAgentAssignedPatch = vi.fn().mockResolvedValue(true)
-const isAgentAssignedQuilt = vi.fn().mockResolvedValue(true)
+const loadAssignedPatchIds = vi.fn().mockResolvedValue([PATCH_ID])
+const writeAuthorizationAudit = vi.fn().mockResolvedValue(undefined)
 
 const app = express()
 app.use((_req, res, next) => {
@@ -34,7 +35,8 @@ app.use('/internal/v1/agent', createAgentReadRouter({
   loadPatchSnapshot,
   loadPatchOperationsAfter,
   isAgentAssignedPatch,
-  isAgentAssignedQuilt,
+  loadAssignedPatchIds,
+  writeAuthorizationAudit,
 }))
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   response.status(500).json({
@@ -59,7 +61,7 @@ afterAll(async () => {
 beforeEach(() => {
   vi.clearAllMocks()
   isAgentAssignedPatch.mockResolvedValue(true)
-  isAgentAssignedQuilt.mockResolvedValue(true)
+  loadAssignedPatchIds.mockResolvedValue([PATCH_ID])
 })
 
 describe('agent read routes', () => {
@@ -95,7 +97,7 @@ describe('agent read routes', () => {
         patchHeight: 10,
       },
       principalId: PRINCIPAL_ID,
-      patches: [],
+      patches: [{ id: PATCH_ID, row: 0, column: 0, state: 'active', revision: 1 }],
     })
 
     const response = await fetch(`${baseUrl}/internal/v1/agent/quilts/${QUILT_ID}/context`)
@@ -105,6 +107,11 @@ describe('agent read routes', () => {
       principalId: PRINCIPAL_ID,
       topology: { quiltId: QUILT_ID },
     })
+    expect(writeAuthorizationAudit).toHaveBeenCalledWith(expect.objectContaining({
+      attemptedAction: 'read_quilt_context',
+      outcome: 'allowed',
+      quiltId: QUILT_ID,
+    }))
   })
 
   it('rejects invalid snapshot surface values', async () => {
@@ -146,6 +153,61 @@ describe('agent read routes', () => {
 
     expect(response.status).toBe(404)
     expect(loadPatchOperationsAfter).not.toHaveBeenCalled()
+    expect(writeAuthorizationAudit).toHaveBeenCalledWith(expect.objectContaining({
+      attemptedAction: 'read_patch_events',
+      outcome: 'denied',
+      reasonCode: 'ASSIGNMENT_REQUIRED',
+      patchId: PATCH_ID,
+    }))
+  })
+
+  it('filters sibling patches from a quilt context', async () => {
+    const siblingPatchId = '50000000-0000-4000-8000-000000000002'
+    loadQuiltContext.mockResolvedValueOnce({
+      topology: { quiltId: QUILT_ID },
+      principalId: PRINCIPAL_ID,
+      patches: [
+        { id: PATCH_ID, row: 0, column: 0, state: 'active', revision: 1 },
+        { id: siblingPatchId, row: 0, column: 1, state: 'active', revision: 1 },
+      ],
+    })
+
+    const response = await fetch(`${baseUrl}/internal/v1/agent/quilts/${QUILT_ID}/context`)
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).patches).toEqual([
+      { id: PATCH_ID, row: 0, column: 0, state: 'active', revision: 1 },
+    ])
+  })
+
+  it('denies an oversized snapshot and records the durable audit decision', async () => {
+    loadPatchSnapshot.mockResolvedValueOnce({
+      tiles: Array.from({ length: 2_001 }, (_value, index) => ({ id: String(index) })),
+    })
+
+    const response = await fetch(`${baseUrl}/internal/v1/agent/patches/${PATCH_ID}/snapshot`)
+
+    expect(response.status).toBe(413)
+    expect(writeAuthorizationAudit).toHaveBeenCalledWith(expect.objectContaining({
+      attemptedAction: 'read_patch_snapshot',
+      outcome: 'denied',
+      reasonCode: 'PAYLOAD_TOO_LARGE',
+    }))
+  })
+
+  it('denies oversized serialized event payloads and records the durable audit decision', async () => {
+    loadPatchOperationsAfter.mockResolvedValueOnce([
+      { eventId: '1', opSeq: 1, opType: 'tile_placed', payload: { value: 'x'.repeat(256 * 1024) }, createdAt: 1, chunkIds: [] },
+    ])
+
+    const response = await fetch(`${baseUrl}/internal/v1/agent/patches/${PATCH_ID}/events?afterOpSeq=0&limit=1`)
+
+    expect(response.status).toBe(413)
+    expect(writeAuthorizationAudit).toHaveBeenCalledWith(expect.objectContaining({
+      attemptedAction: 'read_patch_events',
+      outcome: 'denied',
+      reasonCode: 'PAYLOAD_TOO_LARGE',
+    }))
   })
 
   it('rejects replay requests with out-of-range limits', async () => {

@@ -5,7 +5,8 @@ import {
   loadPatchDeliverySnapshot,
   loadQuiltDeliveryContext,
   isAgentAssignedPatch,
-  isAgentAssignedQuilt,
+  loadAgentAssignedPatchIds,
+  writeAgentReadAuthorizationAudit,
 } from '../db/index.js'
 import { ResourceNotFoundError } from '../db/repository.js'
 import { getPrincipalContext, sendResourceNotFound, type AuthenticatedRequest } from '../auth/httpAuth.js'
@@ -16,7 +17,8 @@ type AgentReadDependencies = {
   loadPatchSnapshot: typeof loadPatchDeliverySnapshot
   loadPatchOperationsAfter: typeof loadPatchDeliveryOperationsAfter
   isAgentAssignedPatch: (principalId: string, patchId: string) => Promise<boolean>
-  isAgentAssignedQuilt: (principalId: string, quiltId: string) => Promise<boolean>
+  loadAssignedPatchIds: (principalId: string, quiltId: string) => Promise<string[]>
+  writeAuthorizationAudit: typeof writeAgentReadAuthorizationAudit
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -68,8 +70,11 @@ const sendPayloadTooLarge = (response: Response): void => {
   })
 }
 
+const responseExceedsByteLimit = (body: unknown): boolean =>
+  Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_RESPONSE_BYTES
+
 const sendBoundedJson = (response: Response, body: unknown): boolean => {
-  if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_RESPONSE_BYTES) {
+  if (responseExceedsByteLimit(body)) {
     sendPayloadTooLarge(response)
     return false
   }
@@ -86,11 +91,16 @@ const principalIdFrom = (request: Request): string =>
 const requestIdFrom = (response: Response): string =>
   response.getHeader('x-request-id')?.toString() ?? randomUUID()
 
-const withNotFoundBoundary = async (response: Response, work: () => Promise<void>): Promise<void> => {
+const withNotFoundBoundary = async (
+  response: Response,
+  work: () => Promise<void>,
+  onNotFound?: () => Promise<void>,
+): Promise<void> => {
   try {
     await work()
   } catch (error) {
     if (error instanceof ResourceNotFoundError) {
+      await onNotFound?.()
       annotateWorkerReadTelemetry({
         'agent.read.outcome': 'not_found',
       })
@@ -108,10 +118,27 @@ export const createAgentReadRouter = (
     loadPatchSnapshot: loadPatchDeliverySnapshot,
     loadPatchOperationsAfter: loadPatchDeliveryOperationsAfter,
     isAgentAssignedPatch,
-    isAgentAssignedQuilt,
+    loadAssignedPatchIds: loadAgentAssignedPatchIds,
+    writeAuthorizationAudit: writeAgentReadAuthorizationAudit,
   },
 ): Router => {
   const router = Router()
+
+  const audit = async (
+    request: Request,
+    response: Response,
+    attemptedAction: 'read_quilt_context' | 'read_patch_snapshot' | 'read_patch_events',
+    outcome: 'allowed' | 'denied',
+    identifiers: { quiltId?: string; patchId?: string },
+    reasonCode?: 'ASSIGNMENT_REQUIRED' | 'RESOURCE_NOT_FOUND' | 'PAYLOAD_TOO_LARGE',
+  ): Promise<void> => dependencies.writeAuthorizationAudit({
+    actorPrincipalId: principalIdFrom(request),
+    attemptedAction,
+    outcome,
+    ...(reasonCode ? { reasonCode } : {}),
+    ...identifiers,
+    requestId: requestIdFrom(response),
+  })
 
   router.get('/quilts/:quiltId/context', async (request, response) => {
     await runWithWorkerReadTelemetry('agent.read.quilt_context', {
@@ -126,7 +153,9 @@ export const createAgentReadRouter = (
         return
       }
 
-      if (!await dependencies.isAgentAssignedQuilt(principalIdFrom(request), quiltId)) {
+      const assignedPatchIds = new Set(await dependencies.loadAssignedPatchIds(principalIdFrom(request), quiltId))
+      if (assignedPatchIds.size === 0) {
+        await audit(request, response, 'read_quilt_context', 'denied', { quiltId }, 'ASSIGNMENT_REQUIRED')
         sendResourceNotFound(response, requestIdFrom(response))
         return
       }
@@ -137,6 +166,7 @@ export const createAgentReadRouter = (
       })
 
       if (!context) {
+        await audit(request, response, 'read_quilt_context', 'denied', { quiltId }, 'RESOURCE_NOT_FOUND')
         annotateWorkerReadTelemetry({
           'agent.read.outcome': 'not_found',
           'agent.read.quilt_id': quiltId,
@@ -145,16 +175,25 @@ export const createAgentReadRouter = (
         return
       }
 
-      annotateWorkerReadTelemetry({
-        'agent.read.outcome': 'ok',
-        'agent.read.quilt_id': quiltId,
-        'agent.read.patch_count': context.patches.length,
-      })
-      if (context.patches.length > MAX_CONTEXT_PATCHES) {
+      const assignedPatches = context.patches.filter((patch) => assignedPatchIds.has(patch.id))
+      if (assignedPatches.length > MAX_CONTEXT_PATCHES) {
+        await audit(request, response, 'read_quilt_context', 'denied', { quiltId }, 'PAYLOAD_TOO_LARGE')
         sendPayloadTooLarge(response)
         return
       }
-      sendBoundedJson(response, context)
+      annotateWorkerReadTelemetry({
+        'agent.read.outcome': 'ok',
+        'agent.read.quilt_id': quiltId,
+        'agent.read.patch_count': assignedPatches.length,
+      })
+      const body = { ...context, patches: assignedPatches }
+      if (responseExceedsByteLimit(body)) {
+        await audit(request, response, 'read_quilt_context', 'denied', { quiltId }, 'PAYLOAD_TOO_LARGE')
+        sendPayloadTooLarge(response)
+      } else {
+        await audit(request, response, 'read_quilt_context', 'allowed', { quiltId })
+        sendBoundedJson(response, body)
+      }
     })
   })
 
@@ -182,6 +221,7 @@ export const createAgentReadRouter = (
 
       await withNotFoundBoundary(response, async () => {
         if (!await dependencies.isAgentAssignedPatch(principalIdFrom(request), patchId)) {
+          await audit(request, response, 'read_patch_snapshot', 'denied', { patchId }, 'ASSIGNMENT_REQUIRED')
           sendResourceNotFound(response, requestIdFrom(response))
           return
         }
@@ -190,6 +230,7 @@ export const createAgentReadRouter = (
           ...(surface ? { surface } : {}),
         })
         if (snapshot.tiles.length > MAX_SNAPSHOT_TILES) {
+          await audit(request, response, 'read_patch_snapshot', 'denied', { patchId }, 'PAYLOAD_TOO_LARGE')
           sendPayloadTooLarge(response)
           return
         }
@@ -198,8 +239,14 @@ export const createAgentReadRouter = (
           'agent.read.patch_id': patchId,
           ...(surface ? { 'agent.read.surface': surface } : {}),
         })
-        sendBoundedJson(response, snapshot)
-      })
+        if (responseExceedsByteLimit(snapshot)) {
+          await audit(request, response, 'read_patch_snapshot', 'denied', { patchId }, 'PAYLOAD_TOO_LARGE')
+          sendPayloadTooLarge(response)
+        } else {
+          await audit(request, response, 'read_patch_snapshot', 'allowed', { patchId })
+          sendBoundedJson(response, snapshot)
+        }
+      }, () => audit(request, response, 'read_patch_snapshot', 'denied', { patchId }, 'RESOURCE_NOT_FOUND'))
     }).catch(next)
   })
 
@@ -229,6 +276,7 @@ export const createAgentReadRouter = (
 
       await withNotFoundBoundary(response, async () => {
         if (!await dependencies.isAgentAssignedPatch(principalIdFrom(request), patchId)) {
+          await audit(request, response, 'read_patch_events', 'denied', { patchId }, 'ASSIGNMENT_REQUIRED')
           sendResourceNotFound(response, requestIdFrom(response))
           return
         }
@@ -246,8 +294,15 @@ export const createAgentReadRouter = (
           'agent.read.limit': limit,
           'agent.read.operation_count': boundedOperations.length,
         })
-        sendBoundedJson(response, { operations: boundedOperations })
-      })
+        const body = { operations: boundedOperations }
+        if (responseExceedsByteLimit(body)) {
+          await audit(request, response, 'read_patch_events', 'denied', { patchId }, 'PAYLOAD_TOO_LARGE')
+          sendPayloadTooLarge(response)
+        } else {
+          await audit(request, response, 'read_patch_events', 'allowed', { patchId })
+          sendBoundedJson(response, body)
+        }
+      }, () => audit(request, response, 'read_patch_events', 'denied', { patchId }, 'RESOURCE_NOT_FOUND'))
     }).catch(next)
   })
 

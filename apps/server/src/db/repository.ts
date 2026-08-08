@@ -3663,28 +3663,51 @@ export const isAgentAssignedPatch = async (principalId: string, patchId: string)
   const [assignment] = await db
     .select({ id: agentAssignments.id })
     .from(agentAssignments)
-    .innerJoin(patches, eq(patches.quiltId, agentAssignments.quiltId))
     .where(and(
       eq(agentAssignments.agentPrincipalId, principalId),
       eq(agentAssignments.status, 'active'),
-      eq(patches.id, patchId),
+      eq(agentAssignments.patchId, patchId),
     ))
     .limit(1)
   return Boolean(assignment)
 }
 
-export const isAgentAssignedQuilt = async (principalId: string, quiltId: string): Promise<boolean> => {
+export const loadAgentAssignedPatchIds = async (principalId: string, quiltId: string): Promise<string[]> => {
   const { db } = getDatabaseBundle()
-  const [assignment] = await db
-    .select({ id: agentAssignments.id })
+  const assignments = await db
+    .select({ patchId: agentAssignments.patchId })
     .from(agentAssignments)
+    .innerJoin(patches, eq(patches.id, agentAssignments.patchId))
     .where(and(
       eq(agentAssignments.agentPrincipalId, principalId),
-      eq(agentAssignments.quiltId, quiltId),
       eq(agentAssignments.status, 'active'),
+      eq(patches.quiltId, quiltId),
     ))
-    .limit(1)
-  return Boolean(assignment)
+  return assignments.flatMap((assignment) => assignment.patchId ? [assignment.patchId] : [])
+}
+
+export const writeAgentReadAuthorizationAudit = async (params: {
+  actorPrincipalId: string
+  attemptedAction: 'read_quilt_context' | 'read_patch_snapshot' | 'read_patch_events'
+  outcome: 'allowed' | 'denied'
+  reasonCode?: 'ASSIGNMENT_REQUIRED' | 'RESOURCE_NOT_FOUND' | 'PAYLOAD_TOO_LARGE'
+  quiltId?: string
+  patchId?: string
+  requestId: string
+}): Promise<void> => {
+  const { db } = getDatabaseBundle()
+  await db.insert(authorizationAuditEvents).values({
+    eventType: 'agent_worker_read',
+    attemptedAction: params.attemptedAction,
+    outcome: params.outcome,
+    reasonCode: params.reasonCode ?? null,
+    actorPrincipalId: params.actorPrincipalId,
+    quiltId: params.quiltId ?? null,
+    patchId: params.patchId ?? null,
+    requestId: params.requestId,
+    sourceChannel: 'http',
+    afterState: { workerRoute: params.attemptedAction },
+  })
 }
 
 export const savePatchSnapshot = async (patchId: string): Promise<{ opSeq: number; tiles: TileInstance[] }> => {

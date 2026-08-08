@@ -10,6 +10,18 @@ class AccessTokenProvider(Protocol):
         ...
 
 
+class StaticAccessTokenProvider:
+    """Provide a fixed token for local integration tests only."""
+
+    def __init__(self, token: str) -> None:
+        if not token.strip():
+            raise ValueError("test access token is required")
+        self._token = token.strip()
+
+    def get_token(self) -> str:
+        return self._token
+
+
 class ManagedIdentityTokenProvider:
     """Acquire and refresh app-only tokens through the workload identity."""
 
