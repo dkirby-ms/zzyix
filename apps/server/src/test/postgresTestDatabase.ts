@@ -10,6 +10,9 @@ import {
 
 const DEFAULT_ADMIN_URL = 'postgresql://postgres:postgres@127.0.0.1:5432/postgres'
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1'])
+// Cluster-wide advisory lock key: serializes migrations across parallel test
+// workers so cluster-level DDL (e.g. CREATE ROLE agent_control_worker) can't race.
+const MIGRATION_ADVISORY_LOCK_KEY = 847_362_910
 
 export type PostgresTestDatabase = {
   connectionString: string
@@ -36,9 +39,18 @@ export const createPostgresTestDatabase = async (prefix: string): Promise<Postgr
   configureDatabaseBundleForTests(bundle)
   const priorDatabaseUrl = process.env.DATABASE_URL
   process.env.DATABASE_URL = connectionString
+
+  // Advisory locks are session-scoped, so hold a dedicated connection for the duration.
+  const lockPool = new Pool({ connectionString: adminUrl.toString(), max: 1 })
   try {
-    await applyDatabaseMigrations(resolveMigrationsFolder(new URL('../db/migrate.ts', import.meta.url).href))
+    await lockPool.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_KEY])
+    try {
+      await applyDatabaseMigrations(resolveMigrationsFolder(new URL('../db/migrate.ts', import.meta.url).href))
+    } finally {
+      await lockPool.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_KEY])
+    }
   } finally {
+    await lockPool.end()
     if (priorDatabaseUrl === undefined) {
       delete process.env.DATABASE_URL
     } else {
