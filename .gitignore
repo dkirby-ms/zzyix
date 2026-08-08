@@ -4,9 +4,16 @@ node_modules/
 apps/client/coverage/
 /playwright-report/
 /test-results/
+/offline/output/
 .env
 /.vscode
 infra/bicep/host.main.bicepparam
 scripts/gh-vars.env
 infra/bicep/host.bicepparam
 apps/client/public/auth-config.json
+infra/bicep/main.json
+**/__pycache__/**
+infra/bicep/host.main copy.bicepparam
+infra/bicep/deploy.env
+apps/agent-worker/.venv/
+apps/agent-worker/src/zzyix_agent_worker.egg-info/

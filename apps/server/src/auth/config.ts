@@ -7,6 +7,10 @@ export type AuthenticationConfig = {
   trustedIssuer: string
   audience: string
   requiredScope: string
+  appTrustedIssuer: string
+  appAudience: string
+  appJwksUri: URL
+  requiredAppRole: string
   acceptedAlgorithm: string
   jwksUri: URL
   jwksTimeoutMs: number
@@ -76,12 +80,20 @@ export const loadAuthenticationConfig = (
     throw new Error('AUTH_TRUSTED_ISSUER must be a canonical URL')
   }
 
+  const jwksUriRaw = required(environment, 'AUTH_JWKS_URI')
+  const agentJwksUriRaw = environment.AUTH_AGENT_JWKS_URI?.trim() || jwksUriRaw
+  const agentJwksUriName = environment.AUTH_AGENT_JWKS_URI?.trim() ? 'AUTH_AGENT_JWKS_URI' : 'AUTH_JWKS_URI'
+
   return {
     trustedIssuer,
     audience: required(environment, 'AUTH_API_AUDIENCE'),
     requiredScope: required(environment, 'AUTH_REQUIRED_SCOPE'),
+    appTrustedIssuer: required(environment, 'AUTH_AGENT_TRUSTED_ISSUER'),
+    appAudience: required(environment, 'AUTH_AGENT_API_AUDIENCE'),
+    appJwksUri: exactHttpsUrl(agentJwksUriRaw, agentJwksUriName, testIssuer),
+    requiredAppRole: environment.AUTH_AGENT_REQUIRED_ROLE?.trim() || 'agent.runtime',
     acceptedAlgorithm,
-    jwksUri: exactHttpsUrl(required(environment, 'AUTH_JWKS_URI'), 'AUTH_JWKS_URI', testIssuer),
+    jwksUri: exactHttpsUrl(jwksUriRaw, 'AUTH_JWKS_URI', testIssuer),
     jwksTimeoutMs: positiveInteger(environment, 'AUTH_JWKS_TIMEOUT_MS', DEFAULT_JWKS_TIMEOUT_MS),
     jwksCacheMaxAgeMs: positiveInteger(
       environment,

@@ -53,6 +53,18 @@ RUN echo '#!/bin/sh' > /entrypoint.sh && \
     echo '  '\''{authority: $authority, clientId: $clientId, apiScope: $apiScope, apiOrigin: $apiOrigin, redirectUri: $redirectUri, postLogoutRedirectUri: $postLogoutRedirectUri}'\'' \' >> /entrypoint.sh && \
     echo '  > /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
     echo 'jq empty /usr/share/nginx/html/auth-config.json' >> /entrypoint.sh && \
+    echo 'echo "[entrypoint] Generating telemetry configuration..."' >> /entrypoint.sh && \
+    echo 'if [ -z "${APPLICATIONINSIGHTS_CONNECTION_STRING:-}" ]; then' >> /entrypoint.sh && \
+    echo '  echo "null" > /usr/share/nginx/html/telemetry-config.json' >> /entrypoint.sh && \
+    echo '  echo "[entrypoint] Application Insights not configured"' >> /entrypoint.sh && \
+    echo 'else' >> /entrypoint.sh && \
+    echo '  jq -n \' >> /entrypoint.sh && \
+    echo '    --arg connectionString "$APPLICATIONINSIGHTS_CONNECTION_STRING" \' >> /entrypoint.sh && \
+    echo '    '\''{connectionString: $connectionString}'\'' \' >> /entrypoint.sh && \
+    echo '    > /usr/share/nginx/html/telemetry-config.json' >> /entrypoint.sh && \
+    echo '  jq empty /usr/share/nginx/html/telemetry-config.json' >> /entrypoint.sh && \
+    echo '  echo "[entrypoint] Application Insights configured"' >> /entrypoint.sh && \
+    echo 'fi' >> /entrypoint.sh && \
     echo 'envsubst "\${BACKEND_SERVICE_HOSTNAME}" < /etc/nginx/nginx.conf.template > /etc/nginx/conf.d/default.conf' >> /entrypoint.sh && \
     echo 'nginx -t' >> /entrypoint.sh && \
     echo 'echo "[entrypoint] Starting nginx..."' >> /entrypoint.sh && \

@@ -62,6 +62,9 @@ import {
   renewQuiltPresenceLease,
   releaseQuiltPresenceLease,
   reapExpiredQuiltPresenceLeases,
+  isAgentAssignedPatch,
+  loadAgentAssignedPatchIds,
+  writeAgentReadAuthorizationAudit,
 } from './db/index.js'
 import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
 import { ResourceNotFoundError } from './db/repository.js'
@@ -69,13 +72,17 @@ import type { PatchDeliveryOperation, QuiltDeliveryContext } from './db/reposito
 import { startRetentionJob } from './jobs/retention.js'
 import { buildPatchRoomAccess, resolveQuiltRooms } from './realtime/quiltRooms.js'
 import { loadAuthenticationConfig } from './auth/config.js'
-import { createTokenVerifier, type TokenVerifier } from './auth/tokenVerifier.js'
+import { createAppTokenVerifier, createTokenVerifier, type TokenVerifier } from './auth/tokenVerifier.js'
 import {
   resolveProtocolV2MutationEnabled,
   validateProductionRolloutGates,
 } from './startup/rolloutGates.js'
 import { redactTelemetry } from './logging/redact.js'
-import { resolveDeletionPendingPrincipal, resolveOrProvisionPrincipal } from './auth/principalContext.js'
+import {
+  resolveAgentPrincipal,
+  resolveDeletionPendingPrincipal,
+  resolveOrProvisionPrincipal,
+} from './auth/principalContext.js'
 import {
   buildMeResponse,
   createHttpAuth,
@@ -85,6 +92,7 @@ import {
 } from './auth/httpAuth.js'
 import { AuthenticationError } from './auth/errors.js'
 import { createSocketAuth } from './auth/socketAuth.js'
+import { createAgentReadRouter } from './routes/agentReads.js'
 import { configureQuiltTelemetry, emitQuiltTelemetry } from './migration/quiltTelemetry.js'
 import {
   consumeCanonicalAttempt,
@@ -157,6 +165,7 @@ const isAggregatePayloadEnabledByDefault = parseBooleanFlag(process.env.FEATURE_
 const isChunkCanaryEnabled = parseBooleanFlag(process.env.FEATURE_CHUNK_CANARY_ENABLED, false)
 const canarySessionIds = parseCanarySessions(process.env.FEATURE_CHUNK_CANARY_SESSION_IDS)
 const isMultiReplicaReady = parseBooleanFlag(process.env.FEATURE_MULTI_REPLICA_READY, false)
+const isAgentReadRoutesEnabled = parseBooleanFlag(process.env.FEATURE_AGENT_READS_ENABLED, false)
 const isProtocolV2MutationEnabled = resolveProtocolV2MutationEnabled()
 const QUILT_PROTOCOL_LIMITS: QuiltProtocolLimits = {
   maxRoomsPerConnection: Number(process.env.QUILT_V2_MAX_ROOMS_PER_CONNECTION ?? 64),
@@ -827,20 +836,52 @@ const testControlRateLimiter = createHttpRateLimiter(
 )
 
 let configuredTokenVerifier: TokenVerifier | undefined
+let configuredAppTokenVerifier: TokenVerifier | undefined
 export const configureTokenVerifierForTests = (verifier: TokenVerifier): void => {
   if (process.env.NODE_ENV !== 'test') throw new Error('Test token verification can only be configured in test mode')
   configuredTokenVerifier = verifier
 }
+export const configureAppTokenVerifierForTests = (verifier: TokenVerifier): void => {
+  if (process.env.NODE_ENV !== 'test') throw new Error('Test token verification can only be configured in test mode')
+  configuredAppTokenVerifier = verifier
+}
 const configureAuthentication = (): void => {
-  configuredTokenVerifier ??= createTokenVerifier(loadAuthenticationConfig())
+  const config = loadAuthenticationConfig()
+  configuredTokenVerifier ??= createTokenVerifier(config)
+  configuredAppTokenVerifier ??= createAppTokenVerifier(config)
 }
 const verifyAccessToken: TokenVerifier = (token) => {
-  configureAuthentication()
+  if (!configuredTokenVerifier) {
+    configureAuthentication()
+  }
   if (!configuredTokenVerifier) throw new Error('Authentication verifier is unavailable')
   return configuredTokenVerifier(token)
 }
+const verifyAgentAccessToken: TokenVerifier = (token) => {
+  if (!configuredAppTokenVerifier) {
+    configureAuthentication()
+  }
+  if (!configuredAppTokenVerifier) throw new Error('Authentication verifier is unavailable')
+  return configuredAppTokenVerifier(token)
+}
 const requireHttpPrincipal = createHttpAuth(verifyAccessToken, resolveOrProvisionPrincipal)
 const requireDeletionPendingPrincipal = createHttpAuth(verifyAccessToken, resolveDeletionPendingPrincipal)
+const requireAgentHttpPrincipal = createHttpAuth(verifyAgentAccessToken, resolveAgentPrincipal)
+
+export const registerAgentReadRoutes = (
+  targetApp: express.Application = app,
+  enabled = isAgentReadRoutesEnabled,
+): void => {
+  if (!enabled) return
+  targetApp.use('/internal/v1/agent', authenticatedReadRateLimiter, requireAgentHttpPrincipal, createAgentReadRouter({
+    loadQuiltContext: loadQuiltDeliveryContext,
+    loadPatchSnapshot: loadPatchDeliverySnapshot,
+    loadPatchOperationsAfter: loadPatchDeliveryOperationsAfter,
+    isAgentAssignedPatch,
+    loadAssignedPatchIds: loadAgentAssignedPatchIds,
+    writeAuthorizationAudit: writeAgentReadAuthorizationAudit,
+  }))
+}
 
 export const ownershipRequest = (value: unknown, fields: string[]): value is Record<string, string> =>
   isObjectRecord(value)
@@ -930,6 +971,8 @@ app.use((req, res, next) => {
   next()
 })
 
+registerAgentReadRoutes()
+
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
 app.get('/health', healthRateLimiter, async (_req, res) => {
   let dbStatus: 'ok' | 'error' = 'error'
@@ -980,6 +1023,7 @@ export const sendCanonicalWorldDiscovery = async (
       } satisfies CanonicalWorldUnavailableError)
       return
     }
+
     descriptor = await loader()
     if (!descriptor) {
       outcome = 'unavailable'; httpStatus = 503; reasonCode = 'missing'

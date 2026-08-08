@@ -24,7 +24,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [client, server]
+        include:
+          - app: client
+            image_suffix: client
+            dockerfile: apps/client/Dockerfile
+            context: .
+          - app: server
+            image_suffix: server
+            dockerfile: apps/server/Dockerfile
+            context: .
+          - app: agent-worker
+            image_suffix: agent-worker
+            dockerfile: apps/agent-worker/Dockerfile
+            context: apps/agent-worker
 
     permissions:
       contents: read
@@ -45,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          app_tag="$(git tag --points-at HEAD --list "${{ matrix.app }}-v*" --sort=-v:refname | head -n 1 || true)"
+          app_tag="$(git tag --points-at HEAD --list "${{ matrix.image_suffix }}-v*" --sort=-v:refname | head -n 1 || true)"
           if [[ -z "${app_tag}" ]]; then
             echo "has_semver=false" >> "$GITHUB_OUTPUT"
             echo "semver=" >> "$GITHUB_OUTPUT"
@@ -54,7 +66,7 @@ jobs:
             exit 0
           fi
 
-          semver="${app_tag#${{ matrix.app }}-v}"
+          semver="${app_tag#${{ matrix.image_suffix }}-v}"
           echo "has_semver=true" >> "$GITHUB_OUTPUT"
           echo "semver=${semver}" >> "$GITHUB_OUTPUT"
           echo "semver_tag=${app_tag}" >> "$GITHUB_OUTPUT"
@@ -74,7 +86,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
-          images: ghcr.io/${{ github.repository }}-${{ matrix.app }}
+          images: ghcr.io/${{ github.repository }}-${{ matrix.image_suffix }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -87,8 +99,8 @@ jobs:
       - name: Build And Push Image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
         with:
-          context: .
-          file: apps/${{ matrix.app }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
@@ -119,8 +131,10 @@ jobs:
       AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
       SERVER_CONTAINER_APP_NAME: ${{ vars.SERVER_CONTAINER_APP_NAME }}
       CLIENT_CONTAINER_APP_NAME: ${{ vars.CLIENT_CONTAINER_APP_NAME }}
+      AGENT_WORKER_CONTAINER_APP_NAME: ${{ vars.AGENT_WORKER_CONTAINER_APP_NAME }}
       SERVER_IMAGE: ghcr.io/${{ github.repository }}-server:${{ github.event.workflow_run.head_sha || github.sha }}
       CLIENT_IMAGE: ghcr.io/${{ github.repository }}-client:${{ github.event.workflow_run.head_sha || github.sha }}
+      AGENT_WORKER_IMAGE: ghcr.io/${{ github.repository }}-agent-worker:${{ github.event.workflow_run.head_sha || github.sha }}
       SERVER_TARGET_PORT: '3001'
       CLIENT_TARGET_PORT: '80'
       CONFIGURED_CORS_ORIGIN: ${{ vars.SERVER_CORS_ORIGIN }}
@@ -137,6 +151,22 @@ jobs:
       AUTH_REQUIRED_SCOPE: ${{ vars.AUTH_REQUIRED_SCOPE }}
       AUTH_JWKS_URI: ${{ vars.AUTH_JWKS_URI }}
       AUTH_ACCEPTED_ALGORITHM: ${{ vars.AUTH_ACCEPTED_ALGORITHM }}
+      AUTH_AGENT_TRUSTED_ISSUER: ${{ vars.AUTH_AGENT_TRUSTED_ISSUER || vars.AUTH_TRUSTED_ISSUER }}
+      AUTH_AGENT_API_AUDIENCE: ${{ vars.AUTH_AGENT_API_AUDIENCE }}
+      AUTH_AGENT_JWKS_URI: ${{ vars.AUTH_AGENT_JWKS_URI || vars.AUTH_JWKS_URI }}
+      AUTH_AGENT_REQUIRED_ROLE: ${{ vars.AUTH_AGENT_REQUIRED_ROLE }}
+      AGENT_SERVER_TOKEN_SCOPE: ${{ vars.AGENT_SERVER_TOKEN_SCOPE }}
+      AGENT_PRINCIPAL_ID: ${{ vars.AGENT_PRINCIPAL_ID }}
+      FEATURE_AGENT_READS_ENABLED: ${{ vars.FEATURE_AGENT_READS_ENABLED || 'false' }}
+      AGENT_FEATURE_MODEL_FREE_ENABLED: ${{ vars.AGENT_FEATURE_MODEL_FREE_ENABLED || 'true' }}
+      AGENT_FEATURE_FOUNDRY_ENABLED: ${{ vars.AGENT_FEATURE_FOUNDRY_ENABLED || 'false' }}
+      AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED: ${{ vars.AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED || 'false' }}
+      AGENT_GATEWAY_MODE: ${{ vars.AGENT_GATEWAY_MODE || 'fake' }}
+      AGENT_WORKER_MIN_REPLICAS: ${{ vars.AGENT_WORKER_MIN_REPLICAS || '1' }}
+      AGENT_WORKER_MAX_REPLICAS: ${{ vars.AGENT_WORKER_MAX_REPLICAS || '2' }}
+      AGENT_LEASE_TTL_SECONDS: ${{ vars.AGENT_LEASE_TTL_SECONDS || '20' }}
+      AGENT_POLL_INTERVAL_SECONDS: ${{ vars.AGENT_POLL_INTERVAL_SECONDS || '1' }}
+      AGENT_TOOL_TIMEOUT_SECONDS: ${{ vars.AGENT_TOOL_TIMEOUT_SECONDS || '5' }}
       AUTH_TELEMETRY_GATE_APPROVED: ${{ vars.AUTH_TELEMETRY_GATE_APPROVED }}
       AUTH_ROLLBACK_GATE_APPROVED: ${{ vars.AUTH_ROLLBACK_GATE_APPROVED }}
       AUTH_RETENTION_POLICY_APPROVED: ${{ vars.AUTH_RETENTION_POLICY_APPROVED }}
@@ -171,6 +201,7 @@ jobs:
             CONTAINERAPPS_ENVIRONMENT
             SERVER_CONTAINER_APP_NAME
             CLIENT_CONTAINER_APP_NAME
+            AGENT_WORKER_CONTAINER_APP_NAME
             MIGRATION_JOB_NAME
             CANONICAL_INITIALIZATION_JOB_NAME
             AUTH_AUTHORITY
@@ -184,6 +215,22 @@ jobs:
             AUTH_REQUIRED_SCOPE
             AUTH_JWKS_URI
             AUTH_ACCEPTED_ALGORITHM
+            AUTH_AGENT_TRUSTED_ISSUER
+            AUTH_AGENT_API_AUDIENCE
+            AUTH_AGENT_JWKS_URI
+            AUTH_AGENT_REQUIRED_ROLE
+            AGENT_SERVER_TOKEN_SCOPE
+            AGENT_PRINCIPAL_ID
+            FEATURE_AGENT_READS_ENABLED
+            AGENT_FEATURE_MODEL_FREE_ENABLED
+            AGENT_FEATURE_FOUNDRY_ENABLED
+            AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED
+            AGENT_GATEWAY_MODE
+            AGENT_WORKER_MIN_REPLICAS
+            AGENT_WORKER_MAX_REPLICAS
+            AGENT_LEASE_TTL_SECONDS
+            AGENT_POLL_INTERVAL_SECONDS
+            AGENT_TOOL_TIMEOUT_SECONDS
             AUTH_TELEMETRY_GATE_APPROVED
             AUTH_ROLLBACK_GATE_APPROVED
             AUTH_RETENTION_POLICY_APPROVED
@@ -217,6 +264,11 @@ jobs:
 
           if [[ -z "${{ secrets.SERVER_DATABASE_URL }}" ]]; then
             echo 'Missing required GitHub environment secret: SERVER_DATABASE_URL' >&2
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.AGENT_CONTROL_PLANE_DSN }}" ]]; then
+            echo 'Missing required GitHub environment secret: AGENT_CONTROL_PLANE_DSN' >&2
             exit 1
           fi
 
@@ -642,7 +694,7 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${SERVER_CONTAINER_APP_NAME}" \
                 --image "${SERVER_IMAGE}" \
-                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=${SERVER_DATABASE_URL}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}" "OTEL_SERVICE_NAME=zzyix-server" "OTEL_SAMPLING_RATIO=${{ vars.OTEL_SAMPLING_RATIO || '1.0' }}"
+                --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=${SERVER_DATABASE_URL}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_AGENT_TRUSTED_ISSUER=${AUTH_AGENT_TRUSTED_ISSUER}" "AUTH_AGENT_API_AUDIENCE=${AUTH_AGENT_API_AUDIENCE}" "AUTH_AGENT_JWKS_URI=${AUTH_AGENT_JWKS_URI}" "AUTH_AGENT_REQUIRED_ROLE=${AUTH_AGENT_REQUIRED_ROLE}" "FEATURE_AGENT_READS_ENABLED=${FEATURE_AGENT_READS_ENABLED}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}" "OTEL_SERVICE_NAME=zzyix-server" "OTEL_SAMPLING_RATIO=${{ vars.OTEL_SAMPLING_RATIO || '1.0' }}"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -660,7 +712,7 @@ jobs:
                 --image "${SERVER_IMAGE}" \
                 --target-port "${SERVER_TARGET_PORT}" \
                 --ingress internal \
-                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=${SERVER_DATABASE_URL}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" \
+                --env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_BOOTSTRAP}" "DATABASE_URL=${SERVER_DATABASE_URL}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_AGENT_TRUSTED_ISSUER=${AUTH_AGENT_TRUSTED_ISSUER}" "AUTH_AGENT_API_AUDIENCE=${AUTH_AGENT_API_AUDIENCE}" "AUTH_AGENT_JWKS_URI=${AUTH_AGENT_JWKS_URI}" "AUTH_AGENT_REQUIRED_ROLE=${AUTH_AGENT_REQUIRED_ROLE}" "FEATURE_AGENT_READS_ENABLED=${FEATURE_AGENT_READS_ENABLED}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}" "OTEL_SERVICE_NAME=zzyix-server" "OTEL_SAMPLING_RATIO=${{ vars.OTEL_SAMPLING_RATIO || '1.0' }}" \
                 --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
@@ -682,6 +734,130 @@ jobs:
             else
               echo "Server ingress is already internal; skipping ingress update."
             fi
+
+      - name: Deploy Agent Worker Container App
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        env:
+          AGENT_CONTROL_PLANE_DSN: ${{ secrets.AGENT_CONTROL_PLANE_DSN }}
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            if [[ -z "${AGENT_CONTROL_PLANE_DSN:-}" ]]; then
+              echo 'Missing required GitHub environment secret: AGENT_CONTROL_PLANE_DSN' >&2
+              exit 1
+            fi
+
+            if [[ -z "${RESOURCE_GROUP}" || -z "${CONTAINERAPPS_ENVIRONMENT}" || -z "${AGENT_WORKER_CONTAINER_APP_NAME}" || -z "${SERVER_CONTAINER_APP_NAME}" ]]; then
+              echo "Missing required environment variables for agent worker deploy."
+              exit 1
+            fi
+
+            server_fqdn="$({
+              az containerapp show \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${SERVER_CONTAINER_APP_NAME}" \
+                --query properties.configuration.ingress.fqdn \
+                --output tsv
+            } | tr -d '\r')"
+
+            if [[ -z "${server_fqdn}" || "${server_fqdn}" == "null" ]]; then
+              echo "ERROR: Could not resolve server app FQDN for agent worker."
+              exit 1
+            fi
+
+            agent_server_base_url="https://${server_fqdn}"
+            HAS_GHCR_CREDS=false
+            if [[ -n "${{ secrets.AZURE_GHCR_USERNAME }}" && -n "${{ secrets.AZURE_GHCR_PASSWORD }}" ]]; then
+              HAS_GHCR_CREDS=true
+            fi
+
+            common_env_vars=(
+              "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}"
+              "OTEL_SERVICE_NAME=zzyix-agent-worker"
+              "AGENT_SERVER_BASE_URL=${agent_server_base_url}"
+              "AGENT_PRINCIPAL_ID=${AGENT_PRINCIPAL_ID}"
+              "AGENT_SERVER_TOKEN_SCOPE=${AGENT_SERVER_TOKEN_SCOPE}"
+              "AGENT_AUTH_TRUSTED_ISSUER=${AUTH_AGENT_TRUSTED_ISSUER}"
+              "AGENT_AUTH_API_AUDIENCE=${AUTH_AGENT_API_AUDIENCE}"
+              "AGENT_AUTH_REQUIRED_ROLE=${AUTH_AGENT_REQUIRED_ROLE}"
+              "FEATURE_AGENT_READS_ENABLED=${FEATURE_AGENT_READS_ENABLED}"
+              "AGENT_GATEWAY_MODE=${AGENT_GATEWAY_MODE}"
+              "AGENT_FEATURE_MODEL_FREE_ENABLED=${AGENT_FEATURE_MODEL_FREE_ENABLED}"
+              "AGENT_FEATURE_FOUNDRY_ENABLED=${AGENT_FEATURE_FOUNDRY_ENABLED}"
+              "AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED=${AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED}"
+              "AGENT_CANONICAL_DB_ACCESS=disabled"
+              "AGENT_MUTATIONS_ENABLED=false"
+              "AGENT_MEMORY_ENABLED=false"
+              "AGENT_LEASE_TTL_SECONDS=${AGENT_LEASE_TTL_SECONDS}"
+              "AGENT_POLL_INTERVAL_SECONDS=${AGENT_POLL_INTERVAL_SECONDS}"
+              "AGENT_TOOL_TIMEOUT_SECONDS=${AGENT_TOOL_TIMEOUT_SECONDS}"
+              "AGENT_CONTROL_PLANE_SCHEMA=agent_control"
+              "AGENT_CONTROL_PLANE_DSN=secretref:agent-control-plane-dsn"
+            )
+
+            if az containerapp show \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${AGENT_WORKER_CONTAINER_APP_NAME}" >/dev/null 2>&1; then
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                az containerapp registry set \
+                  --resource-group "${RESOURCE_GROUP}" \
+                  --name "${AGENT_WORKER_CONTAINER_APP_NAME}" \
+                  --server "ghcr.io" \
+                  --username "${{ secrets.AZURE_GHCR_USERNAME }}" \
+                  --password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+              fi
+
+              az containerapp secret set \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${AGENT_WORKER_CONTAINER_APP_NAME}" \
+                --secrets "agent-control-plane-dsn=${AGENT_CONTROL_PLANE_DSN}"
+
+              az containerapp identity assign \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${AGENT_WORKER_CONTAINER_APP_NAME}" \
+                --system-assigned >/dev/null
+
+              az containerapp update \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${AGENT_WORKER_CONTAINER_APP_NAME}" \
+                --image "${AGENT_WORKER_IMAGE}" \
+                --min-replicas "${AGENT_WORKER_MIN_REPLICAS}" \
+                --max-replicas "${AGENT_WORKER_MAX_REPLICAS}" \
+                --set-env-vars "${common_env_vars[@]}"
+            else
+              CREATE_REGISTRY_ARGS=()
+              if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
+                CREATE_REGISTRY_ARGS=(
+                  --registry-server "ghcr.io"
+                  --registry-username "${{ secrets.AZURE_GHCR_USERNAME }}"
+                  --registry-password "${{ secrets.AZURE_GHCR_PASSWORD }}"
+                )
+              fi
+
+              az containerapp create \
+                --resource-group "${RESOURCE_GROUP}" \
+                --name "${AGENT_WORKER_CONTAINER_APP_NAME}" \
+                --environment "${CONTAINERAPPS_ENVIRONMENT}" \
+                --image "${AGENT_WORKER_IMAGE}" \
+                --system-assigned \
+                --min-replicas "${AGENT_WORKER_MIN_REPLICAS}" \
+                --max-replicas "${AGENT_WORKER_MAX_REPLICAS}" \
+                --secrets "agent-control-plane-dsn=${AGENT_CONTROL_PLANE_DSN}" \
+                --env-vars "${common_env_vars[@]}" \
+                ${CREATE_REGISTRY_ARGS[@]}
+            fi
+
+      - name: Verify Agent Worker Database Role
+        uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
+        with:
+          inlineScript: |
+            set -euo pipefail
+
+            az containerapp exec \
+              --resource-group "${RESOURCE_GROUP}" \
+              --name "${AGENT_WORKER_CONTAINER_APP_NAME}" \
+              --command "python -m control_plane_access_verification"
 
       - name: Deploy Client Container App
         uses: azure/cli@9fe27e8f2d4177d9755d43d94f89e79f065ef883
@@ -735,7 +911,7 @@ jobs:
                 --resource-group "${RESOURCE_GROUP}" \
                 --name "${CLIENT_CONTAINER_APP_NAME}" \
                 --image "${CLIENT_IMAGE}" \
-                --set-env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" "AUTH_AUTHORITY=${AUTH_AUTHORITY}" "AUTH_CLIENT_ID=${AUTH_CLIENT_ID}" "AUTH_API_SCOPE=${AUTH_API_SCOPE}" "AUTH_API_ORIGIN=${AUTH_API_ORIGIN}" "AUTH_REDIRECT_URI=${AUTH_REDIRECT_URI}" "AUTH_POST_LOGOUT_REDIRECT_URI=${AUTH_POST_LOGOUT_REDIRECT_URI}"
+                --set-env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" "AUTH_AUTHORITY=${AUTH_AUTHORITY}" "AUTH_CLIENT_ID=${AUTH_CLIENT_ID}" "AUTH_API_SCOPE=${AUTH_API_SCOPE}" "AUTH_API_ORIGIN=${AUTH_API_ORIGIN}" "AUTH_REDIRECT_URI=${AUTH_REDIRECT_URI}" "AUTH_POST_LOGOUT_REDIRECT_URI=${AUTH_POST_LOGOUT_REDIRECT_URI}" "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}"
             else
               CREATE_REGISTRY_ARGS=()
               if [[ "${HAS_GHCR_CREDS}" == "true" ]]; then
@@ -754,7 +930,7 @@ jobs:
                 --image "${CLIENT_IMAGE}" \
                 --target-port "${CLIENT_TARGET_PORT}" \
                 --ingress external \
-                --env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" "AUTH_AUTHORITY=${AUTH_AUTHORITY}" "AUTH_CLIENT_ID=${AUTH_CLIENT_ID}" "AUTH_API_SCOPE=${AUTH_API_SCOPE}" "AUTH_API_ORIGIN=${AUTH_API_ORIGIN}" "AUTH_REDIRECT_URI=${AUTH_REDIRECT_URI}" "AUTH_POST_LOGOUT_REDIRECT_URI=${AUTH_POST_LOGOUT_REDIRECT_URI}" \
+                --env-vars "BACKEND_SERVICE_HOSTNAME=${BACKEND_SERVICE_HOSTNAME}" "AUTH_AUTHORITY=${AUTH_AUTHORITY}" "AUTH_CLIENT_ID=${AUTH_CLIENT_ID}" "AUTH_API_SCOPE=${AUTH_API_SCOPE}" "AUTH_API_ORIGIN=${AUTH_API_ORIGIN}" "AUTH_REDIRECT_URI=${AUTH_REDIRECT_URI}" "AUTH_POST_LOGOUT_REDIRECT_URI=${AUTH_POST_LOGOUT_REDIRECT_URI}" "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}" \
                 --min-replicas 1 \
                 ${CREATE_REGISTRY_ARGS[@]}
             fi
@@ -819,4 +995,4 @@ jobs:
             az containerapp update \
               --resource-group "${RESOURCE_GROUP}" \
               --name "${SERVER_CONTAINER_APP_NAME}" \
-              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=${SERVER_DATABASE_URL}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}" "OTEL_SERVICE_NAME=zzyix-server" "OTEL_SAMPLING_RATIO=${{ vars.OTEL_SAMPLING_RATIO || '1.0' }}"
+              --set-env-vars "NODE_ENV=production" "CORS_ORIGIN=${SERVER_CORS_ORIGIN_EFFECTIVE}" "DATABASE_URL=${SERVER_DATABASE_URL}" "AUTH_TRUSTED_ISSUER=${AUTH_TRUSTED_ISSUER}" "AUTH_API_AUDIENCE=${AUTH_API_AUDIENCE}" "AUTH_REQUIRED_SCOPE=${AUTH_REQUIRED_SCOPE}" "AUTH_JWKS_URI=${AUTH_JWKS_URI}" "AUTH_ACCEPTED_ALGORITHM=${AUTH_ACCEPTED_ALGORITHM}" "AUTH_AGENT_TRUSTED_ISSUER=${AUTH_AGENT_TRUSTED_ISSUER}" "AUTH_AGENT_API_AUDIENCE=${AUTH_AGENT_API_AUDIENCE}" "AUTH_AGENT_REQUIRED_ROLE=${AUTH_AGENT_REQUIRED_ROLE}" "FEATURE_AGENT_READS_ENABLED=${FEATURE_AGENT_READS_ENABLED}" "AUTH_TELEMETRY_GATE_APPROVED=${AUTH_TELEMETRY_GATE_APPROVED}" "AUTH_ROLLBACK_GATE_APPROVED=${AUTH_ROLLBACK_GATE_APPROVED}" "AUTH_RETENTION_POLICY_APPROVED=${AUTH_RETENTION_POLICY_APPROVED}" "AUTH_DELETION_COMPLETION_POLICY_APPROVED=${AUTH_DELETION_COMPLETION_POLICY_APPROVED}" "APPLICATIONINSIGHTS_CONNECTION_STRING=${{ vars.APPLICATIONINSIGHTS_CONNECTION_STRING }}" "OTEL_SERVICE_NAME=zzyix-server" "OTEL_SAMPLING_RATIO=${{ vars.OTEL_SAMPLING_RATIO || '1.0' }}"

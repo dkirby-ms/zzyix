@@ -22,9 +22,11 @@ import {
   sendOwnershipResult,
   sendCanonicalWorldDiscovery,
   configureTokenVerifierForTests,
+  configureAppTokenVerifierForTests,
   enforceCanonicalSocketCompatibility,
   httpServer,
   io,
+  registerAgentReadRoutes,
   registerCanonicalTelemetryHandler,
 } from './index.js'
 import { buildPatchRoomAccess } from './realtime/quiltRooms.js'
@@ -35,34 +37,65 @@ import { configureQuiltTelemetry } from './migration/quiltTelemetry.js'
 import { createHttpAuth } from './auth/httpAuth.js'
 import { AuthenticationError } from './auth/errors.js'
 import { createSocketAuth } from './auth/socketAuth.js'
+import { createAppTokenVerifier } from './auth/tokenVerifier.js'
 import {
   consumeCanonicalAttempt,
   issueCanonicalAttempt,
 } from './migration/canonicalAttempts.js'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from './test/postgresTestDatabase.js'
+import {
+  createTestOidcIssuer,
+  TEST_OIDC_APP_ROLE,
+  TEST_OIDC_AUDIENCE,
+  type TestOidcIssuer,
+} from '../../../e2e/support/testOidcIssuer.js'
 
 let attemptDatabase: PostgresTestDatabase
 let liveBaseUrl: string
+let agentIssuer: TestOidcIssuer
 
 const PRINCIPAL_A = '11111111-1111-4111-8111-111111111111'
 const PRINCIPAL_B = '22222222-2222-4222-8222-222222222222'
+const AGENT_PRINCIPAL = '99999999-9999-4999-8999-999999999999'
+const AGENT_APPLICATION_ID = '00000000-0000-4000-8000-000000000321'
 const CANVAS_ID = '30000000-0000-4000-8000-000000000001'
 const QUILT_ID = '40000000-0000-4000-8000-000000000001'
 const PATCH_A = '50000000-0000-4000-8000-000000000001'
 const PATCH_B = '50000000-0000-4000-8000-000000000002'
 const TEST_ISSUER = 'https://issuer.example/'
+const testOidcEnvironment = { NODE_ENV: 'test', E2E_TEST_MODE: 'true' }
 
 beforeAll(async () => {
   attemptDatabase = await createPostgresTestDatabase('zzyix_index_attempts')
+  agentIssuer = await createTestOidcIssuer(0, testOidcEnvironment)
+  await agentIssuer.start()
   configureTokenVerifierForTests(async (token) => {
     if (token === 'denied') throw new AuthenticationError('insufficient_scope')
     return {
+      kind: 'delegated_user',
       issuer: TEST_ISSUER,
       subject: token === 'second' ? 'subject-b' : 'subject-a',
       expiresAt: new Date(Date.now() + 60_000),
       scope: ['access'],
+      roles: [],
     }
   })
+  configureAppTokenVerifierForTests(createAppTokenVerifier({
+    trustedIssuer: agentIssuer.issuer,
+    audience: TEST_OIDC_AUDIENCE,
+    requiredScope: 'unused.delegated.scope',
+    appTrustedIssuer: agentIssuer.issuer,
+    appAudience: TEST_OIDC_AUDIENCE,
+    appJwksUri: new URL(agentIssuer.jwksUri),
+    requiredAppRole: TEST_OIDC_APP_ROLE,
+    acceptedAlgorithm: 'RS256',
+    jwksUri: new URL(agentIssuer.jwksUri),
+    jwksTimeoutMs: 200,
+    jwksCacheMaxAgeMs: 60_000,
+    jwksCooldownMs: 0,
+    testIssuer: true,
+  }))
+  registerAgentReadRoutes(undefined, true)
   await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
   liveBaseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`
 }, 30_000)
@@ -79,6 +112,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => io.close(() => resolve()))
+  await agentIssuer?.stop()
   await attemptDatabase?.dispose()
 }, 30_000)
 
@@ -256,6 +290,39 @@ describe('canonical discovery HTTP contract', () => {
       code: 'internal_error',
       message: 'An internal error occurred.',
       requestId: 'request-1',
+    })
+  })
+})
+
+describe('agent read HTTP contract', () => {
+  it('accepts live app-role tokens through the startup-registered worker route', async () => {
+    await seedCanonicalBoundary()
+    await attemptDatabase.db.execute(sql`
+      insert into principals (id, kind, status, display_name)
+      values (${AGENT_PRINCIPAL}, 'agent', 'active', 'Fantome Resident Agent')
+    `)
+    await attemptDatabase.db.execute(sql`
+      insert into external_principal_mappings (provider_namespace, external_subject, principal_id)
+      values (${agentIssuer.issuer}, ${`app:${AGENT_APPLICATION_ID}`}, ${AGENT_PRINCIPAL})
+    `)
+    await attemptDatabase.db.execute(sql`
+      insert into agent_control.agent_assignments (quilt_id, patch_id, agent_principal_id, policy_version)
+      values (${QUILT_ID}, ${PATCH_A}, ${AGENT_PRINCIPAL}, 'test-policy')
+    `)
+    const token = await agentIssuer.issueToken({
+      subject: 'agent-worker',
+      applicationId: AGENT_APPLICATION_ID,
+    })
+
+    const agentRead = await fetch(`${liveBaseUrl}/internal/v1/agent/quilts/${QUILT_ID}/context`, {
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    expect(agentRead.status).toBe(200)
+    await expect(agentRead.json()).resolves.toMatchObject({
+      principalId: AGENT_PRINCIPAL,
+      topology: { quiltId: QUILT_ID },
+      patches: [{ id: PATCH_A }],
     })
   })
 })

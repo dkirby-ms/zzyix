@@ -1,0 +1,182 @@
+{
+  "manifestVersion": 1,
+  "project": "zzyix",
+  "purpose": "Alexander Mosaic benchmark source provenance for deterministic mosaic generation",
+  "retrievalDate": "2026-08-07",
+  "artwork": {
+    "title": "Alexander Mosaic, also known as the Battle of Issus Mosaic",
+    "origin": "House of the Faun, Pompeii",
+    "currentHolding": "National Archaeological Museum, Naples, inventory 10020",
+    "date": "Roman copy, circa 125-120 BCE, after an earlier Hellenistic painting traditionally attributed to Philoxenus of Eretria",
+    "publicDomainRationale": "The underlying ancient mosaic is a two-dimensional artwork from antiquity and is outside copyright term in the United States and other jurisdictions with comparable public-domain treatment for ancient works. The selected source file is also marked Public domain by Wikimedia Commons.",
+    "status": "public-domain"
+  },
+  "assetPolicy": {
+    "runtimeBundle": "excluded",
+    "originalSourceStorage": "Do not store source image bytes under apps/client, apps/server, public, dist, or other runtime bundle paths until an approved asset location is established.",
+    "workingSourceStorage": "Generated working files belong under offline/output/ or another non-runtime path and must remain reproducible from this manifest."
+  },
+  "benchmarkImages": [
+    {
+      "id": "alexander-mosaic-primary",
+      "role": "primary-source",
+      "fileName": "Alexander_Mosaic_detail_of_Alexander_the_Great.jpg",
+      "sourcePageUrl": "https://commons.wikimedia.org/wiki/File:Alexander_Mosaic_detail_of_Alexander_the_Great.jpg",
+      "originalUrl": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Alexander_Mosaic_detail_of_Alexander_the_Great.jpg",
+      "mimeType": "image/jpeg",
+      "pixelDimensions": {
+        "width": 2154,
+        "height": 3232
+      },
+      "byteLength": 3377658,
+      "license": {
+        "name": "Public domain",
+        "reuseTerms": "Public domain",
+        "attributionRequired": false,
+        "attribution": "Unknown author; Wikimedia Commons detail extraction",
+        "metadataSource": "Wikimedia Commons imageinfo extmetadata"
+      },
+      "checksums": {
+        "commonsSha1": "1801fe8ebc4590aa289e3840dee2e41ba4f1e918",
+        "sha256": "6c3731140a79698818db392e7a0a1985a56dad1fbf034552bd214dd14fd4397b"
+      },
+      "checksumVerification": {
+        "verifiedAt": "2026-08-07",
+        "command": "curl -fsSL https://upload.wikimedia.org/wikipedia/commons/d/d0/Alexander_Mosaic_detail_of_Alexander_the_Great.jpg | sha256sum",
+        "repeatRuns": 2,
+        "stable": true
+      },
+      "crop": {
+        "unit": "source-pixel",
+        "x": 0,
+        "y": 0,
+        "width": 2154,
+        "height": 3232,
+        "description": "Use the full Wikimedia Commons close-up of Alexander the Great; no additional local crop is applied."
+      },
+      "normalizedWorkingSource": {
+        "expectedPath": "offline/output/alexander-normalized-master.png",
+        "sourceImageId": "alexander-mosaic-primary",
+        "recipeVersion": 1,
+        "recipe": [
+          {
+            "operation": "download-original",
+            "urlField": "originalUrl",
+            "verifySha256": "6c3731140a79698818db392e7a0a1985a56dad1fbf034552bd214dd14fd4397b"
+          },
+          {
+            "operation": "crop",
+            "box": {
+              "x": 0,
+              "y": 0,
+              "width": 2154,
+              "height": 3232
+            }
+          },
+          {
+            "operation": "normalize-orientation",
+            "method": "honor-decoded-pixel-order-no-rotation"
+          },
+          {
+            "operation": "convert-color-space",
+            "to": "sRGB"
+          },
+          {
+            "operation": "resize",
+            "method": "lanczos3",
+            "width": 1077,
+            "height": 1616,
+            "preserveAspectRatio": true
+          },
+          {
+            "operation": "encode",
+            "format": "png",
+            "compressionLevel": 9,
+            "stripMetadata": true
+          }
+        ],
+        "reproducibilityNote": "The normalized source is generated output, not runtime source. Regenerate it from the Wikimedia Commons close-up URL, checksum, and recipe before producing benchmark tiles."
+      },
+      "preprocessing": {
+        "expectedDirectory": "offline/output/alexander-preprocessed",
+        "script": "scripts/preprocess-alexander-source.mjs",
+        "configPath": "offline/output/alexander-preprocessed/alexander-preprocessing-config.json",
+        "artifacts": {
+          "normalized": "alexander-normalized-master.png",
+          "lab": "alexander-cielab-float32.bin",
+          "luminance": "alexander-luminance-normalized.png",
+          "denoised": "alexander-denoised-preview.png",
+          "saliency": "alexander-saliency-mask.png",
+          "edges": "alexander-edge-mask.png"
+        },
+        "configurationRecords": [
+          "colorSpace",
+          "normalization",
+          "denoising",
+          "saliency",
+          "generatorSeed"
+        ],
+        "edgeRetentionTargets": [
+          "face",
+          "weapon",
+          "armour",
+          "contour"
+        ],
+        "featureRegions": [
+          {
+            "target": "face",
+            "x": 390,
+            "y": 180,
+            "width": 320,
+            "height": 420,
+            "minimumEdgePixels": 40
+          },
+          {
+            "target": "weapon",
+            "x": 520,
+            "y": 160,
+            "width": 557,
+            "height": 110,
+            "minimumEdgePixels": 40
+          },
+          {
+            "target": "armour",
+            "x": 100,
+            "y": 500,
+            "width": 850,
+            "height": 800,
+            "minimumEdgePixels": 160
+          },
+          {
+            "target": "contour",
+            "x": 0,
+            "y": 100,
+            "width": 1077,
+            "height": 1400,
+            "minimumEdgePixels": 320
+          }
+        ]
+      },
+      "mosaicInputs": {
+        "expectedDirectory": "offline/output/alexander-mosaic-inputs",
+        "script": "scripts/generate-alexander-mosaic-inputs.mjs",
+        "configPath": "offline/output/alexander-mosaic-inputs/alexander-mosaic-inputs-config.json",
+        "artifacts": {
+          "palette": "alexander-mosaic-palette.json",
+          "candidates": "alexander-tile-candidates.json"
+        },
+        "configurationRecords": [
+          "palette",
+          "candidates",
+          "generatorSeed"
+        ],
+        "sourceArtifacts": [
+          "lab",
+          "luminance",
+          "saliency",
+          "edges"
+        ]
+      }
+    }
+  ]
+}

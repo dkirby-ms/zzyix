@@ -31,6 +31,7 @@ Required environment variables:
   AZURE_LOCATION
   SERVER_CONTAINER_APP_NAME
   CLIENT_CONTAINER_APP_NAME
+  AGENT_WORKER_CONTAINER_APP_NAME
   MIGRATION_JOB_NAME
   CANONICAL_INITIALIZATION_JOB_NAME
   AUTH_AUTHORITY
@@ -44,12 +45,29 @@ Required environment variables:
   AUTH_REQUIRED_SCOPE
   AUTH_JWKS_URI
   AUTH_ACCEPTED_ALGORITHM
+  AUTH_AGENT_API_AUDIENCE
+  AUTH_AGENT_REQUIRED_ROLE
+  AGENT_SERVER_TOKEN_SCOPE
+  AGENT_PRINCIPAL_ID
+  FEATURE_AGENT_READS_ENABLED
+  AGENT_FEATURE_MODEL_FREE_ENABLED
+  AGENT_FEATURE_FOUNDRY_ENABLED
+  AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED
+  AGENT_GATEWAY_MODE
   APPLICATIONINSIGHTS_CONNECTION_STRING
   SERVER_DATABASE_URL
+  AGENT_CONTROL_PLANE_DSN
 
 Optional environment variables:
   SERVER_CORS_ORIGIN
   OTEL_SAMPLING_RATIO
+  AUTH_AGENT_TRUSTED_ISSUER
+  AUTH_AGENT_JWKS_URI
+  AGENT_WORKER_MIN_REPLICAS
+  AGENT_WORKER_MAX_REPLICAS
+  AGENT_LEASE_TTL_SECONDS
+  AGENT_POLL_INTERVAL_SECONDS
+  AGENT_TOOL_TIMEOUT_SECONDS
   AZURE_GHCR_USERNAME
   AZURE_GHCR_PASSWORD
 
@@ -63,6 +81,7 @@ Examples:
   AZURE_LOCATION=eastus
   SERVER_CONTAINER_APP_NAME=zzyix-staging-server
   CLIENT_CONTAINER_APP_NAME=zzyix-staging-client
+  AGENT_WORKER_CONTAINER_APP_NAME=zzyix-staging-agent-worker
   MIGRATION_JOB_NAME=zzyix-staging-migrations
   CANONICAL_INITIALIZATION_JOB_NAME=zzyix-staging-canon-init
   AUTH_AUTHORITY=https://example.ciamlogin.com/example.onmicrosoft.com
@@ -76,8 +95,23 @@ Examples:
   AUTH_REQUIRED_SCOPE=access_as_user
   AUTH_JWKS_URI=https://example.ciamlogin.com/example.onmicrosoft.com/discovery/v2.0/keys
   AUTH_ACCEPTED_ALGORITHM=RS256
+  AUTH_AGENT_API_AUDIENCE=api://zzyix-agent-reader
+  # Optional when worker tokens use a different Entra tenant than human tokens.
+  # Defaults to AUTH_JWKS_URI when omitted.
+  AUTH_AGENT_JWKS_URI=https://login.microsoftonline.com/<worker-tenant-id>/discovery/v2.0/keys
+  AUTH_AGENT_REQUIRED_ROLE=agent.runtime
+  AGENT_SERVER_TOKEN_SCOPE=api://zzyix-agent-reader/.default
+  # Database principal UUID from principals.id for the mapped app:<application-id> subject.
+  # This is not the Container App managed identity principalId.
+  AGENT_PRINCIPAL_ID=11111111-1111-4111-8111-111111111111
+  FEATURE_AGENT_READS_ENABLED=false
+  AGENT_FEATURE_MODEL_FREE_ENABLED=true
+  AGENT_FEATURE_FOUNDRY_ENABLED=false
+  AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED=false
+  AGENT_GATEWAY_MODE=fake
   APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=<key>;IngestionEndpoint=https://<region>.in.applicationinsights.azure.com/;ApplicationId=<app-id>
   SERVER_DATABASE_URL=postgres://...
+  AGENT_CONTROL_PLANE_DSN=postgresql://agent_control_worker:<password>@<server>:5432/zzyix?sslmode=verify-full
   # Optional: override auto-resolved CORS origin
   # SERVER_CORS_ORIGIN=https://client.example.com
   EOF
@@ -266,6 +300,7 @@ main() {
   require_value "AZURE_LOCATION"
   require_value "SERVER_CONTAINER_APP_NAME"
   require_value "CLIENT_CONTAINER_APP_NAME"
+  require_value "AGENT_WORKER_CONTAINER_APP_NAME"
   require_value "MIGRATION_JOB_NAME"
   require_value "CANONICAL_INITIALIZATION_JOB_NAME"
   require_value "AUTH_AUTHORITY"
@@ -279,9 +314,20 @@ main() {
   require_value "AUTH_REQUIRED_SCOPE"
   require_value "AUTH_JWKS_URI"
   require_value "AUTH_ACCEPTED_ALGORITHM"
+  require_value "AUTH_AGENT_API_AUDIENCE"
+  require_value "AUTH_AGENT_REQUIRED_ROLE"
+  require_value "AGENT_SERVER_TOKEN_SCOPE"
+  require_value "AGENT_PRINCIPAL_ID"
+  require_value "FEATURE_AGENT_READS_ENABLED"
+  require_value "AGENT_FEATURE_MODEL_FREE_ENABLED"
+  require_value "AGENT_FEATURE_FOUNDRY_ENABLED"
+  require_value "AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED"
+  require_value "AGENT_GATEWAY_MODE"
   require_value "APPLICATIONINSIGHTS_CONNECTION_STRING"
   require_value "SERVER_DATABASE_URL"
+  require_value "AGENT_CONTROL_PLANE_DSN"
   warn_if_non_explicit_sslmode "${SERVER_DATABASE_URL}"
+  warn_if_non_explicit_sslmode "${AGENT_CONTROL_PLANE_DSN}"
 
   create_environment_if_missing "${repo}" "${environment_name}"
 
@@ -301,6 +347,8 @@ main() {
     "SERVER_CONTAINER_APP_NAME" "${SERVER_CONTAINER_APP_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
     "CLIENT_CONTAINER_APP_NAME" "${CLIENT_CONTAINER_APP_NAME}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AGENT_WORKER_CONTAINER_APP_NAME" "${AGENT_WORKER_CONTAINER_APP_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
     "MIGRATION_JOB_NAME" "${MIGRATION_JOB_NAME}"
   set_environment_variable "${repo}" "${environment_name}" \
@@ -327,8 +375,54 @@ main() {
     "AUTH_JWKS_URI" "${AUTH_JWKS_URI}"
   set_environment_variable "${repo}" "${environment_name}" \
     "AUTH_ACCEPTED_ALGORITHM" "${AUTH_ACCEPTED_ALGORITHM}"
+  if [[ -n "${AUTH_AGENT_TRUSTED_ISSUER:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AUTH_AGENT_TRUSTED_ISSUER" "${AUTH_AGENT_TRUSTED_ISSUER}"
+  fi
+  if [[ -n "${AUTH_AGENT_JWKS_URI:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AUTH_AGENT_JWKS_URI" "${AUTH_AGENT_JWKS_URI}"
+  fi
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_AGENT_API_AUDIENCE" "${AUTH_AGENT_API_AUDIENCE}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AUTH_AGENT_REQUIRED_ROLE" "${AUTH_AGENT_REQUIRED_ROLE}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AGENT_SERVER_TOKEN_SCOPE" "${AGENT_SERVER_TOKEN_SCOPE}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AGENT_PRINCIPAL_ID" "${AGENT_PRINCIPAL_ID}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "FEATURE_AGENT_READS_ENABLED" "${FEATURE_AGENT_READS_ENABLED}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AGENT_FEATURE_MODEL_FREE_ENABLED" "${AGENT_FEATURE_MODEL_FREE_ENABLED}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AGENT_FEATURE_FOUNDRY_ENABLED" "${AGENT_FEATURE_FOUNDRY_ENABLED}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED" "${AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED}"
+  set_environment_variable "${repo}" "${environment_name}" \
+    "AGENT_GATEWAY_MODE" "${AGENT_GATEWAY_MODE}"
   set_environment_variable "${repo}" "${environment_name}" \
     "APPLICATIONINSIGHTS_CONNECTION_STRING" "${APPLICATIONINSIGHTS_CONNECTION_STRING}"
+  if [[ -n "${AGENT_WORKER_MIN_REPLICAS:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AGENT_WORKER_MIN_REPLICAS" "${AGENT_WORKER_MIN_REPLICAS}"
+  fi
+  if [[ -n "${AGENT_WORKER_MAX_REPLICAS:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AGENT_WORKER_MAX_REPLICAS" "${AGENT_WORKER_MAX_REPLICAS}"
+  fi
+  if [[ -n "${AGENT_LEASE_TTL_SECONDS:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AGENT_LEASE_TTL_SECONDS" "${AGENT_LEASE_TTL_SECONDS}"
+  fi
+  if [[ -n "${AGENT_POLL_INTERVAL_SECONDS:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AGENT_POLL_INTERVAL_SECONDS" "${AGENT_POLL_INTERVAL_SECONDS}"
+  fi
+  if [[ -n "${AGENT_TOOL_TIMEOUT_SECONDS:-}" ]]; then
+    set_environment_variable "${repo}" "${environment_name}" \
+      "AGENT_TOOL_TIMEOUT_SECONDS" "${AGENT_TOOL_TIMEOUT_SECONDS}"
+  fi
   if [[ -n "${OTEL_SAMPLING_RATIO:-}" ]]; then
     set_environment_variable "${repo}" "${environment_name}" \
       "OTEL_SAMPLING_RATIO" "${OTEL_SAMPLING_RATIO}"
@@ -340,6 +434,8 @@ main() {
 
   set_environment_secret "${repo}" "${environment_name}" "SERVER_DATABASE_URL" \
     "${SERVER_DATABASE_URL}"
+  set_environment_secret "${repo}" "${environment_name}" "AGENT_CONTROL_PLANE_DSN" \
+    "${AGENT_CONTROL_PLANE_DSN}"
 
   if [[ -n "${AZURE_GHCR_USERNAME:-}" ]]; then
     set_environment_secret "${repo}" "${environment_name}" \

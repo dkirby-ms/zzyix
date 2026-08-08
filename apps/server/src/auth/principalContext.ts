@@ -113,3 +113,32 @@ export const resolveDeletionPendingPrincipal = async (
     tokenExpiresAt: identity.expiresAt,
   }
 }
+
+export const resolveAgentPrincipal = async (
+  identity: VerifiedExternalIdentity,
+): Promise<PrincipalContext> => {
+  if (identity.kind !== 'app_agent') {
+    throw new AuthenticationError('invalid_token')
+  }
+
+  const { db } = getDatabaseBundle()
+  const [principal] = await db
+    .select({ principalId: principals.id, status: principals.status, kind: principals.kind })
+    .from(externalPrincipalMappings)
+    .innerJoin(principals, eq(externalPrincipalMappings.principalId, principals.id))
+    .where(and(
+      eq(externalPrincipalMappings.providerNamespace, identity.issuer),
+      eq(externalPrincipalMappings.externalSubject, identity.subject),
+    ))
+    .limit(1)
+
+  if (!principal || principal.kind !== 'agent' || principal.status !== 'active') {
+    throw new AuthenticationError('principal_inactive')
+  }
+
+  return {
+    principalId: principal.principalId,
+    status: 'active',
+    tokenExpiresAt: identity.expiresAt,
+  }
+}

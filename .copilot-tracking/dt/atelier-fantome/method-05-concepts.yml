@@ -1,0 +1,50 @@
+concepts:
+  - name: Quiet Witness
+    description: >-
+      The resident acknowledges artists through subtle nonverbal marks and nearby presence,
+      letting discovery happen without direct explanation.
+    file: quiet-witness.png
+    prompt: >-
+      Create a simple stick-figure sketch showing an artist at a tile patch while a small
+      mysterious glyph appears nearby. Minimal lines, plain white background, black-and-white
+      line art, no shading, no detail.
+
+  - name: Respectful Distance
+    description: >-
+      The resident responds to disinterest by moving away and reducing attention while preserving
+      artist agency and comfort.
+    file: respectful-distance.png
+    prompt: >-
+      Create a simple stick-figure sketch showing an artist turning away from a glyph while the
+      resident figure moves to a distant patch. Minimal lines, plain white background,
+      black-and-white line art, no shading, no detail.
+
+  - name: Social Meaning
+    description: >-
+      Resident marks become shared artifacts that artists can comment on, tag, and discuss with
+      each other to co-create meaning.
+    file: social-meaning.png
+    prompt: >-
+      Create a simple stick-figure sketch showing two artists near a resident glyph, one adding
+      a small tag and both exchanging comments. Minimal lines, plain white background,
+      black-and-white line art, no shading, no detail.
+
+  - name: Historic Echoes
+    description: >-
+      On rare moments, the resident adds permanent mosaic scenes inspired by art history,
+      presenting interpretation rather than exact reproduction.
+    file: historic-echoes.png
+    prompt: >-
+      Create a simple stick-figure sketch showing artists observing a larger permanent mosaic
+      section inspired by an ancient work. Minimal lines, plain white background,
+      black-and-white line art, no shading, no detail.
+
+  - name: Mythic Temperament
+    description: >-
+      The resident occasionally expresses dramatic mood through symbolic glyph behavior while
+      remaining non-punitive and non-intrusive.
+    file: mythic-temperament.png
+    prompt: >-
+      Create a simple stick-figure sketch showing a resident figure leaving a bold angular glyph
+      at a distance while an artist watches from their patch. Minimal lines, plain white
+      background, black-and-white line art, no shading, no detail.

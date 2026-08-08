@@ -15,6 +15,8 @@ module.exports = {
         'db',
         'jobs',
         'api',
+        'agent',
+        'agent-worker',
         'deps',
         'deps-dev',
         'deps-client',
@@ -24,7 +26,8 @@ module.exports = {
         'infra',
         'docs',
         'scripts',
-        'release'
+        'release',
+        'mosaic'
       ]
     ],
     'subject-case': [0]

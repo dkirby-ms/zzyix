@@ -15,6 +15,6 @@ param postgresAdminLogin = 'pgadmin'
 //   param postgresAdminPassword = getSecret('<subscriptionId>', '<rgName>', '<vaultName>', 'postgresAdminPassword')
 // Alternatively, pass it via CLI and omit this line from the params file:
 //   az deployment group create ... --parameters postgresAdminPassword='<secret>'
-// The placeholder below will fail the @minLength(8) validation check if deployed as-is.
-param postgresAdminPassword = 'REPLACE_ME'
+// The placeholder below is not a real secret and must be replaced before deployment.
+param postgresAdminPassword = readEnvironmentVariable('POSTGRES_ADMIN_PASSWORD', 'REPLACE_ME')
 // Replace this placeholder before deployment.

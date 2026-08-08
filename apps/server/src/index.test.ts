@@ -1,12 +1,33 @@
+import { createServer } from 'node:http'
+import express from 'express'
 import { describe, expect, it } from 'vitest'
 import {
   buildClientUpgradeRequiredSocketError,
   isOriginAllowed,
   isSupportedCanonicalConnectionAuth,
+  registerAgentReadRoutes,
   resolveCorsOrigin,
 } from './index.js'
 
 describe('authoritative handler semantics', () => {
+  it('registers the worker read router before the first canonical discovery request', async () => {
+    const targetApp = express()
+    registerAgentReadRoutes(targetApp, true)
+    const server = createServer(targetApp)
+
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Failed to bind worker route test server')
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${address.port}/internal/v1/agent/quilts/40000000-0000-4000-8000-000000000001/context`)
+      expect(response.status).toBe(401)
+      expect((await response.json()).code).toBe('authentication_required')
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    }
+  })
+
   it('rejects unsupported socket versions with the exact safe upgrade payload', () => {
     const supported = {
       token: 'token',

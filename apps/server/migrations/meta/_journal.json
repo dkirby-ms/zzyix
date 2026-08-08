@@ -78,6 +78,41 @@
       "when": 1785626954568,
       "tag": "0010_new_tile_shapes",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785632400000,
+      "tag": "0011_agent_principal_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785726000000,
+      "tag": "0012_agent_control_plane",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785733200000,
+      "tag": "0013_agent_control_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786147200000,
+      "tag": "0016_agent_control_permissions_and_queue_guards",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1786147300000,
+      "tag": "0015_patch_scoped_agent_assignments",
+      "breakpoints": true
     }
   ]
 }

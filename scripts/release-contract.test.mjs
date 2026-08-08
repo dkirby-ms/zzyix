@@ -62,6 +62,13 @@ test('CD releases queue without cancelling an in-flight migration owner', async 
   assert.match(workflow, /properties\.status/)
 })
 
+test('CD verifies the deployed worker uses the restricted database role', async () => {
+  const workflow = await readWorkflow()
+
+  assert.match(workflow, /name: Verify Agent Worker Database Role/)
+  assert.match(workflow, /az containerapp exec[\s\S]*python -m control_plane_access_verification/)
+})
+
 test('production rollout excludes legacy migration gates', async () => {
   const workflow = await readWorkflow()
   const deploymentBranches = extractServerDeploymentBranches(workflow)

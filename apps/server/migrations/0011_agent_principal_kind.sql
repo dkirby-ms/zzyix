@@ -1,0 +1,2 @@
+ALTER TABLE "principals" DROP CONSTRAINT "principals_kind_check";--> statement-breakpoint
+ALTER TABLE "principals" ADD CONSTRAINT "principals_kind_check" CHECK ("principals"."kind" in ('human', 'system', 'agent'));

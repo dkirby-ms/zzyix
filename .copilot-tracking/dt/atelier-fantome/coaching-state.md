@@ -6,11 +6,11 @@ project:
   initial_classification: "frozen"
 
 current:
-  method: 4
+  method: 5
   space: "solution"
-  phase: "convergence complete"
+  phase: "design document finalized"
 
-methods_completed: [1, 2, 3]
+methods_completed: [1, 2, 3, 4, 5]
 
 transition_log:
   - from_method: null
@@ -28,6 +28,10 @@ transition_log:
   - from_method: 3
     to_method: 4
     rationale: "The agent design document established a provisional resident direction, ready for divergent exploration of behaviors and presence models."
+    date: "2026-08-06"
+  - from_method: 4
+    to_method: 5
+    rationale: "Method 4 produced five distinct resident philosophies and a full divergent set ready for concept portfolio mapping."
     date: "2026-08-06"
 
 hint_calibration:
@@ -56,6 +60,15 @@ session_log:
   - date: "2026-08-06"
     method: 4
     summary: "Convergence complete. Clustered 15 ideas into five distinct resident philosophies with documented tensions and Method 5 readiness."
+  - date: "2026-08-06"
+    method: 5
+    summary: "Transitioned to User Concepts. Kept all five themes and mapped them to behavior tiers: baseline, frequent secondary behaviors, and rare spikes. Created concept cards and stakeholder-alignment validation targets."
+  - date: "2026-08-06"
+    method: 5
+    summary: "Completed rapid three-lens evaluation. Recommended Method 6 prototype priorities: Quiet Witness and Social Meaning, with Respectful Distance as a mandatory guardrail."
+  - date: "2026-08-06"
+    method: 5
+    summary: "Finalized the resident agent design document as the source of truth for Method 6 prototyping."
 
 artifacts:
   - path: ".copilot-tracking/dt/atelier-fantome/method-04-brainstorming-plan.md"
@@ -67,6 +80,21 @@ artifacts:
   - path: ".copilot-tracking/dt/atelier-fantome/method-04-theme-clusters.md"
     method: 4
     type: "theme-clusters"
+  - path: ".copilot-tracking/dt/atelier-fantome/method-05-concept-portfolio.md"
+    method: 5
+    type: "concept-portfolio"
+  - path: ".copilot-tracking/dt/atelier-fantome/method-05-concepts.yml"
+    method: 5
+    type: "concept-cards"
+  - path: ".copilot-tracking/dt/atelier-fantome/method-05-stakeholder-alignment.md"
+    method: 5
+    type: "stakeholder-alignment"
+  - path: ".copilot-tracking/dt/atelier-fantome/method-05-three-lens-evaluation.md"
+    method: 5
+    type: "three-lens-evaluation"
+  - path: ".copilot-tracking/dt/atelier-fantome/agent-design.md"
+    method: 5
+    type: "final-design-document"
 
 canonical_deck:
   enabled: false

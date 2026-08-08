@@ -3,6 +3,7 @@ import { exportJWK, generateKeyPair, SignJWT, type CryptoKey, type JWK } from 'j
 
 export const TEST_OIDC_AUDIENCE = 'api://zzyix-e2e'
 export const TEST_OIDC_SCOPE = 'quilt.access'
+export const TEST_OIDC_APP_ROLE = 'agent.runtime'
 
 type TestOidcEnvironment = Record<string, string | undefined>
 
@@ -17,6 +18,8 @@ export type TestOidcTokenOptions = {
   expiresInSeconds?: number
   notBeforeSeconds?: number
   scope?: string
+  roles?: string[]
+  applicationId?: string
   name?: string
   email?: string
 }
@@ -85,13 +88,17 @@ export const createTestOidcIssuer = async (
     subject,
     expiresInSeconds = 300,
     notBeforeSeconds = 0,
-    scope = TEST_OIDC_SCOPE,
+    scope,
+    roles,
+    applicationId,
     name,
     email,
   }: TestOidcTokenOptions): Promise<string> => {
     const now = Math.floor(Date.now() / 1_000)
+    const appRoles = roles ?? (applicationId ? [TEST_OIDC_APP_ROLE] : undefined)
     return new SignJWT({
-      scp: scope,
+      ...(appRoles ? { roles: appRoles } : { scp: scope ?? TEST_OIDC_SCOPE }),
+      ...(applicationId ? { azp: applicationId, appid: applicationId } : {}),
       name: resolveDisplayName(subject, name),
       ...(email ? { email } : {}),
     })

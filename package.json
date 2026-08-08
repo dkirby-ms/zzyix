@@ -45,6 +45,11 @@
     "test:e2e:delegated": "node -e \"console.error('Delegated and moderator acceptance remains deferred and must not be treated as complete.'); process.exit(1)\"",
     "test:e2e:install": "playwright install chromium",
     "test:e2e:preflight": "node ./scripts/verify-playwright-linux-deps.mjs",
+    "verify:alexander-source": "node scripts/verify-alexander-source-provenance.mjs",
+    "preprocess:alexander-source": "node scripts/preprocess-alexander-source.mjs",
+    "test:preprocess-alexander-source": "node --test scripts/preprocess-alexander-source.test.mjs",
+    "generate:alexander-mosaic-inputs": "node scripts/generate-alexander-mosaic-inputs.mjs",
+    "test:alexander-mosaic-inputs": "node --test scripts/generate-alexander-mosaic-inputs.test.mjs",
     "test:watch:client": "npm run test:watch --workspace=apps/client",
     "test:watch:server": "npm run test:watch --workspace=apps/server",
     "release": "semantic-release --extends ./.releaserc.cjs"
@@ -59,6 +64,7 @@
     "@semantic-release/github": "^12.0.9",
     "@semantic-release/release-notes-generator": "^14.1.0",
     "conventional-changelog-conventionalcommits": "^10.2.1",
-    "semantic-release": "^25.0.8"
+    "semantic-release": "^25.0.8",
+    "sharp": "^0.35.3"
   }
 }
