@@ -13,3 +13,4 @@ infra/bicep/host.bicepparam
 apps/client/public/auth-config.json
 infra/bicep/main.json
 **/__pycache__/**
+infra/bicep/host.main copy.bicepparam
