@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import express from 'express'
+import rateLimit from 'express-rate-limit'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHttpAuth } from '../auth/httpAuth.js'
 import { AuthenticationError } from '../auth/errors.js'
@@ -52,12 +53,19 @@ const resolvePrincipal = vi.fn(async (identity: VerifiedExternalIdentity) => {
   return { principalId: PRINCIPAL_ID, status: 'active' as const, tokenExpiresAt: identity.expiresAt }
 })
 
+const testReadRateLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
 const app = express()
 app.use((_req, res, next) => {
   res.setHeader('x-request-id', 'agent-read-auth-test-request')
   next()
 })
-app.use('/internal/v1/agent', createHttpAuth(verifyToken, resolvePrincipal), createAgentReadRouter({
+app.use('/internal/v1/agent', testReadRateLimiter, createHttpAuth(verifyToken, resolvePrincipal), createAgentReadRouter({
   loadQuiltContext,
   loadPatchSnapshot,
   loadPatchOperationsAfter,
