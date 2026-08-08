@@ -10,6 +10,7 @@ from hashlib import sha256
 from typing import Any, Protocol
 from urllib.request import Request, urlopen
 
+from identity import AccessTokenProvider
 from telemetry import emit_event
 
 
@@ -74,13 +75,13 @@ class GovernedGateway(ModelGateway):
         limits: GatewayLimits,
         model: str = "gpt-4.1-mini",
         foundry_endpoint: str | None = None,
-        foundry_api_key: str | None = None,
+        token_provider: AccessTokenProvider | None = None,
     ) -> None:
         self._mode = mode
         self._limits = limits
         self._model = model
         self._foundry_endpoint = foundry_endpoint
-        self._foundry_api_key = foundry_api_key
+        self._token_provider = token_provider
         self._active = threading.BoundedSemaphore(value=max(1, limits.max_concurrency))
         self._call_window: deque[float] = deque()
         self._window_lock = threading.Lock()
@@ -145,7 +146,7 @@ class GovernedGateway(ModelGateway):
         return _fallback_response(request, "provider_failure")
 
     def _execute_provider_call(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if not self._foundry_endpoint or not self._foundry_api_key:
+        if not self._foundry_endpoint or self._token_provider is None:
             raise RuntimeError("foundry configuration missing")
 
         body = json.dumps(payload).encode("utf-8")
@@ -154,7 +155,7 @@ class GovernedGateway(ModelGateway):
             method="POST",
             headers={
                 "Content-Type": "application/json",
-                "api-key": self._foundry_api_key,
+                "Authorization": f"Bearer {self._token_provider.get_token()}",
             },
             data=body,
         )

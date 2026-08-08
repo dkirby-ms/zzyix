@@ -4,6 +4,8 @@ import {
   loadPatchDeliveryOperationsAfter,
   loadPatchDeliverySnapshot,
   loadQuiltDeliveryContext,
+  isAgentAssignedPatch,
+  isAgentAssignedQuilt,
 } from '../db/index.js'
 import { ResourceNotFoundError } from '../db/repository.js'
 import { getPrincipalContext, sendResourceNotFound, type AuthenticatedRequest } from '../auth/httpAuth.js'
@@ -13,11 +15,16 @@ type AgentReadDependencies = {
   loadQuiltContext: typeof loadQuiltDeliveryContext
   loadPatchSnapshot: typeof loadPatchDeliverySnapshot
   loadPatchOperationsAfter: typeof loadPatchDeliveryOperationsAfter
+  isAgentAssignedPatch: (principalId: string, patchId: string) => Promise<boolean>
+  isAgentAssignedQuilt: (principalId: string, quiltId: string) => Promise<boolean>
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const MAX_REPLAY_LIMIT = 500
 const DEFAULT_REPLAY_LIMIT = 200
+const MAX_CONTEXT_PATCHES = 256
+const MAX_RESPONSE_BYTES = 256 * 1024
+const MAX_SNAPSHOT_TILES = 2_000
 
 const parsePositiveInt = (value: string | undefined): number | null => {
   if (!value) {
@@ -53,6 +60,23 @@ const sendInvalidRequest = (response: Response): void => {
   })
 }
 
+const sendPayloadTooLarge = (response: Response): void => {
+  response.status(413).json({
+    code: 'payload_too_large',
+    message: 'The requested worker payload exceeds the configured limit.',
+    requestId: requestIdFrom(response),
+  })
+}
+
+const sendBoundedJson = (response: Response, body: unknown): boolean => {
+  if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_RESPONSE_BYTES) {
+    sendPayloadTooLarge(response)
+    return false
+  }
+  response.status(200).json(body)
+  return true
+}
+
 const isSurface = (value: string | undefined): value is 'fineData' | 'aggregateData' =>
   value === undefined || value === 'fineData' || value === 'aggregateData'
 
@@ -83,6 +107,8 @@ export const createAgentReadRouter = (
     loadQuiltContext: loadQuiltDeliveryContext,
     loadPatchSnapshot: loadPatchDeliverySnapshot,
     loadPatchOperationsAfter: loadPatchDeliveryOperationsAfter,
+    isAgentAssignedPatch,
+    isAgentAssignedQuilt,
   },
 ): Router => {
   const router = Router()
@@ -97,6 +123,11 @@ export const createAgentReadRouter = (
           'agent.read.outcome': 'invalid_request',
         })
         sendInvalidRequest(response)
+        return
+      }
+
+      if (!await dependencies.isAgentAssignedQuilt(principalIdFrom(request), quiltId)) {
+        sendResourceNotFound(response, requestIdFrom(response))
         return
       }
 
@@ -119,7 +150,11 @@ export const createAgentReadRouter = (
         'agent.read.quilt_id': quiltId,
         'agent.read.patch_count': context.patches.length,
       })
-      response.status(200).json(context)
+      if (context.patches.length > MAX_CONTEXT_PATCHES) {
+        sendPayloadTooLarge(response)
+        return
+      }
+      sendBoundedJson(response, context)
     })
   })
 
@@ -146,16 +181,24 @@ export const createAgentReadRouter = (
       }
 
       await withNotFoundBoundary(response, async () => {
+        if (!await dependencies.isAgentAssignedPatch(principalIdFrom(request), patchId)) {
+          sendResourceNotFound(response, requestIdFrom(response))
+          return
+        }
         const snapshot = await dependencies.loadPatchSnapshot(patchId, {
           principalId: principalIdFrom(request),
           ...(surface ? { surface } : {}),
         })
+        if (snapshot.tiles.length > MAX_SNAPSHOT_TILES) {
+          sendPayloadTooLarge(response)
+          return
+        }
         annotateWorkerReadTelemetry({
           'agent.read.outcome': 'ok',
           'agent.read.patch_id': patchId,
           ...(surface ? { 'agent.read.surface': surface } : {}),
         })
-        response.status(200).json(snapshot)
+        sendBoundedJson(response, snapshot)
       })
     }).catch(next)
   })
@@ -185,10 +228,15 @@ export const createAgentReadRouter = (
       }
 
       await withNotFoundBoundary(response, async () => {
+        if (!await dependencies.isAgentAssignedPatch(principalIdFrom(request), patchId)) {
+          sendResourceNotFound(response, requestIdFrom(response))
+          return
+        }
         const operations = await dependencies.loadPatchOperationsAfter(
           patchId,
           afterOpSeq,
           principalIdFrom(request),
+          limit,
         )
         const boundedOperations = operations.slice(0, limit)
         annotateWorkerReadTelemetry({
@@ -198,9 +246,7 @@ export const createAgentReadRouter = (
           'agent.read.limit': limit,
           'agent.read.operation_count': boundedOperations.length,
         })
-        response.status(200).json({
-          operations: boundedOperations,
-        })
+        sendBoundedJson(response, { operations: boundedOperations })
       })
     }).catch(next)
   })

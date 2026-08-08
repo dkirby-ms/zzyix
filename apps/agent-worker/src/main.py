@@ -4,8 +4,9 @@ import logging
 import os
 import sys
 
-from control_plane import InMemoryControlPlane, PostgresControlPlane
+from control_plane import PostgresControlPlane
 from gateway import FakeGateway, GatewayLimits, GovernedGateway
+from identity import ManagedIdentityTokenProvider
 from supervisor import AgentSupervisor, load_config_from_env
 from telemetry import emit_event
 from tools import AgentReadTools
@@ -39,14 +40,18 @@ def build_supervisor() -> AgentSupervisor:
     config = load_config_from_env()
 
     control_plane_dsn = os.getenv("AGENT_CONTROL_PLANE_DSN")
-    if control_plane_dsn:
-        control_plane = PostgresControlPlane(control_plane_dsn)
-    else:
-        control_plane = InMemoryControlPlane()
+    if not control_plane_dsn:
+        raise ValueError("AGENT_CONTROL_PLANE_DSN is required; durable control plane cannot be disabled")
+    control_plane = PostgresControlPlane(control_plane_dsn)
+
+    server_token_scope = os.getenv("AGENT_SERVER_TOKEN_SCOPE")
+    if not server_token_scope:
+        raise ValueError("AGENT_SERVER_TOKEN_SCOPE is required for managed identity server reads")
+    token_provider = ManagedIdentityTokenProvider(server_token_scope)
 
     tools = AgentReadTools(
         base_url=os.getenv("AGENT_SERVER_BASE_URL", "http://127.0.0.1:3001"),
-        bearer_token=os.getenv("AGENT_SERVER_BEARER_TOKEN"),
+        token_provider=token_provider,
         timeout_seconds=float(os.getenv("AGENT_TOOL_TIMEOUT_SECONDS", "5")),
     )
 
@@ -54,6 +59,9 @@ def build_supervisor() -> AgentSupervisor:
     model_free_enabled = parse_bool_flag("AGENT_FEATURE_MODEL_FREE_ENABLED", True)
     foundry_enabled = parse_bool_flag("AGENT_FEATURE_FOUNDRY_ENABLED", False)
     structured_proposals_enabled = parse_bool_flag("AGENT_FEATURE_STRUCTURED_PROPOSALS_ENABLED", False)
+    foundry_token_scope = os.getenv("AGENT_FOUNDRY_TOKEN_SCOPE")
+    if foundry_enabled and gateway_mode == "foundry" and not foundry_token_scope:
+        raise ValueError("AGENT_FOUNDRY_TOKEN_SCOPE is required for managed identity Foundry access")
     emit_event(
         "worker_feature_gates",
         model_free_enabled=model_free_enabled,
@@ -80,7 +88,7 @@ def build_supervisor() -> AgentSupervisor:
             limits=limits,
             model=os.getenv("AGENT_GATEWAY_MODEL", "gpt-4.1-mini"),
             foundry_endpoint=os.getenv("AGENT_FOUNDRY_ENDPOINT"),
-            foundry_api_key=os.getenv("AGENT_FOUNDRY_API_KEY"),
+            token_provider=ManagedIdentityTokenProvider(foundry_token_scope or server_token_scope),
         )
 
     workflow = GraphWorkflow(
@@ -89,6 +97,7 @@ def build_supervisor() -> AgentSupervisor:
         policy_version=os.getenv("AGENT_POLICY_VERSION", "v1"),
         framework_version=os.getenv("AGENT_FRAMEWORK_VERSION", "mvp"),
         structured_proposals_enabled=structured_proposals_enabled,
+        allow_test_runtime=False,
     )
 
     return AgentSupervisor(config=config, control_plane=control_plane, workflow=workflow)

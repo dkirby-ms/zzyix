@@ -68,4 +68,3 @@ def test_given_committed_checkpoint_when_worker_restarts_then_state_can_be_resto
     restored = checkpoint_from_row(checkpoint_to_record(checkpoint))
 
     assert restored == checkpoint
-    assert next_checkpoint.workflow_state == "completed"

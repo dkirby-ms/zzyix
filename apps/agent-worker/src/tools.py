@@ -8,6 +8,7 @@ from typing import Any, Literal
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from identity import AccessTokenProvider
 from telemetry import emit_event
 
 
@@ -35,9 +36,9 @@ class PatchEventsInput:
 
 
 class AgentReadTools:
-    def __init__(self, base_url: str, bearer_token: str | None = None, timeout_seconds: float = 5.0) -> None:
+    def __init__(self, base_url: str, token_provider: AccessTokenProvider | None = None, timeout_seconds: float = 5.0) -> None:
         self._base_url = base_url.rstrip("/")
-        self._bearer_token = bearer_token
+        self._token_provider = token_provider
         self._timeout_seconds = timeout_seconds
 
     def get_quilt_context(self, request: QuiltContextInput) -> dict[str, Any]:
@@ -94,8 +95,8 @@ class AgentReadTools:
 
     def _read_json(self, path: str, tool_name: str) -> Any:
         headers = {"Accept": "application/json"}
-        if self._bearer_token:
-            headers["Authorization"] = f"Bearer {self._bearer_token}"
+        if self._token_provider is not None:
+            headers["Authorization"] = f"Bearer {self._token_provider.get_token()}"
 
         request = Request(
             url=f"{self._base_url}/internal/v1/agent{path}",

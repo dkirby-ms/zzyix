@@ -85,7 +85,7 @@ Sequential because control-plane assignments and leases depend on the final agen
 * [x] Step 2.3: Validate control-plane phase changes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 157-164)
 
-### [ ] Implementation Phase 3: Python Worker MVP
+### [x] Implementation Phase 3: Python Worker MVP
 
 <!-- parallelizable: false -->
 
@@ -95,10 +95,11 @@ Sequential because the worker needs the app-only server read route and control-p
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 170-204)
 * [x] Step 3.2: Add governed model gateway integration.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 205-231)
-* [ ] Step 3.3: Validate worker phase changes.
+* [x] Step 3.3: Validate worker phase changes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 232-239)
+  * Note: Syntax and container validation passed; the required pytest command remains blocked because the host lacks pytest tooling.
 
-### [x] Implementation Phase 4: Deployment, Telemetry, and Feature Gates
+### [ ] Implementation Phase 4: Deployment, Telemetry, and Feature Gates
 
 <!-- parallelizable: false -->
 
@@ -110,6 +111,7 @@ Sequential because deployment must consume the worker image, managed identity re
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 272-296)
 * [x] Step 4.3: Validate deployment phase changes.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 297-304)
+  * Note: Template, parameter, worker syntax, and Docker validation passed; Entra role assignment, Foundry RBAC, and server-side environment wiring remain deployment-specific blockers.
 
 ### [ ] Implementation Phase 5: End-to-End Validation and Activation
 
@@ -117,10 +119,12 @@ Sequential because deployment must consume the worker image, managed identity re
 
 Sequential final validation because it verifies behavior across server auth, PostgreSQL leases, worker recovery, infrastructure, telemetry, and e2e fixtures.
 
-* [x] Step 5.1: Add multi-replica and recovery tests.
+* [ ] Step 5.1: Add multi-replica and recovery tests.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 310-336)
-* [x] Step 5.2: Run full project validation.
+  * Note: In-memory and control-plane recovery coverage passed; app-token route coverage is now present through `agentReads.auth` tests and a live startup-registered route integration test; skip-gated PostgreSQL `PostgresControlPlane` contention and checkpoint resume coverage is present; real two-process worker restart evidence remains.
+* [ ] Step 5.2: Run full project validation.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 337-348)
+  * Note: Server tests/build, worker compileall, Docker build, and focused reconnect Playwright validation passed; worker pytest remains blocked because `pytest` is not installed in the host Python environment and local venv creation is unavailable.
 * [x] Step 5.3: Fix minor validation issues.
   * Details: .copilot-tracking/details/2026-08-07/fantome-resident-agent-implementation-details.md (Lines 349-352)
 * [x] Step 5.4: Report blocking issues.

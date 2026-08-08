@@ -46,6 +46,25 @@ Gaps and differences identified between research findings and the implementation
   * Plan specifies: Run `python -m pytest apps/agent-worker/tests` during Phase 3 validation.
   * Implementation differs: Worker tests were authored, but execution is blocked because the host lacks `python` alias and `pytest` tooling.
   * Rationale: Proceeded with code implementation and alternate compile/docker validation to maintain phase momentum.
+* DD-06: Phase 1 required post-review repair before activation evidence was valid.
+  * Plan specifies: Worker routes are available after server initialization with bounded, assignment-scoped reads.
+  * Implementation differs: The initial route registration was lazy and accepted broader read inputs than the review allowed.
+  * Rationale: Startup registration, assignment checks, and response bounds were corrected and covered by focused tests.
+
+* DD-07: Phase 3 recovery and framework-runtime rework was completed after implementation review.
+  * Plan specifies: A durable worker workflow using Microsoft Agent Framework with checkpoint recovery and lease-loss stop behavior.
+  * Implementation differs: The worker now persists checkpoints at graph boundaries, reclaims stale triggers, renews leases in a background thread, gates processing before trigger claim, and executes a `WorkflowBuilder` graph through the verified 1.13.0 API. The local graph is retained only for explicitly enabled tests.
+  * Rationale: The review identified that the initial dictionary loop, terminal trigger failure on lease loss, and completion-only checkpoint persistence could not satisfy restart safety.
+
+* DD-08: Phase 4 and Phase 5 remain partial after review rework.
+  * Plan specifies: Deployment and end-to-end evidence sufficient for activation.
+  * Implementation differs: Bicep, container, in-memory recovery, and control-plane checks pass, but deployment-specific Entra/RBAC wiring and a real two-process PostgreSQL worker restart fixture remain unavailable.
+  * Rationale: Those checks require target Azure identifiers and process orchestration not present in the current local environment.
+
+* DD-09: Phase 5 test evidence expanded but cannot be marked complete.
+  * Plan specifies: Multi-replica/recovery validation and full command execution for activation readiness.
+  * Implementation differs: Added app-only route-auth tests, a live app-role request through the startup-registered worker route, and skip-gated PostgreSQL `PostgresControlPlane` contention and checkpoint resume coverage. Reran server/build/worker syntax/reconnect validations successfully, but `python3 -m pytest apps/agent-worker/tests` remains blocked due to missing `pytest`, the new PostgreSQL worker test needs `AGENT_WORKER_POSTGRES_TEST_DSN`, and no two-process worker restart fixture is in place yet.
+  * Rationale: Local host Python tooling lacks pytest and worker-process orchestration remains follow-on scope.
 
 ## Implementation Paths Considered
 
@@ -110,6 +129,12 @@ Items identified during planning that fall outside current scope.
 * WI-09: Confirm deployment activation prerequisites - Verify ACA internal ingress, restricted PostgreSQL grants, Entra app-role topology, and production operating limits before enabling worker gates. (priority: high, effort: medium)
   * Source: Phase 4 deployment implementation.
   * Dependency: Required before production activation.
-* WI-10: Add worker restart e2e fixture - Exercise a real worker process restart and checkpoint recovery in the multi-replica test environment. (priority: high, effort: medium)
+* WI-10: Add worker restart e2e fixture - Exercise a real worker process restart and checkpoint recovery in the multi-replica test environment. PostgreSQL control-plane contention and same-run checkpoint resume now have skip-gated worker test coverage, but process kill/restart evidence remains outstanding. (priority: high, effort: medium)
   * Source: Phase 5 validation.
-  * Dependency: Requires Python test tooling and worker process orchestration.
+  * Dependency: Requires Python test tooling, `AGENT_WORKER_POSTGRES_TEST_DSN`, and worker process orchestration.
+* WI-11: Run the complete worker pytest suite - Install the repository's Python test tooling and execute `python -m pytest apps/agent-worker/tests`. (priority: high, effort: low)
+  * Source: Phase 3 validation.
+  * Dependency: Host or CI Python environment with pytest available.
+* WI-12: Add two-process worker recovery fixture - Race two worker processes against PostgreSQL, issue app-only tokens, kill the first worker after checkpoint persistence, and verify same-run resume plus route authorization. The local OIDC issuer can now issue app-role tokens and route authorization has live integration coverage. (priority: critical, effort: high)
+  * Source: Phase 5 validation and implementation review.
+  * Dependency: PostgreSQL test environment, worker process orchestration, and runnable worker pytest tooling.

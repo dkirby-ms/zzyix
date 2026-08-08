@@ -30,9 +30,31 @@ param agentServerBaseUrl string = 'http://zzyix-server'
 @description('Pre-provisioned principal identifier for the worker runtime.')
 param agentPrincipalId string = '11111111-1111-4111-8111-111111111111'
 
-@description('Optional restricted PostgreSQL DSN for the worker control-plane schema.')
+@description('Restricted PostgreSQL DSN for the durable worker control-plane schema.')
 @secure()
-param agentControlPlaneDsn string?
+@minLength(1)
+param agentControlPlaneDsn string
+
+@description('OAuth scope used by the worker managed identity for server app-only reads.')
+@minLength(1)
+param agentServerTokenScope string
+
+@description('Issuer configured for worker app-only token validation.')
+@minLength(1)
+param agentAuthTrustedIssuer string
+
+@description('Audience configured for worker app-only token validation.')
+@minLength(1)
+param agentAuthApiAudience string
+
+@description('Application role required for worker app-only tokens.')
+@allowed([
+  'agent.runtime'
+])
+param agentAuthRequiredRole string = 'agent.runtime'
+
+@description('Enables the worker server-read runtime gate.')
+param agentFeatureServerReadsEnabled bool = false
 
 @description('Gateway mode for worker model calls.')
 @allowed([
@@ -51,18 +73,20 @@ param agentFeatureStructuredProposalsEnabled bool = false
 param agentFeatureModelFreeEnabled bool = true
 
 @description('PostgreSQL schema exposed to the restricted worker control-plane role.')
-param agentControlPlaneSchema string = 'agent_control_plane'
+@allowed([
+  'agent_control'
+])
+param agentControlPlaneSchema string = 'agent_control'
 
 @description('Optional Foundry endpoint for worker model calls.')
 param agentFoundryEndpoint string?
 
-@description('Optional Foundry API key for worker model calls.')
-@secure()
-param agentFoundryApiKey string?
+@description('OAuth scope used by the worker managed identity for Foundry provider calls.')
+param agentFoundryTokenScope string?
 
 @description('Minimum replica count for the worker container app.')
-@minValue(0)
-param agentWorkerMinReplicas int = 0
+@minValue(1)
+param agentWorkerMinReplicas int = 1
 
 @description('Maximum replica count for the worker container app.')
 @minValue(1)
@@ -143,13 +167,18 @@ module agentWorker 'modules/agent-worker.bicep' = {
     agentServerBaseUrl: agentServerBaseUrl
     agentPrincipalId: agentPrincipalId
     agentControlPlaneDsn: agentControlPlaneDsn
+    agentServerTokenScope: agentServerTokenScope
+    agentAuthTrustedIssuer: agentAuthTrustedIssuer
+    agentAuthApiAudience: agentAuthApiAudience
+    agentAuthRequiredRole: agentAuthRequiredRole
+    agentFeatureServerReadsEnabled: agentFeatureServerReadsEnabled
     agentGatewayMode: agentGatewayMode
     agentFeatureFoundryEnabled: agentFeatureFoundryEnabled
     agentFeatureStructuredProposalsEnabled: agentFeatureStructuredProposalsEnabled
     agentFeatureModelFreeEnabled: agentFeatureModelFreeEnabled
     agentControlPlaneSchema: agentControlPlaneSchema
     agentFoundryEndpoint: agentFoundryEndpoint
-    agentFoundryApiKey: agentFoundryApiKey
+    agentFoundryTokenScope: agentFoundryTokenScope
     minReplicas: agentWorkerMinReplicas
     maxReplicas: agentWorkerMaxReplicas
     leaseTtlSeconds: agentLeaseTtlSeconds

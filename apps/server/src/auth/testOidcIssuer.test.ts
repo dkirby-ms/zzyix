@@ -2,6 +2,7 @@ import { createRemoteJWKSet, decodeJwt, decodeProtectedHeader, jwtVerify } from 
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createTestOidcIssuer,
+  TEST_OIDC_APP_ROLE,
   TEST_OIDC_AUDIENCE,
   TEST_OIDC_SCOPE,
   type TestOidcIssuer,
@@ -40,6 +41,23 @@ describe('local test OIDC issuer', () => {
 
     expect(decodeJwt(explicitToken)).toMatchObject({ name: 'Robert' })
     expect(decodeJwt(legacyToken)).toMatchObject({ name: 'E2E Canvas User' })
+  })
+
+  it('issues app-role access tokens for worker route validation', async () => {
+    issuer = await createTestOidcIssuer(0, testEnvironment)
+    await issuer.start()
+    const token = await issuer.issueToken({
+      subject: 'agent-worker',
+      applicationId: '00000000-0000-4000-8000-000000000123',
+    })
+
+    expect(decodeJwt(token)).toMatchObject({
+      sub: 'agent-worker',
+      azp: '00000000-0000-4000-8000-000000000123',
+      appid: '00000000-0000-4000-8000-000000000123',
+      roles: [TEST_OIDC_APP_ROLE],
+    })
+    expect(decodeJwt(token)).not.toHaveProperty('scp')
   })
 
   it('supports overlapping key rotation and expired token tests', async () => {

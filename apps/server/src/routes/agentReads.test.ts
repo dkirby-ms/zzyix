@@ -12,6 +12,8 @@ const PATCH_ID = '50000000-0000-4000-8000-000000000001'
 const loadQuiltContext = vi.fn()
 const loadPatchSnapshot = vi.fn()
 const loadPatchOperationsAfter = vi.fn()
+const isAgentAssignedPatch = vi.fn().mockResolvedValue(true)
+const isAgentAssignedQuilt = vi.fn().mockResolvedValue(true)
 
 const app = express()
 app.use((_req, res, next) => {
@@ -31,6 +33,8 @@ app.use('/internal/v1/agent', createAgentReadRouter({
   loadQuiltContext,
   loadPatchSnapshot,
   loadPatchOperationsAfter,
+  isAgentAssignedPatch,
+  isAgentAssignedQuilt,
 }))
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   response.status(500).json({
@@ -54,6 +58,8 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  isAgentAssignedPatch.mockResolvedValue(true)
+  isAgentAssignedQuilt.mockResolvedValue(true)
 })
 
 describe('agent read routes', () => {
@@ -130,7 +136,16 @@ describe('agent read routes', () => {
         { eventId: '1', opSeq: 1, opType: 'tile_placed', payload: {}, createdAt: 1, chunkIds: [] },
       ],
     })
-    expect(loadPatchOperationsAfter).toHaveBeenCalledWith(PATCH_ID, 0, PRINCIPAL_ID)
+    expect(loadPatchOperationsAfter).toHaveBeenCalledWith(PATCH_ID, 0, PRINCIPAL_ID, 1)
+  })
+
+  it('hides patches outside the active agent assignment', async () => {
+    isAgentAssignedPatch.mockResolvedValueOnce(false)
+
+    const response = await fetch(`${baseUrl}/internal/v1/agent/patches/${PATCH_ID}/events?afterOpSeq=0`)
+
+    expect(response.status).toBe(404)
+    expect(loadPatchOperationsAfter).not.toHaveBeenCalled()
   })
 
   it('rejects replay requests with out-of-range limits', async () => {

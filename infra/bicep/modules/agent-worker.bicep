@@ -19,9 +19,31 @@ param agentServerBaseUrl string
 @description('Pre-provisioned principal identifier for the worker runtime.')
 param agentPrincipalId string
 
-@description('Optional restricted PostgreSQL DSN for the worker control-plane schema.')
+@description('Restricted PostgreSQL DSN for the durable worker control-plane schema.')
 @secure()
-param agentControlPlaneDsn string?
+@minLength(1)
+param agentControlPlaneDsn string
+
+@description('OAuth scope used by the worker managed identity for server app-only reads.')
+@minLength(1)
+param agentServerTokenScope string
+
+@description('Issuer configured for worker app-only token validation.')
+@minLength(1)
+param agentAuthTrustedIssuer string
+
+@description('Audience configured for worker app-only token validation.')
+@minLength(1)
+param agentAuthApiAudience string
+
+@description('Application role required for worker app-only tokens.')
+@allowed([
+  'agent.runtime'
+])
+param agentAuthRequiredRole string = 'agent.runtime'
+
+@description('Enables the worker server-read runtime gate.')
+param agentFeatureServerReadsEnabled bool = false
 
 @description('Gateway mode for the worker runtime.')
 @allowed([
@@ -40,18 +62,20 @@ param agentFeatureStructuredProposalsEnabled bool = false
 param agentFeatureModelFreeEnabled bool = true
 
 @description('Name of the PostgreSQL schema accessible to the worker control-plane role.')
-param agentControlPlaneSchema string = 'agent_control_plane'
+@allowed([
+  'agent_control'
+])
+param agentControlPlaneSchema string = 'agent_control'
 
 @description('Optional Foundry endpoint for provider calls when enabled.')
 param agentFoundryEndpoint string?
 
-@description('Optional Foundry API key for provider calls when enabled.')
-@secure()
-param agentFoundryApiKey string?
+@description('OAuth scope used by the worker managed identity for Foundry provider calls.')
+param agentFoundryTokenScope string?
 
 @description('Minimum worker replicas for the container app.')
-@minValue(0)
-param minReplicas int = 0
+@minValue(1)
+param minReplicas int = 1
 
 @description('Maximum worker replicas for the container app.')
 @minValue(1)
@@ -69,20 +93,12 @@ param pollIntervalSeconds int = 1
 @minValue(1)
 param toolTimeoutSeconds int = 5
 
-var workerSecrets = concat(
-  agentControlPlaneDsn == null ? [] : [
-    {
-      name: 'agent-control-plane-dsn'
-      value: agentControlPlaneDsn ?? ''
-    }
-  ],
-  agentFoundryApiKey == null ? [] : [
-    {
-      name: 'agent-foundry-api-key'
-      value: agentFoundryApiKey ?? ''
-    }
-  ]
-)
+var workerSecrets = [
+  {
+    name: 'agent-control-plane-dsn'
+    value: agentControlPlaneDsn
+  }
+]
 
 var workerEnvironmentVariables = concat(
   [
@@ -97,6 +113,26 @@ var workerEnvironmentVariables = concat(
     {
       name: 'AGENT_PRINCIPAL_ID'
       value: agentPrincipalId
+    }
+    {
+      name: 'AGENT_SERVER_TOKEN_SCOPE'
+      value: agentServerTokenScope
+    }
+    {
+      name: 'AGENT_AUTH_TRUSTED_ISSUER'
+      value: agentAuthTrustedIssuer
+    }
+    {
+      name: 'AGENT_AUTH_API_AUDIENCE'
+      value: agentAuthApiAudience
+    }
+    {
+      name: 'AGENT_AUTH_REQUIRED_ROLE'
+      value: agentAuthRequiredRole
+    }
+    {
+      name: 'FEATURE_AGENT_READS_ENABLED'
+      value: string(agentFeatureServerReadsEnabled)
     }
     {
       name: 'AGENT_GATEWAY_MODE'
@@ -143,7 +179,7 @@ var workerEnvironmentVariables = concat(
       value: string(toolTimeoutSeconds)
     }
   ],
-  agentControlPlaneDsn == null ? [] : [
+  [
     {
       name: 'AGENT_CONTROL_PLANE_DSN'
       secretRef: 'agent-control-plane-dsn'
@@ -155,10 +191,10 @@ var workerEnvironmentVariables = concat(
       value: agentFoundryEndpoint ?? ''
     }
   ],
-  agentFoundryApiKey == null ? [] : [
+  agentFoundryTokenScope == null ? [] : [
     {
-      name: 'AGENT_FOUNDRY_API_KEY'
-      secretRef: 'agent-foundry-api-key'
+      name: 'AGENT_FOUNDRY_TOKEN_SCOPE'
+      value: agentFoundryTokenScope ?? ''
     }
   ]
 )

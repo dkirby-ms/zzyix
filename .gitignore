@@ -11,5 +11,5 @@ infra/bicep/host.main.bicepparam
 scripts/gh-vars.env
 infra/bicep/host.bicepparam
 apps/client/public/auth-config.json
-apps/agent-worker/src/__pycache__/
 infra/bicep/main.json
+**/__pycache__/**

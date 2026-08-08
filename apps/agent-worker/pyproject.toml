@@ -9,7 +9,8 @@ description = "Read-only Fantome resident-agent worker MVP"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "agent-framework>=0.1.0",
+  "agent-framework==1.13.0",
+  "azure-identity>=1.19.0,<2.0.0",
   "psycopg[binary]>=3.2.1",
 ]
 
@@ -29,6 +30,7 @@ py-modules = [
   "checkpoints",
   "control_plane",
   "gateway",
+  "identity",
   "main",
   "supervisor",
   "telemetry",

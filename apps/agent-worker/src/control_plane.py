@@ -18,6 +18,8 @@ class TriggerRecord:
     payload: dict[str, Any]
     priority: int
     created_at: datetime
+    run_id: str | None = None
+    claimed_by_agent_principal_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -30,10 +32,13 @@ class LeaseHandle:
 
 
 class ControlPlaneStore(Protocol):
-    def claim_next_trigger(self, owner_principal_id: str) -> TriggerRecord | None:
+    def claim_next_trigger(self, owner_principal_id: str, reclaim_after_seconds: int = 60) -> TriggerRecord | None:
         ...
 
     def start_run(self, quilt_id: str, agent_principal_id: str) -> str:
+        ...
+
+    def start_or_resume_run(self, quilt_id: str, agent_principal_id: str, run_id: str | None) -> str:
         ...
 
     def claim_lease(self, quilt_id: str, run_id: str, owner_principal_id: str, ttl_seconds: int) -> LeaseHandle | None:
@@ -48,7 +53,7 @@ class ControlPlaneStore(Protocol):
     def release_lease(self, quilt_id: str, run_id: str, owner_principal_id: str, generation: int) -> None:
         ...
 
-    def load_checkpoint(self, quilt_id: str, run_id: str) -> WorkerCheckpoint | None:
+    def load_checkpoint(self, quilt_id: str, run_id: str | None = None) -> WorkerCheckpoint | None:
         ...
 
     def save_checkpoint(self, checkpoint: WorkerCheckpoint, expected_version: int | None) -> WorkerCheckpoint:
@@ -66,6 +71,9 @@ class ControlPlaneStore(Protocol):
     def mark_trigger_failed(self, trigger_id: str, run_id: str) -> None:
         ...
 
+    def requeue_trigger(self, trigger_id: str, run_id: str) -> None:
+        ...
+
 
 class InMemoryControlPlane(ControlPlaneStore):
     def __init__(self) -> None:
@@ -73,6 +81,11 @@ class InMemoryControlPlane(ControlPlaneStore):
         self._leases: dict[str, LeaseHandle] = {}
         self._checkpoints: dict[tuple[str, str], WorkerCheckpoint] = {}
         self._runs: dict[str, str] = {}
+        self._run_agents: dict[str, str] = {}
+        self._assignments: dict[str, str] = {}
+
+    def assign_quilt(self, quilt_id: str, agent_principal_id: str) -> None:
+        self._assignments[quilt_id] = agent_principal_id
 
     def enqueue_trigger(self, quilt_id: str, payload: dict[str, Any], source: str = "test", deduplication_key: str = "seed", priority: int = 100) -> str:
         trigger_id = str(uuid4())
@@ -86,17 +99,32 @@ class InMemoryControlPlane(ControlPlaneStore):
             "created_at": datetime.now(timezone.utc),
             "status": "pending",
             "run_id": None,
+            "claimed_at": None,
+            "claimed_by_agent_principal_id": None,
         })
         return trigger_id
 
-    def claim_next_trigger(self, owner_principal_id: str) -> TriggerRecord | None:
-        del owner_principal_id
-        candidates = [item for item in self._triggers if item["status"] == "pending"]
+    def claim_next_trigger(self, owner_principal_id: str, reclaim_after_seconds: int = 60) -> TriggerRecord | None:
+        now = datetime.now(timezone.utc)
+        candidates = [
+            item for item in self._triggers
+            if self._assignments.get(item["quilt_id"]) == owner_principal_id
+            and (
+                item["status"] == "pending"
+                or (
+                    item["status"] == "claimed"
+                    and item["claimed_at"] is not None
+                    and item["claimed_at"] <= now - timedelta(seconds=reclaim_after_seconds)
+                )
+            )
+        ]
         if not candidates:
             return None
 
         selected = sorted(candidates, key=lambda item: (item["priority"], item["created_at"]))[0]
         selected["status"] = "claimed"
+        selected["claimed_by_agent_principal_id"] = owner_principal_id
+        selected["claimed_at"] = now
         return TriggerRecord(
             id=selected["id"],
             quilt_id=selected["quilt_id"],
@@ -105,14 +133,26 @@ class InMemoryControlPlane(ControlPlaneStore):
             payload=dict(selected["payload"]),
             priority=int(selected["priority"]),
             created_at=selected["created_at"],
+            run_id=selected["run_id"],
+            claimed_by_agent_principal_id=selected["claimed_by_agent_principal_id"],
         )
 
     def start_run(self, quilt_id: str, agent_principal_id: str) -> str:
         del quilt_id
-        del agent_principal_id
         run_id = str(uuid4())
         self._runs[run_id] = "running"
+        self._run_agents[run_id] = agent_principal_id
         return run_id
+
+    def start_or_resume_run(self, quilt_id: str, agent_principal_id: str, run_id: str | None) -> str:
+        if (
+            run_id is not None
+            and self._run_agents.get(run_id) == agent_principal_id
+            and run_id in self._runs
+        ):
+            self._runs[run_id] = "running"
+            return run_id
+        return self.start_run(quilt_id, agent_principal_id)
 
     def claim_lease(self, quilt_id: str, run_id: str, owner_principal_id: str, ttl_seconds: int) -> LeaseHandle | None:
         now = datetime.now(timezone.utc)
@@ -161,8 +201,11 @@ class InMemoryControlPlane(ControlPlaneStore):
         if self.lease_is_owned(quilt_id, run_id, owner_principal_id, generation):
             del self._leases[quilt_id]
 
-    def load_checkpoint(self, quilt_id: str, run_id: str) -> WorkerCheckpoint | None:
-        return self._checkpoints.get((quilt_id, run_id))
+    def load_checkpoint(self, quilt_id: str, run_id: str | None = None) -> WorkerCheckpoint | None:
+        if run_id is not None:
+            return self._checkpoints.get((quilt_id, run_id))
+        checkpoints = [checkpoint for (checkpoint_quilt_id, _), checkpoint in self._checkpoints.items() if checkpoint_quilt_id == quilt_id]
+        return max(checkpoints, key=lambda checkpoint: checkpoint.updated_at, default=None)
 
     def save_checkpoint(self, checkpoint: WorkerCheckpoint, expected_version: int | None) -> WorkerCheckpoint:
         key = (checkpoint.quilt_id, checkpoint.run_id)
@@ -195,6 +238,15 @@ class InMemoryControlPlane(ControlPlaneStore):
                 trigger["run_id"] = run_id
                 return
 
+    def requeue_trigger(self, trigger_id: str, run_id: str) -> None:
+        for trigger in self._triggers:
+            if trigger["id"] == trigger_id:
+                trigger["status"] = "pending"
+                trigger["run_id"] = run_id
+                trigger["claimed_at"] = None
+                trigger["claimed_by_agent_principal_id"] = None
+                return
+
 
 class PostgresControlPlane(ControlPlaneStore):
     def __init__(self, dsn: str) -> None:
@@ -207,24 +259,37 @@ class PostgresControlPlane(ControlPlaneStore):
 
         self._psycopg = psycopg
 
-    def claim_next_trigger(self, owner_principal_id: str) -> TriggerRecord | None:
-        del owner_principal_id
+    def claim_next_trigger(self, owner_principal_id: str, reclaim_after_seconds: int = 60) -> TriggerRecord | None:
         sql = """
-with candidate as (
-  select id, quilt_id, source, deduplication_key, payload, priority, created_at
-  from agent_control.trigger_queue
-  where status = 'pending'
+with settings as (
+    select claim_timeout_seconds
+    from agent_control.trigger_queue_limits
+    where singleton_key = 'default'
+), candidate as (
+    select queue.id, queue.quilt_id, queue.source, queue.deduplication_key, queue.payload,
+                 queue.priority, queue.created_at, queue.run_id, queue.claimed_by_agent_principal_id
+    from agent_control.trigger_queue as queue
+    join agent_control.agent_assignments as assignment
+        on assignment.quilt_id = queue.quilt_id
+     and assignment.agent_principal_id = %s
+     and assignment.status = 'active'
+    cross join settings
+    where queue.status = 'pending'
+         or (queue.status = 'claimed'
+                 and queue.claimed_at <= now() - make_interval(secs => greatest(%s, settings.claim_timeout_seconds)))
   order by priority asc, created_at asc
   for update skip locked
   limit 1
 )
 update agent_control.trigger_queue as queue
-set status = 'claimed', claimed_at = now()
+set status = 'claimed', claimed_at = now(), claimed_by_agent_principal_id = %s
 from candidate
 where queue.id = candidate.id
-returning candidate.id, candidate.quilt_id, candidate.source, candidate.deduplication_key, candidate.payload, candidate.priority, candidate.created_at
+returning candidate.id, candidate.quilt_id, candidate.source, candidate.deduplication_key,
+                    candidate.payload, candidate.priority, candidate.created_at, candidate.run_id,
+                    candidate.claimed_by_agent_principal_id
 """
-        row = self._fetchone(sql)
+        row = self._fetchone(sql, (owner_principal_id, reclaim_after_seconds, owner_principal_id))
         if row is None:
             return None
 
@@ -236,6 +301,8 @@ returning candidate.id, candidate.quilt_id, candidate.source, candidate.deduplic
             payload=dict(row[4]),
             priority=int(row[5]),
             created_at=row[6],
+            run_id=str(row[7]) if row[7] is not None else None,
+            claimed_by_agent_principal_id=str(row[8]) if row[8] is not None else None,
         )
 
     def start_run(self, quilt_id: str, agent_principal_id: str) -> str:
@@ -248,6 +315,24 @@ returning id
         if row is None:
             raise RuntimeError("failed to start run")
         return str(row[0])
+
+    def start_or_resume_run(self, quilt_id: str, agent_principal_id: str, run_id: str | None) -> str:
+        if run_id is not None:
+            existing = self._fetchone(
+                     """select id from agent_control.runs
+                         where id = %s and quilt_id = %s and agent_principal_id = %s
+                            and status in ('running', 'failed', 'cancelled')""",
+                (run_id, quilt_id, agent_principal_id),
+            )
+            if existing is not None:
+                self._execute(
+                    """update agent_control.runs
+                       set status = 'running', ended_at = null
+                       where id = %s""",
+                    (run_id,),
+                )
+                return str(existing[0])
+        return self.start_run(quilt_id, agent_principal_id)
 
     def claim_lease(self, quilt_id: str, run_id: str, owner_principal_id: str, ttl_seconds: int) -> LeaseHandle | None:
         sql = """
@@ -311,13 +396,16 @@ where quilt_id = %s
 """
         self._execute(sql, (quilt_id, run_id, owner_principal_id, generation))
 
-    def load_checkpoint(self, quilt_id: str, run_id: str) -> WorkerCheckpoint | None:
+    def load_checkpoint(self, quilt_id: str, run_id: str | None = None) -> WorkerCheckpoint | None:
         sql = """
 select quilt_id, run_id, checkpoint_version, workflow_state, observed_revision, pending_trigger_ids, policy_version, framework_version, updated_at
 from agent_control.checkpoints
-where quilt_id = %s and run_id = %s
+where quilt_id = %s
+    and (%s is null or run_id = %s)
+order by updated_at desc
+limit 1
 """
-        row = self._fetchone(sql, (quilt_id, run_id))
+        row = self._fetchone(sql, (quilt_id, run_id, run_id))
         if row is None:
             return None
 
@@ -416,6 +504,14 @@ where id = %s
 update agent_control.trigger_queue
 set status = 'failed', run_id = %s, resolved_at = now()
 where id = %s
+"""
+        self._execute(sql, (run_id, trigger_id))
+
+    def requeue_trigger(self, trigger_id: str, run_id: str) -> None:
+        sql = """
+update agent_control.trigger_queue
+set status = 'pending', run_id = %s, claimed_at = null, claimed_by_agent_principal_id = null
+where id = %s and status = 'claimed'
 """
         self._execute(sql, (run_id, trigger_id))
 

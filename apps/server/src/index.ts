@@ -62,6 +62,8 @@ import {
   renewQuiltPresenceLease,
   releaseQuiltPresenceLease,
   reapExpiredQuiltPresenceLeases,
+  isAgentAssignedPatch,
+  isAgentAssignedQuilt,
 } from './db/index.js'
 import { prepareDatabaseSchemaForStartup } from './db/migrate.js'
 import { ResourceNotFoundError } from './db/repository.js'
@@ -865,6 +867,20 @@ const requireHttpPrincipal = createHttpAuth(verifyAccessToken, resolveOrProvisio
 const requireDeletionPendingPrincipal = createHttpAuth(verifyAccessToken, resolveDeletionPendingPrincipal)
 const requireAgentHttpPrincipal = createHttpAuth(verifyAgentAccessToken, resolveAgentPrincipal)
 
+export const registerAgentReadRoutes = (
+  targetApp: express.Application = app,
+  enabled = isAgentReadRoutesEnabled,
+): void => {
+  if (!enabled) return
+  targetApp.use('/internal/v1/agent', authenticatedReadRateLimiter, requireAgentHttpPrincipal, createAgentReadRouter({
+    loadQuiltContext: loadQuiltDeliveryContext,
+    loadPatchSnapshot: loadPatchDeliverySnapshot,
+    loadPatchOperationsAfter: loadPatchDeliveryOperationsAfter,
+    isAgentAssignedPatch,
+    isAgentAssignedQuilt,
+  }))
+}
+
 export const ownershipRequest = (value: unknown, fields: string[]): value is Record<string, string> =>
   isObjectRecord(value)
   && typeof value.operationId === 'string'
@@ -953,6 +969,8 @@ app.use((req, res, next) => {
   next()
 })
 
+registerAgentReadRoutes()
+
 // Health check endpoint for container orchestration (ACA, K8s, etc.)
 app.get('/health', healthRateLimiter, async (_req, res) => {
   let dbStatus: 'ok' | 'error' = 'error'
@@ -1004,9 +1022,6 @@ export const sendCanonicalWorldDiscovery = async (
       return
     }
 
-    if (isAgentReadRoutesEnabled) {
-      app.use('/internal/v1/agent', authenticatedReadRateLimiter, requireAgentHttpPrincipal, createAgentReadRouter())
-    }
     descriptor = await loader()
     if (!descriptor) {
       outcome = 'unavailable'; httpStatus = 503; reasonCode = 'missing'

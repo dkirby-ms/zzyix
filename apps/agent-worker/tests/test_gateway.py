@@ -44,7 +44,7 @@ def test_given_foundry_failure_when_generating_then_returns_fallback() -> None:
         mode="foundry",
         limits=GatewayLimits(max_attempts=1),
         foundry_endpoint=None,
-        foundry_api_key=None,
+        token_provider=None,
     )
 
     response = gateway.generate(_request())

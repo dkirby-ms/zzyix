@@ -222,6 +222,31 @@ export const quiltPresenceLeases = pgTable(
   }),
 )
 
+export const agentAssignments = agentControl.table(
+  'agent_assignments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    quiltId: uuid('quilt_id')
+      .notNull()
+      .references(() => quilts.id, { onDelete: 'cascade' }),
+    agentPrincipalId: uuid('agent_principal_id')
+      .notNull()
+      .references(() => principals.id, { onDelete: 'restrict' }),
+    status: text('status').default('active').notNull(),
+    policyVersion: text('policy_version').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    quiltUnique: uniqueIndex('agent_control_agent_assignments_quilt_id_unique').on(table.quiltId),
+    agentUnique: uniqueIndex('agent_control_agent_assignments_agent_principal_id_unique').on(table.agentPrincipalId),
+    statusCheck: check(
+      'agent_control_agent_assignments_status_check',
+      sql`${table.status} in ('active', 'paused', 'disabled')`,
+    ),
+  }),
+)
+
 export const agentRuns = agentControl.table(
   'runs',
   {
@@ -283,11 +308,13 @@ export const agentQueueLimits = agentControl.table(
   {
     singletonKey: text('singleton_key').primaryKey().default('default'),
     pendingLimit: integer('pending_limit').default(500).notNull(),
+    claimTimeoutSeconds: integer('claim_timeout_seconds').default(60).notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => ({
     singletonCheck: check('agent_control_trigger_queue_limits_singleton_check', sql`${table.singletonKey} = 'default'`),
     pendingLimitCheck: check('agent_control_trigger_queue_limits_pending_limit_check', sql`${table.pendingLimit} > 0`),
+    claimTimeoutCheck: check('agent_control_trigger_queue_limits_claim_timeout_check', sql`${table.claimTimeoutSeconds} > 0`),
   }),
 )
 
@@ -305,6 +332,7 @@ export const agentTriggerQueue = agentControl.table(
     coalescingPolicyVersion: text('coalescing_policy_version').notNull(),
     payload: jsonb('payload').notNull(),
     runId: uuid('run_id').references(() => agentRuns.id, { onDelete: 'set null' }),
+    claimedByAgentPrincipalId: uuid('claimed_by_agent_principal_id').references(() => principals.id, { onDelete: 'set null' }),
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
