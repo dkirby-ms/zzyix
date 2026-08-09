@@ -43,6 +43,11 @@ Implementation in progress for the consent-scoped, client-only Fantome witness p
 
 ## Additional or Deviating Changes
 
+* Fixed a local E2E readiness race in `e2e/support/multiUser.ts`
+	* A socket could report `connected` before the initial canonical patch cache was populated, causing `placeTileAtWithAck` to reject because patch IDs or revisions were unavailable.
+	* Multi-user test readiness now requires both `connected` status and at least one retained canonical patch.
+	* The previously failing sequential-placement test passed in five consecutive isolated runs and the complete seven-test multi-user suite.
+
 * Used a client-relative Vitest invocation for the Phase 1 focused test
 	* The prescribed root-relative path is evaluated after the script changes into apps/client and cannot discover the test file
 * Used a client-relative Vitest invocation for the Phase 2 focused render tests
@@ -75,3 +80,6 @@ Implementation is code-complete through automated validation and review remediat
 * Focused review-remediation tests passed: 4 files, 42 passed, 16 skipped
 * Review-remediation client lint and build passed
 * Review-remediation focused Playwright test passed: 1/1
+* `npx playwright test e2e/multi-user-fixtures.spec.ts --reporter=line` passed: 7/7
+* The previously failing sequential-placement test passed in five consecutive runs
+* `npm run lint:client` passed after the E2E readiness fix

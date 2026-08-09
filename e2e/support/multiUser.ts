@@ -40,6 +40,7 @@ export type CanvasStateSnapshot = {
   }
   tiles: CanvasTileSnapshot[]
   metrics: {
+    retainedPatchCount: number
     optimisticCount: number
   }
 }
@@ -256,7 +257,12 @@ const createCanvasUser = (
   },
   getState: async () => readCanvasState(page),
   waitForConnection: async (status: CanvasConnectionStatus = 'connected') =>
-    waitForState(page, (state) => state.connectionStatus === status, `${name} should reach ${status} state`),
+    waitForState(
+      page,
+      (state) => state.connectionStatus === status
+        && (status !== 'connected' || state.metrics.retainedPatchCount > 0),
+      `${name} should reach ${status} state with canonical patch data ready`,
+    ),
   setActiveTile: async (patch) => {
     await callCanvasApi(page, 'setActiveTile', patch)
     await waitForState(
