@@ -575,6 +575,121 @@ export type QuiltPatchResyncRequiredPayload = {
   reason: 'EVENT_GAP' | 'CURSOR_AHEAD' | 'SNAPSHOT_REQUIRED'
 }
 
+// ── Resident domain and event contracts ─────────────────────────────────────
+
+export const RESIDENT_SCHEMA_VERSION = 1 as const
+
+export const residentMemoryClassificationValues = ['creative', 'sensitive'] as const
+export type ResidentMemoryClassification = (typeof residentMemoryClassificationValues)[number]
+
+export const residentRetentionTierValues = ['ephemeral', 'short_lived', 'long_lived'] as const
+export type ResidentRetentionTier = (typeof residentRetentionTierValues)[number]
+
+export const residentDeletionScopeValues = ['record', 'principal', 'quilt'] as const
+export type ResidentDeletionScope = (typeof residentDeletionScopeValues)[number]
+
+export const residentTransportBoundaryValues = ['runtime_internal', 'server_control_plane', 'client_visible'] as const
+export type ResidentTransportBoundary = (typeof residentTransportBoundaryValues)[number]
+
+export const DEFAULT_RESIDENT_CREATIVE_MEMORY_RETENTION_TIER: ResidentRetentionTier = 'short_lived'
+export const DEFAULT_RESIDENT_CREATIVE_MEMORY_DELETION_SCOPE: ResidentDeletionScope = 'principal'
+export const DEFAULT_RESIDENT_CREATIVE_MEMORY_TRANSPORT_BOUNDARIES = [
+  'runtime_internal',
+  'server_control_plane',
+] as const satisfies readonly Exclude<ResidentTransportBoundary, 'client_visible'>[]
+
+/**
+ * Creative memory can be persisted only after an explicit policy decision.
+ * Sensitive memory is never persisted and remains runtime-only.
+ */
+export type ResidentMemoryPolicy =
+  | {
+      classification: 'creative'
+      persistence: 'allowed'
+      retentionTier: ResidentRetentionTier
+      deletionScope: ResidentDeletionScope
+      transport: Exclude<ResidentTransportBoundary, 'client_visible'>
+    }
+  | {
+      classification: 'sensitive'
+      persistence: 'forbidden'
+      retentionTier: 'ephemeral'
+      deletionScope: 'record'
+      transport: 'runtime_internal'
+    }
+
+export const SENSITIVE_MEMORY_POLICY: Extract<ResidentMemoryPolicy, { classification: 'sensitive' }> = {
+  classification: 'sensitive',
+  persistence: 'forbidden',
+  retentionTier: 'ephemeral',
+  deletionScope: 'record',
+  transport: 'runtime_internal',
+}
+
+export const defaultCreativeMemoryPolicy = (): Extract<ResidentMemoryPolicy, { classification: 'creative' }> => ({
+  classification: 'creative',
+  persistence: 'allowed',
+  retentionTier: DEFAULT_RESIDENT_CREATIVE_MEMORY_RETENTION_TIER,
+  deletionScope: DEFAULT_RESIDENT_CREATIVE_MEMORY_DELETION_SCOPE,
+  transport: DEFAULT_RESIDENT_CREATIVE_MEMORY_TRANSPORT_BOUNDARIES[1],
+})
+
+export const residentEventTypeValues = [
+  'worker_trigger_claimed',
+  'worker_lease_unavailable',
+  'worker_checkpoint_recovered',
+  'worker_checkpoint_committed',
+  'worker_lease_lost',
+  'worker_run_completed',
+  'worker_run_failed',
+  'worker_tool_call',
+  'worker_tool_failure',
+] as const
+export type ResidentEventType = (typeof residentEventTypeValues)[number]
+
+export type ResidentEventEnvelope = {
+  schemaVersion: typeof RESIDENT_SCHEMA_VERSION
+  eventType: ResidentEventType
+  occurredAt: string
+  quiltId: string
+  runId?: string
+  triggerId?: string
+  payload?: Record<string, unknown>
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+const isEnumValue = <T extends readonly string[]>(values: T, value: unknown): value is T[number] =>
+  typeof value === 'string' && values.includes(value as T[number])
+
+export const isResidentMemoryPolicy = (value: unknown): value is ResidentMemoryPolicy => {
+  if (!isRecord(value)) return false
+  if (!isEnumValue(residentMemoryClassificationValues, value.classification)) return false
+  if (value.classification === 'creative') {
+    return value.persistence === 'allowed'
+      && isEnumValue(residentRetentionTierValues, value.retentionTier)
+      && isEnumValue(residentDeletionScopeValues, value.deletionScope)
+      && isEnumValue(['runtime_internal', 'server_control_plane'] as const, value.transport)
+  }
+  return value.persistence === 'forbidden'
+    && value.retentionTier === 'ephemeral'
+    && value.deletionScope === 'record'
+    && value.transport === 'runtime_internal'
+}
+
+export const isResidentEventEnvelope = (value: unknown): value is ResidentEventEnvelope => {
+  if (!isRecord(value)) return false
+  if (value.schemaVersion !== RESIDENT_SCHEMA_VERSION) return false
+  if (!isEnumValue(residentEventTypeValues, value.eventType)) return false
+  if (typeof value.occurredAt !== 'string' || value.occurredAt.length === 0) return false
+  if (typeof value.quiltId !== 'string' || value.quiltId.length === 0) return false
+  if (value.runId !== undefined && typeof value.runId !== 'string') return false
+  if (value.triggerId !== undefined && typeof value.triggerId !== 'string') return false
+  if (value.payload !== undefined && !isRecord(value.payload)) return false
+  return true
+}
+
 // ── Typed event maps ──────────────────────────────────────────────────────────
 // Pass these to Server<C, S, I, D> and Socket<C, S, I, D>.
 
