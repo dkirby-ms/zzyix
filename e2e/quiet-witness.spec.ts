@@ -181,6 +181,19 @@ test('quiet witness stays local, attributable, and non-mutating across browsers'
     message: 'reload should retain human-authored canonical state before witness fixture setup',
   }).toEqual(durableCanonicalBaseline)
 
+  await enableWitnessFixture(author.page, {
+    prototypeFeatureEnabled: false,
+    consentedStudyEnabled: false,
+    studyCondition: 'one-signal',
+  })
+  await enableWitnessFixture(observer.page, {
+    prototypeFeatureEnabled: false,
+    consentedStudyEnabled: false,
+    studyCondition: 'one-signal',
+  })
+  await expect(author.page.getByRole('complementary', { name: 'Witness signal controls' })).toHaveCount(0)
+  await expect(observer.page.getByRole('complementary', { name: 'Witness signal controls' })).toHaveCount(0)
+
   const preWitnessCanonicalBaseline = comparableCanonicalState(await readCanonicalState(author.page))
   await enableWitnessFixture(author.page, {
     prototypeFeatureEnabled: true,

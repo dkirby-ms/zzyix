@@ -141,6 +141,8 @@ const WITNESS_STUDY_CONSTRUCTS: readonly WitnessStudyConstruct[] = Object.freeze
   'perceived-authorship',
 ])
 
+const WITNESS_PATCH_ANCHOR_OFFSET = Object.freeze({ x: 1.2, y: 0 })
+
 const CANONICAL_MUTATION_EVENT_NAMES = new Set([
   'quilt_place_tile',
   'quilt_remove_tile',
@@ -195,6 +197,25 @@ const createWitnessStudyEvent = (
     ? { perceivedAuthorship: payload.perceivedAuthorship } : {}),
   ...(payload.constructs ? { constructs: WITNESS_STUDY_CONSTRUCTS } : {}),
 })
+
+const repositionWitnessSignals = (
+  signals: readonly WitnessSignal[],
+  anchor: { x: number; y: number },
+): readonly WitnessSignal[] => {
+  if (signals.length === 0) return signals
+  const currentAnchor = signals[0].anchor
+  const dx = anchor.x - currentAnchor.x
+  const dy = anchor.y - currentAnchor.y
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return signals
+
+  return signals.map((signal) => ({
+    ...signal,
+    anchor: Object.freeze({
+      x: signal.anchor.x + dx,
+      y: signal.anchor.y + dy,
+    }),
+  }))
+}
 
 const MosaicScene = lazy(async () => {
   const module = await import('./render/MosaicScene')
@@ -575,6 +596,20 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
       witnessSignalGates.studyCondition ?? 'one-signal',
     ))
   }, [recordWitnessStudyEvent, witnessSignalGates.studyCondition, witnessStudyEnabled])
+
+  useEffect(() => {
+    if (!witnessStudyEnabled) return
+    if (!focusedCanonicalPatch) return
+
+    const targetAnchor = {
+      x: focusedCanonicalPatch.centerX + WITNESS_PATCH_ANCHOR_OFFSET.x,
+      y: focusedCanonicalPatch.centerY + WITNESS_PATCH_ANCHOR_OFFSET.y,
+    }
+    setWitnessSignals((previous) => repositionWitnessSignals(previous, targetAnchor))
+  }, [
+    focusedCanonicalPatch,
+    witnessStudyEnabled,
+  ])
 
   useEffect(() => {
     activeTileRef.current = activeTile

@@ -433,6 +433,8 @@ describe('App canonical canvas behavior', () => {
 
   it('keeps witness controls and signals disabled unless both study gates are enabled', async () => {
     vi.stubEnv('VITE_WITNESS_PROTOTYPE_ENABLED', 'true')
+    vi.stubEnv('VITE_WITNESS_CONSENTED_STUDY_ENABLED', 'false')
+    vi.stubEnv('VITE_WITNESS_STUDY_CONDITION', 'one-signal')
     render(<App />)
     await enterCanonicalCanvas()
 
