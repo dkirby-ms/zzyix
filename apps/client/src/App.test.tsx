@@ -1,10 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { evictStaleCollaboratorSignals, mergeCollaboratorsFromSnapshot } from './domain/collaboratorUtils'
 import { resolvePaletteColorSelection } from './ui/palettes'
 import type { MeResponse } from '../../server/src/contracts'
 import { RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
+import { CANVAS_TEST_API_KEY } from './test/canvasTestApi'
 
 const {
   clearCanonicalPatchLinkMock,
@@ -139,6 +141,8 @@ vi.mock('./render/MosaicScene', () => ({
     remoteCursors,
     remoteSelections,
     tiles,
+    witnessSignals,
+    onWitnessDetail,
     ghost,
     gridOverlay,
     worldBounds,
@@ -155,6 +159,8 @@ vi.mock('./render/MosaicScene', () => ({
     remoteCursors?: Array<{ clientId: string }>
     remoteSelections?: Array<{ clientId: string; tileId: string }>
     tiles?: Array<{ id: string; transform: { position: { x: number; y: number }; rotation: number; mirrored?: boolean } }>
+    witnessSignals?: Array<{ id: string }>
+    onWitnessDetail?: () => void
     ghost?: { transform: { position: { x: number; y: number }; rotation: number; mirrored?: boolean }; visible: boolean }
     gridOverlay?: { pattern: { id: string }; activeSlotId?: string }
     worldBounds?: { minX: number; maxX: number; minY: number; maxY: number }
@@ -177,6 +183,7 @@ vi.mock('./render/MosaicScene', () => ({
       data-remote-cursors={remoteCursors?.length ?? 0}
       data-remote-selections={remoteSelections?.length ?? 0}
       data-tile-count={tiles?.length ?? 0}
+      data-witness-signal-count={witnessSignals?.length ?? 0}
       data-tile-transforms={JSON.stringify(tiles?.map((tile) => tile.transform) ?? [])}
       data-grid-pattern={gridOverlay?.pattern.id ?? 'off'}
       data-grid-slot={gridOverlay?.activeSlotId ?? 'none'}
@@ -194,6 +201,9 @@ vi.mock('./render/MosaicScene', () => ({
       scene
       <button type="button" onClick={() => onPointerMove?.(0, 0)}>
         Move Pointer Near
+      </button>
+      <button type="button" onClick={() => onWitnessDetail?.()}>
+        Open witness detail
       </button>
       <button type="button" onClick={() => onPointerMove?.(5, 5)}>
         Move Pointer Far
@@ -291,6 +301,7 @@ describe('App canonical canvas behavior', () => {
     setCanonicalPatchLinkMock.mockReset()
     listSessionsMock.mockReset()
     useSocketConnectionMock.mockClear()
+    vi.unstubAllEnvs()
   })
 
   afterEach(() => {
@@ -418,6 +429,130 @@ describe('App canonical canvas behavior', () => {
       screen.getByLabelText('Whole atlas preview').querySelector('[data-tile-count="7"]'),
     ).toBeInTheDocument())
     expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-tile-count', '0')
+  })
+
+  it('keeps witness controls and signals disabled unless both study gates are enabled', async () => {
+    vi.stubEnv('VITE_WITNESS_PROTOTYPE_ENABLED', 'true')
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    expect(screen.queryByRole('complementary', { name: 'Witness signal controls' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-witness-signal-count', '0')
+
+    cleanup()
+    vi.stubEnv('VITE_WITNESS_CONSENTED_STUDY_ENABLED', 'true')
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    expect(screen.getByRole('complementary', { name: 'Witness signal controls' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Witness signals' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-witness-signal-count', '1')
+
+    cleanup()
+    vi.stubEnv('VITE_WITNESS_STUDY_CONDITION', 'no-signal')
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    expect(screen.getByRole('complementary', { name: 'Witness signal controls' })).toBeInTheDocument()
+    expect(screen.getByTestId('mosaic-scene')).toHaveAttribute('data-witness-signal-count', '0')
+  })
+
+  it('shows attributed non-mutating witness details through keyboard access', async () => {
+    vi.stubEnv('VITE_WITNESS_PROTOTYPE_ENABLED', 'true')
+    vi.stubEnv('VITE_WITNESS_CONSENTED_STUDY_ENABLED', 'true')
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    const user = userEvent.setup()
+    fireEvent.click(screen.getByRole('button', { name: 'I noticed a witness signal' }))
+    const detailButton = screen.getByRole('button', { name: 'Witness signal details' })
+    detailButton.focus()
+    await user.keyboard('{Enter}')
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('Observed by Fantome, the resident.')
+    expect(screen.getByRole('dialog')).toHaveTextContent('did not change this mosaic')
+  })
+
+  it('hides and resets witness signals without mutating canonical scene fixtures', async () => {
+    vi.stubEnv('VITE_WITNESS_PROTOTYPE_ENABLED', 'true')
+    vi.stubEnv('VITE_WITNESS_CONSENTED_STUDY_ENABLED', 'true')
+    vi.stubEnv('VITE_E2E_TEST_MODE', 'true')
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    const canvasApi = window[CANVAS_TEST_API_KEY]
+    await waitFor(() => expect(canvasApi).toBeDefined())
+    const initialCanonical = canvasApi?.getCanonicalState()
+    expect(initialCanonical).toBeDefined()
+
+    const scene = screen.getByTestId('mosaic-scene')
+    const initialTileCount = scene.getAttribute('data-tile-count')
+    const initialTileTransforms = scene.getAttribute('data-tile-transforms')
+    const initialCursorCount = scene.getAttribute('data-remote-cursors')
+    const initialSelectionCount = scene.getAttribute('data-remote-selections')
+    fireEvent.click(screen.getByRole('button', { name: 'Witness signals' }))
+
+    expect(scene).toHaveAttribute('data-witness-signal-count', '0')
+    expect(scene).toHaveAttribute('data-tile-count', initialTileCount ?? '')
+    expect(scene).toHaveAttribute('data-tile-transforms', initialTileTransforms ?? '')
+    expect(scene).toHaveAttribute('data-remote-cursors', initialCursorCount ?? '')
+    expect(scene).toHaveAttribute('data-remote-selections', initialSelectionCount ?? '')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset prototype signals' }))
+    expect(scene).toHaveAttribute('data-witness-signal-count', '1')
+    expect(scene).toHaveAttribute('data-tile-count', initialTileCount ?? '')
+    expect(scene).toHaveAttribute('data-tile-transforms', initialTileTransforms ?? '')
+
+    const afterResetCanonical = canvasApi?.getCanonicalState()
+    expect(afterResetCanonical?.revision).toBe(initialCanonical?.revision)
+    expect(afterResetCanonical?.ownershipIdentity).toBe(initialCanonical?.ownershipIdentity)
+    expect(afterResetCanonical?.tiles).toEqual(initialCanonical?.tiles)
+    expect(afterResetCanonical?.metrics).toEqual(initialCanonical?.metrics)
+  })
+
+  it('emits only minimal study-safe witness event payloads', async () => {
+    vi.stubEnv('VITE_WITNESS_PROTOTYPE_ENABLED', 'true')
+    vi.stubEnv('VITE_WITNESS_CONSENTED_STUDY_ENABLED', 'true')
+    const events: unknown[] = []
+    const recordEvent = (event: Event): void => {
+      events.push((event as CustomEvent).detail)
+    }
+    window.addEventListener('witness-study-event', recordEvent)
+    render(<App />)
+    await enterCanonicalCanvas()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open witness detail' }))
+    fireEvent.click(screen.getByRole('button', { name: 'I noticed a witness signal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Witness signal details' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Witness signals' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reset prototype signals' }))
+    fireEvent.click(screen.getByRole('button', { name: 'I noticed a witness signal' }))
+    for (const construct of ['intrigue', 'discomfort', 'invisibility', 'confusion']) {
+      fireEvent.change(screen.getByRole('combobox', { name: construct }), { target: { value: '4' } })
+    }
+    fireEvent.change(screen.getByRole('combobox', { name: 'Perceived authorship' }), { target: { value: 'artist' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Complete study condition' }))
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'condition-shown', condition: 'one-signal' }),
+      expect.objectContaining({ type: 'unaided-notice', condition: 'one-signal', unaidedNotice: 'noticed' }),
+      expect.objectContaining({ type: 'detail-opened', condition: 'one-signal' }),
+      expect.objectContaining({ type: 'hide', condition: 'one-signal' }),
+      expect.objectContaining({ type: 'reset', condition: 'one-signal' }),
+      expect.objectContaining({
+        type: 'condition-completed',
+        constructs: ['intrigue', 'discomfort', 'invisibility', 'confusion', 'perceived-authorship'],
+        ratings: { intrigue: 4, discomfort: 4, invisibility: 4, confusion: 4 },
+        perceivedAuthorship: 'artist',
+      }),
+    ]))
+    const completedEvent = events.find((event) => (event as { type?: string }).type === 'condition-completed') as {
+      ratings: Record<string, number>
+    }
+    expect(Object.values(completedEvent.ratings).every((rating) => rating >= 1 && rating <= 7)).toBe(true)
+    expect(events).not.toContainEqual(expect.objectContaining({ canvas: expect.anything() }))
+    expect(events).not.toContainEqual(expect.objectContaining({ feedback: expect.anything() }))
+    window.removeEventListener('witness-study-event', recordEvent)
   })
 
   it('resolves a durable patch link without rendering manual claim controls', async () => {

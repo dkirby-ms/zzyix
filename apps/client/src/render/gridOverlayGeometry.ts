@@ -14,7 +14,7 @@ export type BuildGridOverlaySegmentsInput = {
   pattern: GridPattern
   viewport: WorldViewport
   activeShape: TileShape
-  tiles: TileInstance[]
+  tiles: readonly TileInstance[]
   bounds: MosaicBounds | BoundsPolicy
   topology?: QuiltTopology
   activeSlotId?: string
@@ -30,7 +30,7 @@ const createEmptyGroups = (): GridOverlaySegmentGroups => ({
 export const classifyGridPatternSlot = (
   slot: GridPatternSlot,
   activeShape: TileShape,
-  tiles: TileInstance[],
+  tiles: readonly TileInstance[],
   bounds: MosaicBounds | BoundsPolicy,
   activeSlotId?: string,
   topology?: QuiltTopology,

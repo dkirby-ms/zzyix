@@ -6,6 +6,7 @@ import {
   type TopologyRect,
 } from '../../../server/src/domain/quiltTopology'
 import type { TileInstance } from '../domain/placementSolver'
+import type { WitnessSignal } from '../domain/witnessSignals'
 
 export type PeriodicTileImage = {
   key: string
@@ -53,8 +54,50 @@ export const nearestPeriodicPoint = (
   }
 }
 
+const WITNESS_ANCHOR_CLEARANCE = 0.72
+const WITNESS_CANDIDATE_OFFSETS = [
+  { x: 0, y: 0 },
+  { x: 1.2, y: 0 },
+  { x: -1.2, y: 0 },
+  { x: 0, y: 1.2 },
+  { x: 0, y: -1.2 },
+  { x: 0.85, y: 0.85 },
+  { x: -0.85, y: 0.85 },
+  { x: 0.85, y: -0.85 },
+  { x: -0.85, y: -0.85 },
+]
+
+export const resolveWitnessDisplaySignals = (
+  signals: readonly WitnessSignal[],
+  tiles: readonly TileInstance[],
+  reference: { x: number; y: number },
+  topology?: QuiltTopology,
+): readonly WitnessSignal[] => {
+  const occupied = tiles.map((tile) => topology
+    ? nearestPeriodicPoint(tile.transform.position, reference, topology)
+    : tile.transform.position)
+
+  return signals.map((signal) => {
+    const nearestAnchor = topology
+      ? nearestPeriodicPoint(signal.anchor, reference, topology)
+      : signal.anchor
+    const anchor = WITNESS_CANDIDATE_OFFSETS
+      .map((offset) => ({ x: nearestAnchor.x + offset.x, y: nearestAnchor.y + offset.y }))
+      .find((candidate) => occupied.every((tile) => {
+        const dx = candidate.x - tile.x
+        const dy = candidate.y - tile.y
+        return (dx * dx) + (dy * dy) >= WITNESS_ANCHOR_CLEARANCE ** 2
+      })) ?? nearestAnchor
+
+    return {
+      ...signal,
+      anchor,
+    }
+  })
+}
+
 export const enumerateVisibleTileImages = (
-  tiles: TileInstance[],
+  tiles: readonly TileInstance[],
   viewport: TopologyRect,
   topology: QuiltTopology,
   overscan = 1,

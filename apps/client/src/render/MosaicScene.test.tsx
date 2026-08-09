@@ -15,6 +15,7 @@ vi.mock('@react-three/fiber', () => ({
 
 vi.mock('@react-three/drei', () => ({
   OrbitControls: () => null,
+  Html: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
 afterEach(() => {
@@ -170,6 +171,66 @@ describe('MosaicScene interaction plane', () => {
 
     expect(container.querySelector('[data-owner-boundary="client-2"]')).toBeInTheDocument()
     expect(container.querySelector('[data-owner-boundary="client-1"]')).not.toBeInTheDocument()
+  })
+
+  it('renders witness signals separately and preserves canonical scene inputs', () => {
+    const tiles = Object.freeze([Object.freeze({
+      id: 'artist-tile',
+      shape: 'square' as const,
+      color: '#fff',
+      material: 'ceramic' as const,
+      transform: Object.freeze({ position: Object.freeze({ x: 0, y: 0 }), rotation: 0, mirrored: false }),
+      createdAt: 1,
+      placedBy: 'artist-1',
+    })])
+    const remoteCursors = Object.freeze([Object.freeze({ clientId: 'artist-2', position: Object.freeze({ x: 1, y: 1 }) })])
+    const remoteSelections = Object.freeze([Object.freeze({ clientId: 'artist-2', tileId: 'artist-tile' })])
+    const cameraPan = Object.freeze({ x: 0, y: 0 })
+    const witnessSignals = Object.freeze([Object.freeze({
+      id: 'fantome-witness-scene',
+      kind: 'glyph' as const,
+      anchor: Object.freeze({ x: 2, y: 2 }),
+      residentId: 'fantome' as const,
+      label: 'Fantome observed this area.',
+      source: 'prototype-fixture' as const,
+    })])
+    const onWitnessDetail = vi.fn()
+
+    const { container, getByRole } = render(
+      <MosaicScene
+        tiles={tiles}
+        witnessSignals={witnessSignals}
+        onWitnessDetail={onWitnessDetail}
+        clientId="client-1"
+        ownershipIdentity="client-1"
+        activeShape="square"
+        ghost={{
+          transform: { position: { x: 0, y: 0 }, rotation: 0, mirrored: false },
+          confidence: 'valid',
+          color: '#d4614f',
+          material: 'ceramic',
+          visible: false,
+        }}
+        remoteCursors={remoteCursors}
+        remoteSelections={remoteSelections}
+        onPointerMove={vi.fn()}
+        onPointerDown={vi.fn()}
+        onPointerUp={vi.fn()}
+        onRotateDrag={vi.fn()}
+        onCameraPan={vi.fn()}
+        cameraPan={cameraPan}
+      />,
+    )
+
+    expect(container.querySelector('[data-canonical-id="artist-tile"]')).toBeInTheDocument()
+    expect(container.querySelector('[data-witness-signal="fantome-witness-scene"]')).toBeInTheDocument()
+    fireEvent.click(getByRole('button', { name: /Fantome resident witness mark/ }))
+    expect(onWitnessDetail).toHaveBeenCalledWith(witnessSignals[0])
+    expect(tiles[0].placedBy).toBe('artist-1')
+    expect(remoteCursors[0].position).toEqual({ x: 1, y: 1 })
+    expect(remoteSelections[0]).toEqual({ clientId: 'artist-2', tileId: 'artist-tile' })
+    expect(cameraPan).toEqual({ x: 0, y: 0 })
+    expect(witnessSignals[0].anchor).toEqual({ x: 2, y: 2 })
   })
 
   it('mounts settled tiles at their authoritative transform without replaying placement motion', () => {

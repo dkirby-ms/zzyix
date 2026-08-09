@@ -21,6 +21,57 @@ export type CanvasTestTileSnapshot = {
   placedBy?: string
 }
 
+export type CanvasWitnessStudyEventType =
+  | 'condition-shown'
+  | 'unaided-notice'
+  | 'detail-opened'
+  | 'hide'
+  | 'reset'
+  | 'condition-completed'
+
+export type CanvasWitnessStudyCondition = 'no-signal' | 'one-signal'
+
+export type CanvasWitnessStudyRating = 1 | 2 | 3 | 4 | 5 | 6 | 7
+
+export type CanvasWitnessStudyUnaidedNotice = 'noticed' | 'not-noticed'
+
+export type CanvasWitnessStudyAuthorship = 'artist' | 'fantome' | 'both' | 'unsure'
+
+export type CanvasWitnessStudyConstruct =
+  | 'intrigue'
+  | 'discomfort'
+  | 'invisibility'
+  | 'confusion'
+  | 'perceived-authorship'
+
+export type CanvasWitnessStudyRatings = Readonly<{
+  intrigue: CanvasWitnessStudyRating
+  discomfort: CanvasWitnessStudyRating
+  invisibility: CanvasWitnessStudyRating
+  confusion: CanvasWitnessStudyRating
+}>
+
+export type CanvasWitnessStudyEvent = Readonly<{
+  prototype: 'quiet-witness'
+  type: CanvasWitnessStudyEventType
+  condition: CanvasWitnessStudyCondition
+  unaidedNotice?: CanvasWitnessStudyUnaidedNotice
+  ratings?: CanvasWitnessStudyRatings
+  perceivedAuthorship?: CanvasWitnessStudyAuthorship
+  constructs?: readonly CanvasWitnessStudyConstruct[]
+}>
+
+export type CanvasWitnessTestState = Readonly<{
+  gates: {
+    prototypeFeatureEnabled: boolean
+    consentedStudyEnabled: boolean
+  }
+  signalIds: readonly string[]
+  visible: boolean
+  detailOpen: boolean
+  studyEvents: readonly CanvasWitnessStudyEvent[]
+}>
+
 export type CanvasTestStateSnapshot = {
   clientId: string
   ownershipIdentity: string
@@ -43,15 +94,28 @@ export type CanvasTestStateSnapshot = {
     cursorCount: number
     optimisticCount: number
     undoCount: number
+    undoAvailable: boolean
+    undoDepth: number
     snapshotBytes: number
     sceneObjectCount: number
     drawCalls: number
     frameTimeMs: number
   }
+  witness: CanvasWitnessTestState
 }
+
+export type CanvasCanonicalStateSnapshot = Pick<CanvasTestStateSnapshot,
+  'clientId' | 'ownershipIdentity' | 'sessionId' | 'mode' | 'connectionStatus' | 'revision'
+  | 'resyncEvents' | 'collaboratorIds' | 'tiles' | 'metrics' | 'witness'
+>
 
 export type CanvasTestApi = {
   getState: () => CanvasTestStateSnapshot
+  getCanonicalState: () => CanvasCanonicalStateSnapshot
+  getWitnessState: () => CanvasWitnessTestState
+  setWitnessFixtureGates: (gates: CanvasWitnessTestState['gates']) => void
+  startCanonicalMutationObserver: () => void
+  getCanonicalMutationTraffic: () => readonly string[]
   joinSession: (sessionId: string) => void
   setActiveTile: (patch: Partial<ActiveTile>) => void
   movePointer: (position: { x: number; y: number }) => void

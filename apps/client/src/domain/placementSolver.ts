@@ -76,11 +76,11 @@ export const derivePlacementBounds = (
 }
 
 export const projectNearestPeriodicTiles = (
-  settled: TileInstance[],
+  settled: readonly TileInstance[],
   reference: Vec2,
   topology?: QuiltTopology,
 ): TileInstance[] => {
-  if (!topology) return settled
+  if (!topology) return [...settled]
   const width = topology.patchColumns * topology.patchWidth
   const height = topology.patchRows * topology.patchHeight
   return settled.map((tile) => ({
@@ -176,7 +176,7 @@ const resolveBoundsPolicy = (bounds: MosaicBounds | BoundsPolicy): BoundsPolicy 
 export const validatePlacement = (
   candidateShape: TileShape,
   candidateTransform: Transform2D,
-  settled: TileInstance[],
+  settled: readonly TileInstance[],
   bounds: MosaicBounds | BoundsPolicy,
   topology?: QuiltTopology,
 ): ValidationResult => {

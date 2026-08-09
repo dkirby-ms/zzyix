@@ -74,7 +74,25 @@ import {
   updateCollaborator,
   type RemoteCollaboratorMap,
 } from './domain/collaboratorUtils'
-import { registerCanvasTestApi, toCanvasTestTileSnapshot } from './test/canvasTestApi'
+import {
+  registerCanvasTestApi,
+  toCanvasTestTileSnapshot,
+  type CanvasWitnessStudyConstruct,
+  type CanvasWitnessStudyAuthorship,
+  type CanvasWitnessStudyCondition,
+  type CanvasWitnessStudyEvent,
+  type CanvasWitnessStudyEventType,
+  type CanvasWitnessStudyRating,
+  type CanvasWitnessStudyRatings,
+  type CanvasWitnessStudyUnaidedNotice,
+} from './test/canvasTestApi'
+import {
+  areWitnessSignalsEnabled,
+  getPrototypeWitnessSignals,
+  resetPrototypeWitnessSignals,
+  type WitnessSignal,
+  type WitnessSignalGates,
+} from './domain/witnessSignals'
 import {
   applyQuiltPatchPlacement,
   applyQuiltPatchRemoval,
@@ -105,6 +123,78 @@ const AGGREGATE_TIER_ENTER_ZOOM = 45
 const AGGREGATE_TIER_EXIT_ZOOM = 47
 const INTERACTION_GUIDE_DISMISSED_KEY = 'zzyix.interactionGuideDismissed'
 const THEME_MODE_KEY = 'zzyix.themeMode'
+
+type WitnessStudyEventType = CanvasWitnessStudyEventType
+type WitnessStudyConstruct = CanvasWitnessStudyConstruct
+type WitnessStudyEvent = CanvasWitnessStudyEvent
+type WitnessStudyCondition = CanvasWitnessStudyCondition
+type WitnessStudyRating = CanvasWitnessStudyRating
+type WitnessStudyRatings = CanvasWitnessStudyRatings
+type WitnessStudyUnaidedNotice = CanvasWitnessStudyUnaidedNotice
+type WitnessStudyAuthorship = CanvasWitnessStudyAuthorship
+
+const WITNESS_STUDY_CONSTRUCTS: readonly WitnessStudyConstruct[] = Object.freeze([
+  'intrigue',
+  'discomfort',
+  'invisibility',
+  'confusion',
+  'perceived-authorship',
+])
+
+const CANONICAL_MUTATION_EVENT_NAMES = new Set([
+  'quilt_place_tile',
+  'quilt_remove_tile',
+  'quilt_patch_event',
+  'quilt_patch_state',
+  'quilt_patch_resync_required',
+  'cache_invalidate',
+  'cache_refresh',
+  'client_joined',
+  'client_left',
+])
+
+const getWitnessSignalGates = (): WitnessSignalGates => ({
+  prototypeFeatureEnabled: import.meta.env.VITE_WITNESS_PROTOTYPE_ENABLED === 'true',
+  consentedStudyEnabled: import.meta.env.VITE_WITNESS_CONSENTED_STUDY_ENABLED === 'true',
+  studyCondition: import.meta.env.VITE_WITNESS_STUDY_CONDITION === 'no-signal' ? 'no-signal' : 'one-signal',
+})
+
+const sanitizeWitnessStudyRatings = (
+  ratings: Partial<WitnessStudyRatings> | undefined,
+): WitnessStudyRatings | undefined => {
+  if (!ratings) return undefined
+  const constructs = ['intrigue', 'discomfort', 'invisibility', 'confusion'] as const
+  if (!constructs.every((construct) => {
+    const rating = ratings[construct]
+    return typeof rating === 'number' && Number.isInteger(rating) && rating >= 1 && rating <= 7
+  })) {
+    return undefined
+  }
+
+  return {
+    intrigue: ratings.intrigue as WitnessStudyRating,
+    discomfort: ratings.discomfort as WitnessStudyRating,
+    invisibility: ratings.invisibility as WitnessStudyRating,
+    confusion: ratings.confusion as WitnessStudyRating,
+  }
+}
+
+const createWitnessStudyEvent = (
+  type: WitnessStudyEventType,
+  payload: Omit<WitnessStudyEvent, 'prototype' | 'type' | 'condition'> = {},
+  condition: WitnessStudyCondition = 'one-signal',
+): WitnessStudyEvent => ({
+  prototype: 'quiet-witness',
+  type,
+  condition: condition === 'no-signal' ? 'no-signal' : 'one-signal',
+  ...(payload.unaidedNotice && ['noticed', 'not-noticed'].includes(payload.unaidedNotice)
+    ? { unaidedNotice: payload.unaidedNotice } : {}),
+  ...(sanitizeWitnessStudyRatings(payload.ratings)
+    ? { ratings: sanitizeWitnessStudyRatings(payload.ratings) } : {}),
+  ...(payload.perceivedAuthorship && ['artist', 'fantome', 'both', 'unsure'].includes(payload.perceivedAuthorship)
+    ? { perceivedAuthorship: payload.perceivedAuthorship } : {}),
+  ...(payload.constructs ? { constructs: WITNESS_STUDY_CONSTRUCTS } : {}),
+})
 
 const MosaicScene = lazy(async () => {
   const module = await import('./render/MosaicScene')
@@ -319,6 +409,9 @@ const DEFAULT_WORLD_BOUNDS = DEFAULT_BOUNDED_WORLD_BOUNDS
 
 function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleTheme: () => void }) {
   const auth = useAuthSession()
+  const [witnessFixtureGates, setWitnessFixtureGates] = useState<WitnessSignalGates | null>(null)
+  const witnessSignalGates = witnessFixtureGates ?? getWitnessSignalGates()
+  const witnessStudyEnabled = areWitnessSignalsEnabled(witnessSignalGates)
   const [sequencedState, setSequencedState] = useState<SequencedTilesState>(
     createInitialSequencedTilesState(),
   )
@@ -350,6 +443,15 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
 
     return window.localStorage.getItem(INTERACTION_GUIDE_DISMISSED_KEY) !== 'true'
   })
+  const [witnessSignals, setWitnessSignals] = useState<readonly WitnessSignal[]>(() =>
+    getPrototypeWitnessSignals(witnessSignalGates),
+  )
+  const [witnessSignalsVisible, setWitnessSignalsVisible] = useState(true)
+  const [witnessDetailOpen, setWitnessDetailOpen] = useState(false)
+  const [witnessUnaidedNotice, setWitnessUnaidedNotice] = useState<WitnessStudyUnaidedNotice | null>(null)
+  const [witnessRatings, setWitnessRatings] = useState<Partial<WitnessStudyRatings>>({})
+  const [witnessPerceivedAuthorship, setWitnessPerceivedAuthorship] = useState<WitnessStudyAuthorship | null>(null)
+  const [witnessStudyEvents, setWitnessStudyEvents] = useState<readonly WitnessStudyEvent[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
   const [canonicalError, setCanonicalError] = useState<string | null>(null)
@@ -397,6 +499,8 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     resyncEvents: 0,
   })
   const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
+  const canonicalMutationTrafficRef = useRef<string[]>([])
+  const stopCanonicalMutationObserverRef = useRef<(() => void) | null>(null)
   const clientId = useMemo(() => ensureClientId(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
@@ -427,6 +531,50 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     () => isQuiltV2 ? selectQuiltTiles(quiltCache) : sequencedState.tiles,
     [isQuiltV2, quiltCache, sequencedState.tiles],
   )
+  const visibleWitnessSignals = useMemo(
+    () => witnessStudyEnabled && witnessSignalsVisible ? witnessSignals : [],
+    [witnessSignals, witnessSignalsVisible, witnessStudyEnabled],
+  )
+
+  const recordWitnessStudyEvent = useCallback((event: WitnessStudyEvent): void => {
+    setWitnessStudyEvents((previous) => [...previous, event])
+    window.dispatchEvent(new CustomEvent<WitnessStudyEvent>('witness-study-event', { detail: event }))
+  }, [])
+
+  const openWitnessDetail = useCallback((): void => {
+    if (!witnessStudyEnabled) return
+    if (!witnessUnaidedNotice) return
+    setWitnessDetailOpen(true)
+    recordWitnessStudyEvent(createWitnessStudyEvent(
+      'detail-opened',
+      {},
+      witnessSignalGates.studyCondition ?? 'one-signal',
+    ))
+  }, [recordWitnessStudyEvent, witnessSignalGates.studyCondition, witnessStudyEnabled, witnessUnaidedNotice])
+
+  const handleWitnessUnaidedNotice = useCallback((notice: WitnessStudyUnaidedNotice): void => {
+    if (!witnessStudyEnabled) return
+    setWitnessUnaidedNotice(notice)
+    recordWitnessStudyEvent(createWitnessStudyEvent(
+      'unaided-notice',
+      { unaidedNotice: notice },
+      witnessSignalGates.studyCondition ?? 'one-signal',
+    ))
+  }, [recordWitnessStudyEvent, witnessSignalGates.studyCondition, witnessStudyEnabled])
+
+  const handleWitnessSignalNotice = useCallback((): void => {
+    if (!witnessUnaidedNotice) return
+    openWitnessDetail()
+  }, [openWitnessDetail, witnessUnaidedNotice])
+
+  useEffect(() => {
+    if (!witnessStudyEnabled) return
+    recordWitnessStudyEvent(createWitnessStudyEvent(
+      'condition-shown',
+      {},
+      witnessSignalGates.studyCondition ?? 'one-signal',
+    ))
+  }, [recordWitnessStudyEvent, witnessSignalGates.studyCondition, witnessStudyEnabled])
 
   useEffect(() => {
     activeTileRef.current = activeTile
@@ -1167,8 +1315,12 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     placeFromState(activeTileRef.current, ghostRef.current)
   }, [placeFromState])
 
+  useEffect(() => () => {
+    stopCanonicalMutationObserverRef.current?.()
+  }, [])
+
   useEffect(() => registerCanvasTestApi({
-    getState: () => ({
+    getCanonicalState: () => ({
       clientId,
       ownershipIdentity,
       sessionId,
@@ -1190,10 +1342,87 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
         cursorCount: Object.keys(selectQuiltCursors(quiltCache)).length,
         optimisticCount: Object.keys(quiltCache.optimistic).length,
         undoCount: Object.keys(quiltCache.undo).length,
+        undoAvailable: Object.keys(quiltCache.undo).length > 0,
+        undoDepth: Object.keys(quiltCache.undo).length,
         snapshotBytes: new TextEncoder().encode(JSON.stringify(quiltCache.patches)).byteLength,
         ...sceneMetricsRef.current,
       },
+      witness: {
+        gates: witnessSignalGates,
+        signalIds: visibleWitnessSignals.map((signal) => signal.id),
+        visible: witnessSignalsVisible,
+        detailOpen: witnessDetailOpen,
+        studyEvents: witnessStudyEvents,
+      },
     }),
+    getWitnessState: () => ({
+      gates: witnessSignalGates,
+      signalIds: visibleWitnessSignals.map((signal) => signal.id),
+      visible: witnessSignalsVisible,
+      detailOpen: witnessDetailOpen,
+      studyEvents: witnessStudyEvents,
+    }),
+    getState: () => ({
+      ...(() => ({
+        clientId,
+        ownershipIdentity,
+        sessionId,
+        mode,
+        connectionStatus: connectionState.status,
+        revision: sequencedState.revision,
+        resyncEvents: clientTelemetryRef.current.resyncEvents,
+        collaboratorIds: activeCollaborators.map((collaborator) => collaborator.clientId),
+        activeTile,
+        cameraPan,
+        grid: {
+          enabled: gridOverlayEnabled,
+          patternId: selectedGridPatternId,
+        },
+        tiles: visibleTiles.map(toCanvasTestTileSnapshot),
+        metrics: {
+          retainedPatchCount: Object.keys(quiltCache.patches).length,
+          retainedTileCount: visibleTiles.length,
+          cursorCount: Object.keys(selectQuiltCursors(quiltCache)).length,
+          optimisticCount: Object.keys(quiltCache.optimistic).length,
+          undoCount: Object.keys(quiltCache.undo).length,
+          undoAvailable: Object.keys(quiltCache.undo).length > 0,
+          undoDepth: Object.keys(quiltCache.undo).length,
+          snapshotBytes: new TextEncoder().encode(JSON.stringify(quiltCache.patches)).byteLength,
+          ...sceneMetricsRef.current,
+        },
+      }))(),
+      witness: {
+        gates: witnessSignalGates,
+        signalIds: visibleWitnessSignals.map((signal) => signal.id),
+        visible: witnessSignalsVisible,
+        detailOpen: witnessDetailOpen,
+        studyEvents: witnessStudyEvents,
+      },
+    }),
+    setWitnessFixtureGates: (gates) => {
+      setWitnessFixtureGates(gates)
+      setWitnessSignals(getPrototypeWitnessSignals(gates))
+      setWitnessSignalsVisible(true)
+      setWitnessDetailOpen(false)
+      setWitnessUnaidedNotice(null)
+      setWitnessRatings({})
+      setWitnessPerceivedAuthorship(null)
+      setWitnessStudyEvents([])
+    },
+    startCanonicalMutationObserver: () => {
+      stopCanonicalMutationObserverRef.current?.()
+      canonicalMutationTrafficRef.current = []
+      const socket = socketActionRef.current
+      if (!socket) return
+      const listener = (eventName: string): void => {
+        if (CANONICAL_MUTATION_EVENT_NAMES.has(eventName)) {
+          canonicalMutationTrafficRef.current.push(eventName)
+        }
+      }
+      socket.onAnyOutgoing(listener)
+      stopCanonicalMutationObserverRef.current = () => socket.offAnyOutgoing(listener)
+    },
+    getCanonicalMutationTraffic: () => canonicalMutationTrafficRef.current,
     joinSession: () => {},
     setActiveTile: (patch) => {
       dispatchActiveTileUi({ type: 'patch-active-tile', patch })
@@ -1378,6 +1607,11 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     socketRef,
     triggerInvalidPulse,
     updatePointer,
+    visibleWitnessSignals,
+    witnessDetailOpen,
+    witnessSignalGates,
+    witnessSignalsVisible,
+    witnessStudyEvents,
   ])
 
   const content = mode === 'canonical-loading' ? (
@@ -1479,6 +1713,110 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
               Show tips
             </button>
           )}
+          {witnessStudyEnabled && (
+            <aside aria-label="Witness signal controls">
+              <button
+                type="button"
+                aria-pressed={witnessSignalsVisible}
+                onClick={() => {
+                  setWitnessSignalsVisible((visible) => {
+                    if (visible) recordWitnessStudyEvent(createWitnessStudyEvent(
+                      'hide',
+                      {},
+                      witnessSignalGates.studyCondition ?? 'one-signal',
+                    ))
+                    return !visible
+                  })
+                }}
+              >
+                Witness signals
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setWitnessSignals(resetPrototypeWitnessSignals(witnessSignalGates))
+                  setWitnessSignalsVisible(true)
+                  setWitnessDetailOpen(false)
+                  setWitnessUnaidedNotice(null)
+                  setWitnessRatings({})
+                  setWitnessPerceivedAuthorship(null)
+                  recordWitnessStudyEvent(createWitnessStudyEvent(
+                    'reset',
+                    {},
+                    witnessSignalGates.studyCondition ?? 'one-signal',
+                  ))
+                }}
+              >
+                Reset prototype signals
+              </button>
+              <fieldset>
+                <legend>Unaided notice</legend>
+                <button type="button" onClick={() => handleWitnessUnaidedNotice('noticed')}>I noticed a witness signal</button>
+                <button type="button" onClick={() => handleWitnessUnaidedNotice('not-noticed')}>I did not notice a witness signal</button>
+              </fieldset>
+              <button type="button" onClick={openWitnessDetail} disabled={!witnessUnaidedNotice}>Witness signal details</button>
+              <fieldset>
+                <legend>Study ratings</legend>
+                {(['intrigue', 'discomfort', 'invisibility', 'confusion'] as const).map((construct) => (
+                  <label key={construct}>
+                    {construct}
+                    <select
+                      aria-label={construct}
+                      value={witnessRatings[construct] ?? ''}
+                      onChange={(event) => setWitnessRatings((previous) => ({
+                        ...previous,
+                        [construct]: Number(event.target.value) as WitnessStudyRating,
+                      }))}
+                    >
+                      <option value="">Select 1-7</option>
+                      {[1, 2, 3, 4, 5, 6, 7].map((rating) => <option key={rating} value={rating}>{rating}</option>)}
+                    </select>
+                  </label>
+                ))}
+                <label>
+                  Perceived authorship
+                  <select
+                    aria-label="Perceived authorship"
+                    value={witnessPerceivedAuthorship ?? ''}
+                    onChange={(event) => setWitnessPerceivedAuthorship(event.target.value as WitnessStudyAuthorship)}
+                  >
+                    <option value="">Select an answer</option>
+                    <option value="artist">Artist</option>
+                    <option value="fantome">Fantome</option>
+                    <option value="both">Both</option>
+                    <option value="unsure">Unsure</option>
+                  </select>
+                </label>
+              </fieldset>
+              <button
+                type="button"
+                disabled={
+                  !witnessUnaidedNotice
+                  || !witnessPerceivedAuthorship
+                  || !(['intrigue', 'discomfort', 'invisibility', 'confusion'] as const).every((construct) => witnessRatings[construct] !== undefined)
+                }
+                onClick={() => recordWitnessStudyEvent(createWitnessStudyEvent(
+                  'condition-completed',
+                  {
+                    constructs: WITNESS_STUDY_CONSTRUCTS,
+                    unaidedNotice: witnessUnaidedNotice ?? undefined,
+                    ratings: witnessRatings as WitnessStudyRatings,
+                    perceivedAuthorship: witnessPerceivedAuthorship ?? undefined,
+                  },
+                  witnessSignalGates.studyCondition ?? 'one-signal',
+                ))}
+              >
+                Complete study condition
+              </button>
+            </aside>
+          )}
+          {witnessDetailOpen && (
+            <section role="dialog" aria-modal="true" aria-labelledby="witness-detail-title">
+              <h2 id="witness-detail-title">Witness signal details</h2>
+              <p>Witness mark. Observed by Fantome, the resident. This prototype signal did not change this mosaic.</p>
+              <button type="button" onClick={() => setWitnessDetailOpen(false)}>Close witness details</button>
+            </section>
+          )}
           <AppErrorBoundary
             title="Canvas failed to load"
             description="Reload the canvas to try again. If this repeats, include the diagnostic details below when reporting it."
@@ -1488,6 +1826,8 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
               <Suspense fallback={<CanvasLoadingFallback />}>
                 <MosaicScene
                 tiles={visibleTiles}
+                witnessSignals={visibleWitnessSignals}
+                onWitnessDetail={handleWitnessSignalNotice}
                 clientId={clientId}
                 ownershipIdentity={ownershipIdentity}
                 activeShape={activeTile.shape}

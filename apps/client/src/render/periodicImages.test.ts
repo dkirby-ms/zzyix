@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalizeDisplayPoint, enumerateVisibleTileImages, nearestPeriodicPoint } from './periodicImages'
+import { canonicalizeDisplayPoint, enumerateVisibleTileImages, nearestPeriodicPoint, resolveWitnessDisplaySignals } from './periodicImages'
 
 const topology = { patchRows: 2, patchColumns: 2, patchWidth: 10, patchHeight: 10 }
 const tile = {
@@ -24,5 +24,17 @@ describe('periodicImages', () => {
     expect(nearestPeriodicPoint({ x: 0.2, y: 0.3 }, { x: 19.9, y: 19.8 }, topology)).toEqual({
       x: expect.closeTo(20.2), y: expect.closeTo(20.3),
     })
+  })
+
+  it('projects witness anchors to the nearest periodic image and clears occupied artist anchors', () => {
+    const signals = [{
+      id: 'witness', kind: 'glyph' as const, anchor: { x: 0.2, y: 0.3 },
+      residentId: 'fantome' as const, label: 'witness', source: 'prototype-fixture' as const,
+    }]
+    const display = resolveWitnessDisplaySignals(signals, [tile], { x: 19.9, y: 19.8 }, topology)
+
+    expect(display[0].anchor).toEqual({ x: expect.closeTo(21.4), y: expect.closeTo(20.3) })
+    expect(display[0].anchor).not.toEqual(tile.transform.position)
+    expect(signals[0].anchor).toEqual({ x: 0.2, y: 0.3 })
   })
 })

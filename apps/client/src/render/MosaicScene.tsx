@@ -21,9 +21,11 @@ import type { GridPattern } from '../domain/gridPatterns'
 import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 import { getCollaboratorColor } from '../ui/palettes'
-import { deriveOrthographicViewport, enumerateVisibleTileImages, nearestPeriodicPoint, resolveDisplayHitPoint } from './periodicImages'
+import { deriveOrthographicViewport, enumerateVisibleTileImages, nearestPeriodicPoint, resolveDisplayHitPoint, resolveWitnessDisplaySignals } from './periodicImages'
+import { ResidentWitnessLayer } from './ResidentWitnessLayer'
 import type { QuiltTopology } from '../../../server/src/domain/quiltTopology'
 import type { TopologyRect } from '../../../server/src/domain/quiltTopology'
+import type { WitnessSignal } from '../domain/witnessSignals'
 
 const geometryCache = new Map<TileShape, ExtrudeGeometry>()
 
@@ -46,13 +48,15 @@ type RemoteSelection = {
 }
 
 type MosaicSceneProps = {
-  tiles: TileInstance[]
+  tiles: readonly TileInstance[]
+  witnessSignals?: readonly WitnessSignal[]
+  onWitnessDetail?: (signal: WitnessSignal) => void
   clientId: string
   ownershipIdentity: string
   activeShape: TileShape
   ghost: Ghost
-  remoteCursors: RemoteCursor[]
-  remoteSelections: RemoteSelection[]
+  remoteCursors: readonly RemoteCursor[]
+  remoteSelections: readonly RemoteSelection[]
   gridOverlay?: {
     pattern: GridPattern
     activeSlotId?: string
@@ -443,6 +447,8 @@ const CameraZoomController = ({ zoom }: { zoom?: number }) => {
 
 const SceneContents = ({
   tiles,
+  witnessSignals = [],
+  onWitnessDetail,
   ownershipIdentity,
   activeShape,
   ghost,
@@ -479,6 +485,10 @@ const SceneContents = ({
       key: tile.id, canonicalId: tile.id, tile, position: tile.transform.position, image: { x: 0, y: 0 },
     })),
     [cameraViewport, tiles, topology],
+  )
+  const displayWitnessSignals = useMemo(
+    () => resolveWitnessDisplaySignals(witnessSignals, tiles, cameraPan, topology),
+    [cameraPan, tiles, topology, witnessSignals],
   )
   useFrame(() => {
     if (!onSceneMetrics) return
@@ -527,6 +537,7 @@ const SceneContents = ({
             <TileMesh tile={image.tile} ownershipIdentity={ownershipIdentity} />
           </group>
         ))}
+        <ResidentWitnessLayer signals={displayWitnessSignals} onDetail={onWitnessDetail} />
         {remoteSelections.map((selection) => {
           const selectedTile = tilesById.get(selection.tileId)
           if (!selectedTile) {
@@ -602,6 +613,8 @@ const SceneContents = ({
 
 export const MosaicScene = ({
   tiles,
+  witnessSignals = [],
+  onWitnessDetail,
   clientId,
   ownershipIdentity,
   activeShape,
@@ -696,6 +709,8 @@ export const MosaicScene = ({
           <fog attach="fog" args={[SCENE_FOG_COLOR, 10, 24]} />
           <SceneContents
             tiles={tiles}
+            witnessSignals={witnessSignals}
+            onWitnessDetail={onWitnessDetail}
             clientId={clientId}
             ownershipIdentity={ownershipIdentity}
             activeShape={activeShape}
