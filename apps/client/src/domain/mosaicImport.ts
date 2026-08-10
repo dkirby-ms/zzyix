@@ -308,8 +308,8 @@ const findAffectedPatches = (
 
 const bindPlacement = (placement: MosaicManifestPlacement, deployment: MosaicDeploymentContext): MosaicBoundPlacement => {
   const position = {
-    x: deployment.targetRect.minX + deployment.sourceToWorld.origin.x + placement.source.normalizedAnchor.x * deployment.sourceToWorld.scale.x,
-    y: deployment.targetRect.minY + deployment.sourceToWorld.origin.y + placement.source.normalizedAnchor.y * deployment.sourceToWorld.scale.y,
+    x: deployment.sourceToWorld.origin.x + placement.source.normalizedAnchor.x * deployment.sourceToWorld.scale.x,
+    y: deployment.sourceToWorld.origin.y + placement.source.normalizedAnchor.y * deployment.sourceToWorld.scale.y,
   }
   const tile = { ...placement.tile, position }
   return { ...placement, tile, footprint: derivePlacementBounds(tile.shape, tile) }

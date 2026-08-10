@@ -1833,6 +1833,13 @@ button:focus-visible,
   text-transform: uppercase;
 }
 
+.palette-alexander-status {
+  margin: 0.55rem 0 0;
+  color: var(--atlas-ink-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 button {
   border-radius: 10px;
   border-color: rgba(227, 208, 173, 0.34);

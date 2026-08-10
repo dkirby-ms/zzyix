@@ -5,6 +5,7 @@ apps/client/coverage/
 /playwright-report/
 /test-results/
 /offline/output/
+/apps/client/public/alexander-patch-manifest.json
 .env
 /.vscode
 infra/bicep/host.main.bicepparam

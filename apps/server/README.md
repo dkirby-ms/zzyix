@@ -192,8 +192,10 @@ additive quilt data back, compares complete legacy canvas and tile
 fingerprints, then backfills and verifies again. The cleanup trap drops both
 temporary databases.
 
-CD owns production migration execution through one manually triggered
-Container Apps job. The job runs the release server image's `db:apply` command
+CD owns production database setup through one manually triggered Container Apps
+job. The job runs the release server image's `db:apply` command, which applies
+pending migrations and idempotently initializes the canonical world when it is
+missing.
 with parallelism one, retries a failed replica twice, and must report success
 before the server Container App receives the new image. CD releases queue
 without cancellation, and deployment fails closed before changing the job when

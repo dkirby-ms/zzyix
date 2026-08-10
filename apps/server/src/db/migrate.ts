@@ -3,6 +3,7 @@ import path from 'node:path'
 import { readdirSync } from 'node:fs'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { closeDatabaseBundle, getDatabaseBundle } from './client.js'
+import { runDatabaseSeed } from './seed.js'
 
 export const resolveMigrationsFolder = (metaUrl: string): string => {
   const currentFile = fileURLToPath(metaUrl)
@@ -103,6 +104,7 @@ export const applyDatabaseMigrationsIfNeeded = async (): Promise<boolean> => {
 
 const runFromCli = async (): Promise<void> => {
   await applyDatabaseMigrationsIfNeeded()
+  await runDatabaseSeed()
 }
 
 const isExecutedAsEntryPoint = (): boolean => {

@@ -37,12 +37,19 @@ import { useConnectionStatus } from './network/useConnectionStatus'
 import type { AuthLossReason } from './network/authenticatedFetch'
 import {
   createMosaicImportQueue,
+  hashMosaicManifest,
+  parseMosaicManifest,
   parseMosaicImportRequest,
   preflightMosaicManifest,
   type MosaicImportQueueState,
   type MosaicBoundPlacement,
   type MosaicPreflightResult,
 } from './domain/mosaicImport'
+import {
+  ALEXANDER_PATCH_MANIFEST_PATH,
+  filterAlexanderManifestForDeployment,
+  selectAlexanderOwnedPatch,
+} from './domain/alexanderPatchPlacement'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
   CanonicalPatchNavigation,
@@ -231,6 +238,15 @@ const MosaicScene = lazy(async () => {
 })
 
 type ZoomTier = 'fine' | 'aggregate'
+
+type AlexanderPlacementStatus = 'idle' | 'loading' | 'armed' | 'preflighting' | 'queue' | 'error'
+
+type AlexanderPlacementState = {
+  status: AlexanderPlacementStatus
+  manifest?: unknown
+  placementCount?: number
+  message: string
+}
 
 type ActiveTileUiState = {
   activeTile: ActiveTile
@@ -497,6 +513,11 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
   const [canonicalError, setCanonicalError] = useState<string | null>(null)
   const [canonicalDescriptor, setCanonicalDescriptor] = useState<CanonicalWorldEntryDescriptor | null>(null)
+  const [alexanderPlacement, setAlexanderPlacement] = useState<AlexanderPlacementState>({
+    status: 'idle',
+    message: '',
+  })
+  const [mosaicImportQueueState, setMosaicImportQueueState] = useState<MosaicImportQueueState | null>(null)
   const [focusedCanonicalPatch, setFocusedCanonicalPatch] = useState<CanonicalPatchNavigation | null>(null)
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
@@ -550,6 +571,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const canonicalMutationTrafficRef = useRef<string[]>([])
   const stopCanonicalMutationObserverRef = useRef<(() => void) | null>(null)
+  const alexanderPreloadAttemptedRef = useRef(false)
   const clientId = useMemo(() => ensureClientId(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
@@ -1427,7 +1449,10 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
         mosaicImportResyncPendingRef.current = true
         setQuiltSubscriptionEpoch((previous) => previous + 1)
       },
-      onState: (state) => { mosaicImportStateRef.current = state },
+      onState: (state) => {
+        mosaicImportStateRef.current = state
+        setMosaicImportQueueState(state)
+      },
     })
     mosaicImportQueueRef.current = queue
     queue.start()
@@ -1481,6 +1506,194 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const attemptPlace = useCallback((): void => {
     placeFromState(activeTileRef.current, ghostRef.current)
   }, [placeFromState])
+
+  const loadAlexanderManifest = useCallback(
+    async (
+      loadingMessage: string,
+      options?: { showLoadingState?: boolean },
+    ): Promise<{ manifest: unknown; placementCount: number } | undefined> => {
+      const showLoadingState = options?.showLoadingState ?? true
+      if (showLoadingState) {
+        setAlexanderPlacement((previous) => ({
+          ...previous,
+          status: 'loading',
+          message: loadingMessage,
+        }))
+      }
+    try {
+      const response = await fetch(ALEXANDER_PATCH_MANIFEST_PATH, { cache: 'no-store' })
+      if (!response.ok) {
+        throw new Error(`The local Alexander manifest is unavailable (${response.status}). Run npm run prepare:alexander-patch-manifest.`)
+      }
+
+      const manifest = await response.json() as unknown
+      const parsed = parseMosaicManifest(manifest)
+      if (!parsed.manifest) {
+        throw new Error(parsed.rejected[0]?.message ?? 'The local Alexander manifest is malformed.')
+      }
+
+      const placementCount = parsed.manifest.placements.length
+      setAlexanderPlacement((previous) => ({
+        ...previous,
+        status: showLoadingState ? 'idle' : previous.status,
+        manifest,
+        placementCount,
+        message: previous.status === 'armed'
+          ? previous.message
+          : showLoadingState ? 'Alexander import ready. Click Place Alexander in my patch to arm the tool.' : previous.message,
+      }))
+      return { manifest, placementCount }
+    } catch (error) {
+      if (!showLoadingState) {
+        return undefined
+      }
+
+      setAlexanderPlacement((previous) => ({
+        ...previous,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'The local Alexander manifest could not be loaded.',
+      }))
+      return undefined
+    }
+  }, [])
+
+  useEffect(() => {
+    if (mode !== 'canvas' || alexanderPreloadAttemptedRef.current || alexanderPlacement.manifest) {
+      return
+    }
+
+    alexanderPreloadAttemptedRef.current = true
+    void loadAlexanderManifest('Preparing the local Alexander manifest...', { showLoadingState: false })
+  }, [alexanderPlacement.manifest, loadAlexanderManifest, mode])
+
+  const armAlexanderPlacement = useCallback(async (): Promise<void> => {
+    if (alexanderPlacement.status === 'armed') {
+      setAlexanderPlacement((previous) => ({
+        ...previous,
+        status: 'idle',
+        message: '',
+      }))
+      return
+    }
+
+    let manifest = alexanderPlacement.manifest
+    let placementCount = alexanderPlacement.placementCount
+
+    if (!manifest || !placementCount) {
+      const loaded = await loadAlexanderManifest('Loading the local Alexander manifest...')
+      if (!loaded) {
+        return
+      }
+
+      manifest = loaded.manifest
+      placementCount = loaded.placementCount
+    }
+
+    setAlexanderPlacement((previous) => ({
+      ...previous,
+      status: 'armed',
+      manifest,
+      placementCount,
+      message: 'Alexander tool armed. Click your owned patch on the canvas to start import.',
+    }))
+  }, [alexanderPlacement.manifest, alexanderPlacement.placementCount, alexanderPlacement.status, loadAlexanderManifest])
+
+  const cancelAlexanderPlacement = useCallback((): void => {
+    setAlexanderPlacement({ status: 'idle', message: '' })
+  }, [])
+
+  const handleCanvasPointerUp = useCallback((): void => {
+    if (alexanderPlacement.status === 'idle' || alexanderPlacement.status === 'queue') {
+      attemptPlace()
+      return
+    }
+
+    if (alexanderPlacement.status !== 'armed') {
+      if (alexanderPlacement.status === 'loading' || alexanderPlacement.status === 'preflighting') {
+        setAlexanderPlacement((previous) => ({
+          ...previous,
+          message: 'Alexander import is still preparing. Wait for it to finish before placing.',
+        }))
+      }
+      return
+    }
+
+    const pointer = lastPointerWorldRef.current
+    const deployment = pointer && canonicalDescriptor ? selectAlexanderOwnedPatch(canonicalDescriptor, pointer) : undefined
+    if (!deployment) {
+      setAlexanderPlacement((previous) => ({
+        ...previous,
+        message: 'Alexander tool armed. Click your owned patch on the canvas to start import.',
+      }))
+      return
+    }
+
+    if (!alexanderPlacement.manifest) {
+      setAlexanderPlacement((previous) => ({
+        ...previous,
+        status: 'error',
+        message: 'Alexander manifest is not loaded yet. Click Place Alexander in my patch again.',
+      }))
+      return
+    }
+
+    setAlexanderPlacement((previous) => ({
+      ...previous,
+      status: 'preflighting',
+      message: 'Checking the selected patch before queueing Alexander tiles...',
+    }))
+
+    void (async () => {
+      try {
+        const parsed = parseMosaicManifest(alexanderPlacement.manifest)
+        if (!parsed.manifest) {
+          setAlexanderPlacement((previous) => ({
+            ...previous,
+            status: 'error',
+            message: parsed.rejected[0]?.message ?? 'Alexander manifest could not be parsed.',
+          }))
+          return
+        }
+
+        const filteredManifest = filterAlexanderManifestForDeployment(parsed.manifest, deployment)
+        if (filteredManifest.placements.length === 0) {
+          setAlexanderPlacement((previous) => ({
+            ...previous,
+            status: 'error',
+            message: 'No Alexander placements fit inside your owned patch bounds.',
+          }))
+          return
+        }
+
+        filteredManifest.provenance.manifestSha256 = await hashMosaicManifest(filteredManifest as unknown as Record<string, unknown>)
+
+        const preflight = await startMosaicImport({
+          manifest: filteredManifest,
+          deployment,
+        })
+        if (!preflight.ready) {
+          setAlexanderPlacement((previous) => ({
+            ...previous,
+            status: 'error',
+            message: preflight.rejected[0]?.message ?? 'Alexander placement could not pass preflight.',
+          }))
+          return
+        }
+
+        setAlexanderPlacement((previous) => ({
+          ...previous,
+          status: 'idle',
+          message: `${preflight.counts.accepted} Alexander tiles queued for your patch.`,
+        }))
+      } catch (error) {
+        setAlexanderPlacement((previous) => ({
+          ...previous,
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Alexander placement could not be started.',
+        }))
+      }
+    })()
+  }, [alexanderPlacement.manifest, alexanderPlacement.status, attemptPlace, canonicalDescriptor, startMosaicImport])
 
   useEffect(() => () => {
     stopCanonicalMutationObserverRef.current?.()
@@ -1602,6 +1815,9 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     },
     setGridEnabled: (enabled) => {
       setGridOverlayEnabled(enabled)
+    },
+    releasePointer: () => {
+      handleCanvasPointerUp()
     },
     placeTileAt: (position) => {
       const pointer = vec2(position.x, position.y)
@@ -1755,6 +1971,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     activeCollaborators,
     activeTile,
     attemptPlace,
+    handleCanvasPointerUp,
     clientId,
     cameraPan,
     connectionState.status,
@@ -2009,7 +2226,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
                 }}
                 onPointerMove={updatePointer}
                 onPointerDown={updatePointer}
-                onPointerUp={mutationControlsEnabled ? attemptPlace : () => undefined}
+                onPointerUp={mutationControlsEnabled ? handleCanvasPointerUp : () => undefined}
                 onRotateDrag={(deltaX) => dispatchActiveTileUi({ type: 'rotate-fine', delta: deltaX * (Math.PI / 200) })}
                 remoteCursors={remoteCursors}
                 remoteSelections={remoteSelections}
@@ -2116,6 +2333,13 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
             onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
             onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
             paletteFallbackAnnouncement={paletteFallbackAnnouncement}
+            alexanderPlacement={{
+              status: alexanderPlacement.status,
+              message: alexanderPlacement.status === 'queue' && mosaicImportQueueState
+                ? `${alexanderPlacement.message} ${mosaicImportQueueState.status}: ${mosaicImportQueueState.outcomes.length} processed.`
+                : alexanderPlacement.message,
+              onToggle: () => void armAlexanderPlacement(),
+            }}
           />
         )}
       </div>

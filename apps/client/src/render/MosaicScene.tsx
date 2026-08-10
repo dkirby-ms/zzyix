@@ -314,7 +314,6 @@ const InteractionPlane = ({
     }
     if (event.button === 1) {
       lastMiddlePos.current = { x: event.clientX, y: event.clientY }
-      ;(event as any).nativeEvent?.preventDefault()
       event.stopPropagation()
       return
     }
@@ -332,7 +331,6 @@ const InteractionPlane = ({
     }
     if (event.button === 1) {
       lastMiddlePos.current = null
-      ;(event as any).nativeEvent?.preventDefault()
       event.stopPropagation()
       return
     }

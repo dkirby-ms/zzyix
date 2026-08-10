@@ -39,6 +39,12 @@ export const loadRuntimeTelemetryConfig = async (): Promise<RuntimeTelemetryConf
       return null
     }
 
+    const contentType = response.headers.get('content-type') ?? ''
+    if (!contentType.toLowerCase().includes('application/json')) {
+      console.debug('[telemetry] Telemetry configuration is unavailable; continuing without Application Insights')
+      return null
+    }
+
     const config = parseRuntimeTelemetryConfig(await response.json())
     if (!config) {
       console.debug('[telemetry] Telemetry not configured; Application Insights will not be initialized')

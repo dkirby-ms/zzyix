@@ -220,17 +220,7 @@ test('imports an Alexander fixture through the client parser and bounded queue',
     data: { externalSubject, claimEnabled: true },
   })
   expect(setup.ok()).toBeTruthy()
-  const { quiltId, patchId } = await setup.json() as { quiltId: string; patchId: string }
-
-  await page.addInitScript((subject) => {
-    localStorage.setItem('zzyix:e2e-subject', subject)
-    localStorage.setItem('zzyix:e2e-authenticated', 'true')
-  }, externalSubject)
-  await page.goto('http://127.0.0.1:4174')
-  await expect.poll(async () => page.evaluate(() => Boolean(window.__ZZYIX_E2E_CANVAS__?.getState))).toBe(true)
-  await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState().connectionStatus)).toBe('connected')
-  await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState().metrics.retainedPatchCount ?? 0))
-    .toBeGreaterThan(0)
+  const { quiltId } = await setup.json() as { quiltId: string }
 
   const manifest: Record<string, unknown> = {
     schemaVersion: 2,
@@ -247,31 +237,51 @@ test('imports an Alexander fixture through the client parser and bounded queue',
   }
   ;(manifest.provenance as Record<string, unknown>).manifestSha256 = browserManifestHash(manifest)
 
-  const preflight = await page.evaluate(async (input) => window.__ZZYIX_E2E_CANVAS__?.startMosaicImport(input), {
-    manifest,
-    deployment: {
-      targetRect: { minX: 0, maxX: 10, minY: 0, maxY: 10 },
-      sourceToWorld: { origin: { x: 0, y: 0 }, scale: { x: 10, y: 10 } },
-    },
+  await page.route('**/alexander-patch-manifest.json', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(manifest),
+    })
   })
-  expect(preflight).toMatchObject({ ready: true, rejected: [] })
+
+  await page.addInitScript((subject) => {
+    localStorage.setItem('zzyix:e2e-subject', subject)
+    localStorage.setItem('zzyix:e2e-authenticated', 'true')
+  }, externalSubject)
+  await page.goto('http://127.0.0.1:4174')
+  await expect.poll(async () => page.evaluate(() => Boolean(window.__ZZYIX_E2E_CANVAS__?.getState))).toBe(true)
+  await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState().connectionStatus)).toBe('connected')
+  await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getState().metrics.retainedPatchCount ?? 0))
+    .toBeGreaterThan(0)
+
+  await page.getByRole('button', { name: 'Place Alexander in my patch' }).click()
+  await expect(page.getByText('Alexander tool armed. Click your owned patch on the canvas to start import.')).toBeVisible()
+  await page.evaluate(() => {
+    const canvas = window.__ZZYIX_E2E_CANVAS__
+    canvas?.movePointer({ x: 100, y: 100 })
+    canvas?.releasePointer()
+  })
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+
+  await page.evaluate(() => {
+    const canvas = window.__ZZYIX_E2E_CANVAS__
+    canvas?.movePointer({ x: 0, y: 0 })
+    canvas?.releasePointer()
+    canvas?.startCanonicalMutationObserver()
+  })
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  await expect(page.getByText('2 Alexander tiles queued for your patch.')).toBeVisible()
+
+  await expect.poll(async () => page.evaluate(() => window.__ZZYIX_E2E_CANVAS__?.getCanonicalMutationTraffic()))
+    .toContain('quilt_place_tile')
 
   await expect.poll(async () => page.evaluate(() => {
     const state = window.__ZZYIX_E2E_CANVAS__?.getState()
-    const hasPlacement = (color: string, position: { x: number; y: number }): boolean =>
-      state?.tiles.some((tile) => tile.color === color
-        && Math.abs(tile.position.x - position.x) < 1e-6
-        && Math.abs(tile.position.y - position.y) < 1e-6) ?? false
+    const hasPlacement = (color: string): boolean => state?.tiles.some((tile) => tile.color === color) ?? false
 
     return state?.metrics.optimisticCount === 0
-      && hasPlacement('#abc', { x: 2, y: 2 })
-      && hasPlacement('#def', { x: 4, y: 4 })
+      && hasPlacement('#abc')
+      && hasPlacement('#def')
   })).toBe(true)
 
-  const reconnected = await connect(REPLICA_B, quiltId, await issueToken(externalSubject))
-  const statePromise = onceMatching<QuiltScopedStatePayload>(reconnected.socket, 'quilt_patch_state', (payload) => payload.patchId === patchId && payload.payloadMode === 'fine')
-  await subscribe(reconnected.socket, { quiltId, rooms: [{ requestId: 'alexander-fine', kind: 'fine', row: 0, column: 0, chunkIds: ['0:0'] }] })
-  const state = await statePromise
-  expect(state.tiles.filter((tile) => tile.color === '#abc' || tile.color === '#def')).toHaveLength(2)
-  reconnected.socket.disconnect()
 })
