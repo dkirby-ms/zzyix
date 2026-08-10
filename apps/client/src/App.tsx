@@ -35,6 +35,13 @@ import {
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
 import type { AuthLossReason } from './network/authenticatedFetch'
+import {
+  createMosaicImportQueue,
+  preflightMosaicManifest,
+  type MosaicImportQueueState,
+  type MosaicManifestPlacement,
+  type MosaicPreflightResult,
+} from './domain/mosaicImport'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
   CanonicalPatchNavigation,
@@ -483,6 +490,8 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
   const [quiltProtocol, setQuiltProtocol] = useState<QuiltProtocolHandshake | null>(null)
   const [quiltCache, setQuiltCache] = useState<QuiltCacheState>(createQuiltCache)
+  const mosaicImportStateRef = useRef<MosaicImportQueueState | null>(null)
+  const mosaicImportResyncPendingRef = useRef(false)
   const [quiltOccupancy, setQuiltOccupancy] = useState<QuiltOccupancyChunk[]>([])
   const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
   const [connectionEpoch, setConnectionEpoch] = useState(0)
@@ -495,6 +504,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const ghostRef = useRef(ghost)
   const ghostVisibleRef = useRef(ghostVisible)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
+  const mosaicImportQueueRef = useRef<ReturnType<typeof createMosaicImportQueue> | null>(null)
   const pointerEmitThrottleRef = useRef<{
     lastSentAt: number
     pendingPosition?: { x: number; y: number }
@@ -698,6 +708,9 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     setCameraZoomOverride(undefined)
     setCameraZoom(58)
     setConnectionEpoch(0)
+    mosaicImportQueueRef.current = null
+    mosaicImportStateRef.current = null
+    mosaicImportResyncPendingRef.current = false
   }, [])
 
   useEffect(() => {
@@ -854,6 +867,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
 
   const onQuiltPatchState = useCallback((payload: QuiltScopedStatePayload): void => {
     quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
+    mosaicImportResyncPendingRef.current = false
     if (payload.payloadMode === 'fine') {
       setQuiltCache((previous) => mergeQuiltPatchSnapshot(previous, {
         patchId: payload.patchId,
@@ -1321,6 +1335,91 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     }
     triggerInvalidPulse()
   }, [emitSelectionUpdate, isQuiltV2, ownershipIdentity, quiltCache, quiltProtocol, socketRef, triggerInvalidPulse, visibleTiles])
+
+  const startMosaicImport = useCallback(async (input: unknown): Promise<MosaicPreflightResult> => {
+    const topology = quiltProtocol?.topology
+    const targetPatchId = canonicalDescriptor?.assignedPatch.id
+    if (!isQuiltV2 || !topology || !canonicalDescriptor || !targetPatchId) {
+      return { ready: false, accepted: [], rejected: [{ reason: 'target', message: 'Canonical quilt is not ready for import' }], warnings: [], counts: { accepted: 0, rejected: 1, warnings: 0 } }
+    }
+
+    const preflight = await preflightMosaicManifest(input, {
+      expectedSourceImageId: 'alexander-mosaic-primary',
+      expectedSourceDimensions: { width: 1077, height: 1616 },
+      expectedTopology: {
+        patchRows: topology.patchRows,
+        patchColumns: topology.patchColumns,
+        patchWidth: topology.patchWidth,
+        patchHeight: topology.patchHeight,
+        originX: canonicalDescriptor.originX,
+        originY: canonicalDescriptor.originY,
+      },
+      quiltId: canonicalDescriptor.quiltId,
+      patchId: targetPatchId,
+      patchRevision: quiltCache.patches[targetPatchId]?.cursor.revision,
+    })
+    if (!preflight.ready || !preflight.manifest || !preflight.manifestHash) return preflight
+
+    const manifest = preflight.manifest
+    const queue = createMosaicImportQueue({
+      manifestHash: preflight.manifestHash,
+      placements: manifest.placements,
+      getExpectedPatchRevisions: (placement: MosaicManifestPlacement) => {
+        const patchIds = findAffectedCachedPatchIds(quiltCache, { shape: placement.tile.shape, transform: placement.tile }, topology)
+        if (!patchIds) return undefined
+        const revisions = expectedPatchRevisions(quiltCache, patchIds)
+        return Object.keys(revisions).length === patchIds.length ? revisions : undefined
+      },
+      buildRequest: (placement, operationId, revisions) => {
+        const tile = { id: operationId, shape: placement.tile.shape, color: placement.tile.color, material: placement.tile.material, transform: placement.tile, createdAt: Date.now(), placedBy: ownershipIdentity }
+        const patchIds = findAffectedCachedPatchIds(quiltCache, tile, topology) ?? []
+        setQuiltCache((previous) => setQuiltOptimisticTile(previous, patchIds, tile, operationId))
+        return { quiltId: canonicalDescriptor.quiltId, operationId, expectedPatchRevisions: revisions, tile: { tileId: operationId, shape: placement.tile.shape, color: placement.tile.color, material: placement.tile.material, transform: placement.tile } }
+      },
+      submit: (request, ack) => socketActionRef.current?.emit('quilt_place_tile', request, ack),
+      onAccepted: (placement, ack) => {
+        setQuiltCache((previous) => {
+          const cleared = clearQuiltOptimisticTile(previous, ack.operationId)
+          const patchIds = findAffectedCachedPatchIds(cleared, ack.tile, topology) ?? []
+          const applied = patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, { ...ack.tile, placedBy: ownershipIdentity }, {
+            patchId, opSeq: ack.patchRevisions[patchId], revision: ack.patchRevisions[patchId], eventId: ack.eventIds[patchId],
+          }), cleared)
+          return reconcileQuiltMutationRevisions(applied, ack.patchRevisions, ack.eventIds)
+        })
+        void placement
+      },
+      isConnected: () => connectionState.status === 'connected' && socketActionRef.current?.connected === true,
+      canResume: () => quiltProtocol.mutationEnabled && !mosaicImportResyncPendingRef.current && Boolean(quiltCache.patches[targetPatchId]?.cursor),
+      onStaleRevision: () => {
+        mosaicImportResyncPendingRef.current = true
+        setQuiltSubscriptionEpoch((previous) => previous + 1)
+      },
+      onState: (state) => { mosaicImportStateRef.current = state },
+    })
+    mosaicImportQueueRef.current = queue
+    queue.start()
+    return preflight
+  }, [canonicalDescriptor, connectionState.status, isQuiltV2, ownershipIdentity, quiltCache, quiltProtocol, setQuiltCache])
+
+  useEffect(() => {
+    const handleImport = (event: Event): void => {
+      void startMosaicImport((event as CustomEvent<unknown>).detail)
+    }
+    window.addEventListener('zzyix:mosaic-import', handleImport)
+    return () => window.removeEventListener('zzyix:mosaic-import', handleImport)
+  }, [startMosaicImport])
+
+  useEffect(() => {
+    const queue = mosaicImportQueueRef.current
+    if (!queue) return
+    if (connectionState.status !== 'connected') {
+      mosaicImportResyncPendingRef.current = true
+      queue.pause()
+      return
+    }
+    const state = queue.getState()
+    if (state.status === 'paused' && !mosaicImportResyncPendingRef.current) queue.resume(state.manifestHash)
+  }, [connectionEpoch, connectionState.status, quiltCache, quiltSubscriptionEpoch])
 
   const updatePointer = useCallback((x: number, y: number): void => {
     const pointer = vec2(x, y)
