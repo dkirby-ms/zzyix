@@ -291,7 +291,6 @@ const InteractionPlane = ({
         onCameraPan(deltaX, deltaY)
       }
       lastMiddlePos.current = { x: event.clientX, y: event.clientY }
-      ;(event as any).nativeEvent?.preventDefault()
       event.stopPropagation()
       return
     }

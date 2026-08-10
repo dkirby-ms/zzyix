@@ -12,6 +12,15 @@ ms.topic: plan
 
 Complete the Alexander mosaic epic by converting existing deterministic palette and candidate artifacts into an app-supported placement manifest, preflighting it in the client, submitting bounded windows through `quilt_place_tile`, and proving fidelity, persistence, replay, and reconnect convergence while deferring agent-owned writes.
 
+## Product Decision Revision
+
+The generated manifest is an unbound, reusable source-local artifact. It must
+not encode a quilt ID, patch ID, world rectangle, or world-space placement.
+Each import operation supplies an explicit deployment rectangle and
+source-to-world transform. The client resolves the one active canonical quilt
+through the canonical-world entry flow, then derives affected patch cursors and
+ownership eligibility from the live runtime cache before using `quilt_place_tile`.
+
 ## Objectives
 
 ### User Requirements
@@ -109,13 +118,28 @@ Complete the Alexander mosaic epic by converting existing deterministic palette 
 * [ ] Step 6.1: Only after explicit approval, design worker mutation authority through ordinary authenticated contracts with audit, checkpoints, bounded retries, and multi-replica tests.
   * Details: `.copilot-tracking/details/2026-08-09/alexander-placement-manifest-import-details.md` (Lines 220-237)
 
+### [x] Implementation Phase 7: Review-Driven Correctness Rework
+
+<!-- parallelizable: false -->
+
+* [x] Step 7.1: Make queued import operations read the latest cache, cursor, and topology state; remove optimistic tiles for rejected outcomes; and add regression coverage for same-patch stale-revision recovery.
+  * Details: `.copilot-tracking/details/2026-08-09/alexander-placement-manifest-import-details.md` under `Implementation Phase 7`
+* [x] Step 7.2: Extend preflight to validate shape safely, topology, deployment bounds, ownership, current cursors, color, and manifest policy before a mutation is emitted.
+  * Details: `.copilot-tracking/details/2026-08-09/alexander-placement-manifest-import-details.md` under `Implementation Phase 7`
+* [x] Step 7.3: Correct finalized manifest provenance calculation and add missing generator failure coverage.
+  * Details: `.copilot-tracking/details/2026-08-09/alexander-placement-manifest-import-details.md` under `Implementation Phase 7`
+* [x] Step 7.4: Exercise the actual client manifest import path in multi-replica E2E, including bounded queueing, stale recovery, replay, and reconnect; repair replica startup only if the failure is reproducible.
+  * Details: `.copilot-tracking/details/2026-08-09/alexander-placement-manifest-import-details.md` under `Implementation Phase 7`
+* [x] Step 7.5: Re-run focused validation and update the handoff records with verified results only.
+  * Details: `.copilot-tracking/details/2026-08-09/alexander-placement-manifest-import-details.md` under `Implementation Phase 7`
+
 ## Planning Log
 
 See `.copilot-tracking/plans/logs/2026-08-09/alexander-placement-manifest-import-log.md` for DR-01 through DR-03, DD-01 through DD-03, selected path, rejected alternatives, and WI-01 through WI-03.
 
 ## Dependencies
 
-* Product confirmation of the target patch, source-to-world transform, release fidelity threshold, and v1 actor. Provisional engineering defaults cover candidate count, four in-flight placements, two stale-revision retries, and deterministic skip-and-record conflict handling.
+* Product confirmation of per-operation deployment rectangle, source-to-world transform, release fidelity threshold, and v1 actor. The active canonical quilt, patch cursors, and ownership are runtime-derived rather than generated artifact values. Provisional engineering defaults cover candidate count, four in-flight placements, two stale-revision retries, and deterministic skip-and-record conflict handling.
 * Existing Node, client, server, PostgreSQL, and authenticated multi-replica test infrastructure.
 * Existing source provenance, preprocessing, and mosaic-input generation commands.
 * A decision on publication or CI handling for ignored generated manifests and fidelity reports.
@@ -123,6 +147,7 @@ See `.copilot-tracking/plans/logs/2026-08-09/alexander-placement-manifest-import
 ## Success Criteria
 
 * Identical source and config inputs produce byte-identical manifest and fidelity hashes — Traces to: user deterministic-pipeline requirement and research finding that existing outputs are sufficient inputs.
+* Generated manifests remain portable and contain only source-local geometry; each import rejects a missing or invalid deployment rectangle and transform before any mutation.
 * Client preflight rejects malformed or incompatible manifests before any mutation — Traces to: user canonical-import requirement and research Phase 3.
 * All committed placements use existing `quilt_place_tile` and pass canonical server persistence, idempotent replay, patch history, snapshots, and revision checks — Traces to: user persistence/replay requirement and existing runtime contracts.
 * Reconnect through another replica converges to the same canonical tile set, transforms, revisions, and cursors — Traces to: user reconnect requirement and existing E2E patterns.

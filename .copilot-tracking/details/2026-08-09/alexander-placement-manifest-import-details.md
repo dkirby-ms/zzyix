@@ -236,6 +236,77 @@ Dependencies:
 * Explicit product decision that v1 must be fully agent-committed
 * Separate authority and threat-model research
 
+## Implementation Phase 7: Review-Driven Correctness Rework
+
+<!-- parallelizable: false -->
+
+### Step 7.1: Refresh queue state and reconcile rejections
+
+Ensure queue callbacks obtain current cache and topology state at dispatch and
+after ACK or resync, rather than capturing the import-start cache. Remove any
+optimistic tile for a terminal rejected operation. Add tests that force multiple
+same-patch placements through stale-revision recovery and verify later requests
+use the server-advanced revision.
+
+Files:
+* `apps/client/src/App.tsx`
+* `apps/client/src/domain/mosaicImport.ts`
+* `apps/client/src/domain/mosaicImport.test.ts`
+* Existing focused client test surfaces as needed
+
+### Step 7.2: Complete preflight runtime validation
+
+Validate placement shapes before deriving a footprint. Require and validate live
+topology, deployment world bounds, patch ownership, every affected current patch
+cursor, supported color, and the configured manifest policy. Return structured
+rejection results and emit no socket mutation when any validation fails.
+
+Files:
+* `apps/client/src/domain/mosaicImport.ts`
+* `apps/client/src/domain/mosaicImport.test.ts`
+* `apps/client/src/domain/tileGeometry.ts` only for a narrow shared validator
+
+### Step 7.3: Correct generator finalization and coverage
+
+Calculate serialized-byte metadata and manifest provenance only after the final
+manifest fields have been written, without self-referential instability. Add
+missing-input and input-hash-mismatch tests.
+
+Files:
+* `scripts/generate-alexander-patch-manifest.mjs`
+* `scripts/generate-alexander-patch-manifest.test.mjs`
+
+### Step 7.4: Add true client-path E2E coverage
+
+Replace direct Socket.IO placement emission with a browser import invocation that
+parses a manifest and runs the bounded queue. Verify deployment binding,
+stale-revision recovery, replay, optimistic reconciliation, and reconnect across
+replicas. Diagnose and correct replica-A startup only when a focused
+reproduction identifies an application or harness defect.
+
+Files:
+* `e2e/alexander-mosaic-import.spec.ts`
+* `e2e/support/` only when a focused helper is required
+* `playwright.config.ts` only when a focused project is required
+
+### Step 7.5: Validate and correct handoff claims
+
+Run focused generator, client, server, and multi-replica E2E commands. Retain
+only reproducible artifact, deployment, and E2E claims in the changes log and
+planning log. Record unresolved product release gates or unavailable ignored
+artifact evidence as blockers rather than completed validation.
+
+Validation commands:
+* `npm run test:alexander-patch-manifest`
+* `npm run test:alexander-patch-fidelity`
+* `npm run test --workspace=apps/client -- src/domain/mosaicImport.test.ts`
+* `npm run test:server -- src/db/repository.postgres.integration.test.ts`
+* `npm run lint:client`
+* `npm run build:client`
+* `npm run lint:server`
+* `npm run build:server`
+* `npm run test:e2e:multi-replica`
+
 ## Dependencies
 
 * Existing Node and client/server test toolchains

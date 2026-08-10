@@ -4,12 +4,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-	ALEXANDER_TARGET_REQUIREMENTS,
+	ALEXANDER_DEPLOYMENT_REQUIREMENTS,
 	ALEXANDER_V1_DEFAULTS,
-	CANONICAL_TOPOLOGY,
 	assertSupportedPlacement,
-	deriveFootprint,
-	mapSourcePointToWorld,
 } from './alexander-placement-contract.mjs'
 
 export * from './alexander-placement-contract.mjs'
@@ -18,19 +15,13 @@ const defaultInputConfigUrl = new URL('../offline/output/alexander-mosaic-inputs
 const defaultPreprocessingConfigUrl = new URL('../offline/output/alexander-preprocessed/alexander-preprocessing-config.json', import.meta.url)
 const defaultOutputUrl = new URL('../offline/output/alexander-mosaic-inputs/', import.meta.url)
 
-const MANIFEST_VERSION = 1
-const GENERATOR_VERSION = 'alexander-patch-manifest-v1'
-
-export const DEFAULT_MANIFEST_TARGET = Object.freeze({
-	quiltId: 'canonical-alexander-import-target',
-	patchId: 'operator-selected-owned-patch',
-	targetRect: Object.freeze({ minX: 0, maxX: CANONICAL_TOPOLOGY.patchWidth, minY: 0, maxY: CANONICAL_TOPOLOGY.patchHeight }),
-	sourceToWorld: Object.freeze({ origin: Object.freeze({ x: 0, y: 0 }), scale: Object.freeze({ x: CANONICAL_TOPOLOGY.patchWidth, y: CANONICAL_TOPOLOGY.patchHeight }) }),
-})
+const MANIFEST_VERSION = 2
+const GENERATOR_VERSION = 'alexander-patch-manifest-v2'
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex')
 const hashFile = async (filePath) => sha256(await readFile(filePath))
 const stableStringify = (value) => `${JSON.stringify(sortObject(value), null, 2)}\n`
+const canonicalStringify = (value) => JSON.stringify(sortObject(value))
 const sortObject = (value) => {
 	if (Array.isArray(value)) return value.map(sortObject)
 	if (value && typeof value === 'object' && value.constructor === Object) {
@@ -56,16 +47,8 @@ export const manifestContentHash = (manifest) => {
 		delete copy.provenance.manifestSha256
 		delete copy.provenance.manifestBytes
 	}
-	return sha256(stableStringify(copy))
+	return sha256(canonicalStringify(copy))
 }
-
-const validateTarget = (target) => {
-	assert.ok(target.quiltId && target.patchId, 'target quiltId and patchId are required')
-	assert.ok(target.targetRect && target.sourceToWorld, 'target rectangle and sourceToWorld transform are required')
-	return target
-}
-
-const intersects = (left, right) => left.minX < right.maxX && left.maxX > right.minX && left.minY < right.maxY && left.maxY > right.minY
 
 const sourceFeatureCoverage = ({ candidate, features }) => features
 	.filter((feature) => candidate.box.x < feature.box.x + feature.box.width
@@ -78,13 +61,11 @@ export const generatePatchManifest = async ({
 	mosaicInputsConfigPath,
 	preprocessingConfigPath,
 	outputPath,
-	target = DEFAULT_MANIFEST_TARGET,
 	candidateBudget,
 	placementBudget,
 	conflictPolicy = ALEXANDER_V1_DEFAULTS.conflictPolicy,
 	geometry = ALEXANDER_V1_DEFAULTS.geometry,
 }) => {
-	validateTarget(target)
 	assert.equal(conflictPolicy, 'skip-and-record', 'only deterministic skip-and-record is supported')
 	assert.deepEqual(geometry, ALEXANDER_V1_DEFAULTS.geometry, 'v1 geometry must remain square ceramic with zero rotation')
 
@@ -118,7 +99,6 @@ export const generatePatchManifest = async ({
 
 	const orderedCandidates = [...candidatesDocument.candidates].sort((left, right) => right.score - left.score || left.id.localeCompare(right.id))
 	const seenIds = new Set()
-	const occupied = []
 	const placements = []
 	const skippedCandidates = []
 	const featureTargets = new Set()
@@ -131,29 +111,22 @@ export const generatePatchManifest = async ({
 		if (placements.length >= maxPlacements) return skip('placement-budget-exceeded')
 		const palette = paletteDocument.palette.find((entry) => entry.id === candidate.paletteId)
 		if (!palette) return skip('missing-palette-reference')
-		const position = mapSourcePointToWorld({ point: candidate.anchor, sourceDimensions, targetRect: target.targetRect, transform: target.sourceToWorld })
-		const footprint = deriveFootprint({ ...geometry, position })
-		const targetBounds = { minX: target.targetRect.minX, maxX: target.targetRect.maxX, minY: target.targetRect.minY, maxY: target.targetRect.maxY }
-		if (footprint.minX < targetBounds.minX || footprint.maxX > targetBounds.maxX || footprint.minY < targetBounds.minY || footprint.maxY > targetBounds.maxY) return skip('out-of-bounds', { position, footprint })
-		if (occupied.some((other) => intersects(footprint, other))) return skip('collision', { position, footprint })
 		const coveredFeatures = sourceFeatureCoverage({ candidate, features })
 		coveredFeatures.forEach((feature) => featureTargets.add(feature))
-		occupied.push(footprint)
 		placements.push({
 			id: `alexander-tile-${String(placements.length + 1).padStart(5, '0')}`,
-			source: { candidateId: candidate.id, rank: index + 1, anchor: candidate.anchor, box: candidate.box, score: candidate.score, paletteId: candidate.paletteId, paletteDeltaE: candidate.paletteDeltaE, featureTargets: coveredFeatures },
-			tile: { position, shape: geometry.shape, material: geometry.material, color: palette.hex, rotation: geometry.rotation, mirrored: geometry.mirrored },
-			footprint,
+			source: { candidateId: candidate.id, rank: index + 1, anchor: candidate.anchor, normalizedAnchor: { x: candidate.anchor.x / sourceDimensions.width, y: candidate.anchor.y / sourceDimensions.height }, box: candidate.box, score: candidate.score, paletteId: candidate.paletteId, paletteDeltaE: candidate.paletteDeltaE, featureTargets: coveredFeatures },
+			tile: { shape: geometry.shape, material: geometry.material, color: palette.hex, rotation: geometry.rotation, mirrored: geometry.mirrored },
 		})
 	})
 
-	placements.forEach((placement) => assertSupportedPlacement(placement.tile))
+	placements.forEach((placement) => assertSupportedPlacement({ ...placement.tile, position: { x: 0, y: 0 } }))
 	const manifest = {
 		schemaVersion: MANIFEST_VERSION,
 		generator: { name: GENERATOR_VERSION, seed: inputConfig.pipeline.generatorSeed, command: 'npm run generate:alexander-patch-manifest' },
 		source: { imageId: preprocessingConfig.source.imageId, sourceSha256: preprocessingConfig.source.sha256, dimensions: sourceDimensions, coordinateUnit: candidatesDocument.coordinateSpace.unit, featureRegions: features, preprocessingConfig: preprocessingConfigArtifact, normalizedArtifact: await artifactRecord(resolvePath(preprocessingConfig.output.artifacts.normalized.path)) },
 		inputs: { config: inputConfigArtifact, palette: paletteArtifact, candidates: candidatesArtifact },
-		target: { ...target, topology: CANONICAL_TOPOLOGY, coordinateSpace: 'canonical-world-x-y' },
+		coordinateSpace: 'source-local-normalized-x-y',
 		geometry: { ...geometry, footprintUnit: 0.88 },
 		budget: { candidateCount: candidatesDocument.candidates.length, candidateBudget: maxCandidates, placementBudget: maxPlacements, accepted: placements.length, skipped: skippedCandidates.length },
 		policy: { conflict: conflictPolicy, outOfBounds: conflictPolicy, ordering: 'score-descending-then-candidate-id-ascending' },
@@ -162,13 +135,18 @@ export const generatePatchManifest = async ({
 		placements,
 	}
 	const manifestPath = resolvePath(outputPath)
-	manifest.provenance = { manifestSha256: '', manifestBytes: 0, requiredTargetFields: ALEXANDER_TARGET_REQUIREMENTS }
+	manifest.provenance = { manifestSha256: '', manifestBytes: 0, requiredDeploymentFields: ALEXANDER_DEPLOYMENT_REQUIREMENTS }
 	manifest.provenance.manifestSha256 = manifestContentHash(manifest)
-	const finalSerialized = stableStringify(manifest)
-	manifest.provenance.manifestBytes = Buffer.byteLength(finalSerialized)
+	let finalSerialized = stableStringify(manifest)
+	let manifestBytes = Buffer.byteLength(finalSerialized)
+	while (manifest.provenance.manifestBytes !== manifestBytes) {
+		manifest.provenance.manifestBytes = manifestBytes
+		finalSerialized = stableStringify(manifest)
+		manifestBytes = Buffer.byteLength(finalSerialized)
+	}
 	const finalArtifact = { path: path.relative(process.cwd(), manifestPath), bytes: Buffer.byteLength(finalSerialized), sha256: sha256(finalSerialized) }
 	await mkdir(path.dirname(manifestPath), { recursive: true })
-	await writeFile(manifestPath, stableStringify(manifest))
+	await writeFile(manifestPath, finalSerialized)
 	return { ...manifest, artifact: finalArtifact }
 }
 

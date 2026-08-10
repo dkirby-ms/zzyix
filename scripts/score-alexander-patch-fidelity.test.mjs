@@ -15,7 +15,7 @@ const makeManifest = (root, color = '#646464') => {
     sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 255, g: 255, b: 255 } } }).grayscale().png().toFile(edgePath),
   ]).then(async () => {
     const manifest = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       source: { imageId: 'synthetic', dimensions: { width: 8, height: 8 }, normalizedArtifact: { path: normalizedPath, sha256: '' }, preprocessingConfig: { path: path.join(root, 'alexander-preprocessing-config.json') } },
       placements: [{ source: { box: { x: 0, y: 0, width: 8, height: 8 } }, tile: { color } }],
       skippedCandidates: [],

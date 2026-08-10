@@ -2,6 +2,7 @@ import type { TileInstance } from '../domain/placementSolver'
 import type { ActiveTile } from '../interaction/controller'
 import type { ConnectionStatus } from '../network/useConnectionStatus'
 import type { PlaceTileAck } from '../../../server/src/contracts'
+import type { MosaicPreflightResult } from '../domain/mosaicImport'
 
 export const CANVAS_TEST_API_KEY = '__ZZYIX_E2E_CANVAS__'
 
@@ -127,6 +128,7 @@ export type CanvasTestApi = {
     includeExpectedRevision?: boolean
     expectedRevisionOverride?: number
   }) => Promise<PlaceTileAck>
+  startMosaicImport: (input: unknown) => Promise<MosaicPreflightResult>
 }
 
 declare global {

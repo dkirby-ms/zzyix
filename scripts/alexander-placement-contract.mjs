@@ -35,11 +35,12 @@ export const ALEXANDER_V1_DEFAULTS = Object.freeze({
   }),
 })
 
-export const ALEXANDER_TARGET_REQUIREMENTS = Object.freeze({
-  quiltId: 'explicit-canonical-quilt-id',
-  patchId: 'operator-selected-owned-patch',
-  targetRect: 'explicit-world-rectangle',
-  sourceToWorld: 'explicit-transform',
+export const ALEXANDER_DEPLOYMENT_REQUIREMENTS = Object.freeze({
+  activeCanonicalQuilt: 'resolved-from-canonical-world-entry',
+  targetRect: 'explicit-world-rectangle-per-operation',
+  sourceToWorld: 'explicit-source-local-transform-per-operation',
+  affectedPatchCursors: 'derived-from-live-quilt-cache',
+  ownership: 'validated-from-live-runtime-state',
   fidelityThreshold: 'release-gate-confirmation-required',
 })
 

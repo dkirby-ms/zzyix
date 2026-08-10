@@ -15,9 +15,11 @@ Gaps and differences identified between research findings and the implementation
 
 * V1 is a user or operator-triggered client import. Agent-owned writes remain a
   separate decision-gated follow-up.
-* The import target supplies the canonical protocol-V2 quilt ID, an
-  operator-selected owned patch, its target world rectangle, and an explicit
-  source-to-world transform. Runtime code must not infer any of these values.
+* The active canonical quilt is resolved at import time. The operator-selected
+  deployment supplies its target world rectangle and explicit source-to-world
+  transform; the client derives affected patches, ownership eligibility, and
+  cursors from the active quilt. The generated manifest contains none of these
+  deployment-specific values.
 * The configured candidate budget, four in-flight placements, two stale-revision
   retries, pause-and-resume cancellation, and deterministic skip-and-record
   conflict policy are the provisional v1 defaults.
@@ -29,6 +31,25 @@ Gaps and differences identified between research findings and the implementation
   can proceed without silently choosing a target or threshold.
 
 ### Final Validation Status
+
+* The 2026-08-09 implementation review reopened the work as Phase 7. Phase 7
+  is complete: queue callbacks read current refs, rejected and stale optimistic
+  entries are removed, preflight validates live runtime constraints, provenance
+  finalization is stable, and E2E drives the browser import path.
+* Replica-A refusal was reproducible and caused by the Alexander E2E test
+  stopping Playwright-managed shared servers. Removing that test-owned teardown
+  restored the full suite. `npm run test:e2e:multi-replica` passed with 2 tests
+  passed and 1 skipped; ports 3001, 5173, 3201, 3202, and 4174 were free after
+  validation.
+
+* Product decision revision: there is one active canonical quilt. Alexander
+  manifests are schema-v2 source-local artifacts with normalized anchors and no
+  quilt ID, patch ID, target rectangle, world transform, world footprint, or
+  deployment-selected collision outcome. Import requests provide
+  `{ manifest, deployment }`, where deployment contains an explicit rectangle
+  and source-to-world transform. `discoverCanonicalWorld` resolves the active
+  quilt identity, and the client derives affected patch cursors from the live
+  quilt cache before each ordinary `quilt_place_tile` request.
 
 * No new unaddressed research items or plan deviations were identified. The plan covers deterministic manifest generation from existing palette/candidate outputs, app-supported preflight, bounded `quilt_place_tile` import, fidelity evidence, canonical persistence, replay, reconnect, and the separate agent-owned-write boundary.
 * DR-01 remains a release-gate product decision, mitigated for implementation by the documented provisional defaults and explicit target/transform requirements.
@@ -42,17 +63,16 @@ Gaps and differences identified between research findings and the implementation
   `3313069d7e0a44cf11fe261ea6289fe4ce2aa5d70cdfb71e5206f182d1e6d0bf`.
   Two fidelity scorings produced matching report hashes
   `59c15f8cdf1017e0a772402e67a392e4654b5ce230b673afb387ec37de9bfd8d`.
-* The focused Alexander multi-replica import scenario passed. The initial
-  combined E2E run reported a transient `ECONNREFUSED` for replica A in the
-  reconnect scenario; the focused reconnect rerun passed without a code change.
-  Ports 3001, 5173, 3201, 3202, and 3299 were clear after validation.
+* Focused Phase 7 validation passed: 7 manifest tests, 2 fidelity tests, 20
+  client import tests, 13 server persistence tests, client/server lint, and
+  client/server builds.
 
 ### Unaddressed Research Items
 
-* DR-01: The exact canonical quilt, owned patch set, target world rectangle, and release fidelity threshold are not specified in the repository research.
+* DR-01: The release deployment rectangle, source-to-world transform, and fidelity threshold are not specified in the repository research.
   * Source: `.copilot-tracking/research/subagents/2026-08-09/alexander-placement-pipeline-research.md` under `Unresolved Questions`
-  * Reason: These are product and deployment decisions rather than implementation facts. The plan supplies provisional import, retry, concurrency, and conflict defaults so implementation can proceed while release values are confirmed.
-  * Impact: Medium. Phase 1 must confirm the release target and threshold before acceptance, but the generator and queue can be built against explicit provisional values.
+  * Reason: These are per-operation product and deployment decisions rather than generated artifact facts. The active canonical quilt is resolved at runtime, and the plan supplies provisional import, retry, concurrency, and conflict defaults.
+  * Impact: Medium. Operations must supply deployment values and confirm the release threshold before acceptance.
 
 * DR-02: The normalized-master provenance recipe references a path that differs from the current generated artifact path.
   * Source: `.copilot-tracking/research/subagents/2026-08-09/alexander-placement-pipeline-research.md` under `Existing Alexander Data`

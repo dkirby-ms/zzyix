@@ -13,6 +13,7 @@ import {
   canonicalizeWorldPoint,
   deriveFootprint,
   mapSourcePointToWorld,
+  manifestContentHash,
   generatePatchManifest,
 } from './generate-alexander-patch-manifest.mjs'
 
@@ -92,7 +93,18 @@ test('rejects unsupported or non-finite placement attributes before generation',
   }), /must be finite/)
 })
 
-test('generates stable placements and records deterministic skips, budgets, and feature coverage', async () => {
+test('rejects missing generator inputs', async () => {
+  await assert.rejects(
+    generatePatchManifest({
+      mosaicInputsConfigPath: path.join(tmpdir(), 'missing-inputs.json'),
+      preprocessingConfigPath: path.join(tmpdir(), 'missing-preprocessing.json'),
+      outputPath: path.join(tmpdir(), 'missing-manifest.json'),
+    }),
+    /ENOENT/,
+  )
+})
+
+test('generates a stable unbound manifest with normalized placement geometry', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'zzyix-manifest-'))
   try {
     const palettePath = path.join(root, 'palette.json')
@@ -124,13 +136,40 @@ test('generates stable placements and records deterministic skips, budgets, and 
       output: { width: 10, height: 10, paletteSize: 1, candidateCount: candidates.candidates.length, artifacts: { palette: { path: palettePath, sha256: paletteHash }, candidates: { path: candidatesPath, sha256: candidatesHash } } },
       pipeline: { generatorSeed: 'fixture-seed' },
     })
-    const first = await generatePatchManifest({ mosaicInputsConfigPath: inputConfigPath, preprocessingConfigPath: preprocessingPath, outputPath: path.join(root, 'manifest-a.json'), candidateBudget: 4, placementBudget: 2, target: { quiltId: 'q', patchId: 'p', targetRect: { minX: 0, maxX: 10, minY: 0, maxY: 10 }, sourceToWorld: { origin: { x: 0, y: 0 }, scale: { x: 10, y: 10 } } } })
-    const second = await generatePatchManifest({ mosaicInputsConfigPath: inputConfigPath, preprocessingConfigPath: preprocessingPath, outputPath: path.join(root, 'manifest-b.json'), candidateBudget: 4, placementBudget: 2, target: { quiltId: 'q', patchId: 'p', targetRect: { minX: 0, maxX: 10, minY: 0, maxY: 10 }, sourceToWorld: { origin: { x: 0, y: 0 }, scale: { x: 10, y: 10 } } } })
+    const first = await generatePatchManifest({ mosaicInputsConfigPath: inputConfigPath, preprocessingConfigPath: preprocessingPath, outputPath: path.join(root, 'manifest-a.json'), candidateBudget: 4, placementBudget: 2 })
+    const second = await generatePatchManifest({ mosaicInputsConfigPath: inputConfigPath, preprocessingConfigPath: preprocessingPath, outputPath: path.join(root, 'manifest-b.json'), candidateBudget: 4, placementBudget: 2 })
     assert.equal(first.artifact.sha256, second.artifact.sha256)
-    assert.equal(first.placements.length, 1)
+    assert.equal(first.placements.length, 2)
+    assert.equal(first.coordinateSpace, 'source-local-normalized-x-y')
+    assert.equal('target' in first, false)
+    assert.deepEqual(first.placements[0].source.normalizedAnchor, { x: 0.5, y: 0.5 })
+    assert.equal('position' in first.placements[0].tile, false)
+    expectNoDeploymentIdentity(first)
     assert.deepEqual(first.featureCoverage.selected, ['face'])
-    assert.deepEqual(first.skippedCandidates.map((entry) => entry.reason), ['duplicate-candidate-id', 'collision', 'out-of-bounds', 'candidate-budget-exceeded'])
+    assert.deepEqual(first.skippedCandidates.map((entry) => entry.reason), ['duplicate-candidate-id', 'placement-budget-exceeded', 'candidate-budget-exceeded'])
+    const serialized = await readFile(path.join(root, 'manifest-a.json'))
+    const emittedManifest = JSON.parse(serialized)
+    assert.equal(first.provenance.manifestBytes, serialized.byteLength)
+    assert.equal(first.provenance.manifestSha256, manifestContentHash(emittedManifest))
+
+    const tamperedInput = JSON.parse(await readFile(inputConfigPath, 'utf8'))
+    tamperedInput.output.artifacts.palette.sha256 = '0'.repeat(64)
+    await writeJson(inputConfigPath, tamperedInput)
+    await assert.rejects(
+      generatePatchManifest({ mosaicInputsConfigPath: inputConfigPath, preprocessingConfigPath: preprocessingPath, outputPath: path.join(root, 'tampered-manifest.json') }),
+      /palette hash mismatch/,
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+const expectNoDeploymentIdentity = (manifest) => {
+  assert.equal('quiltId' in manifest, false)
+  assert.equal('patchId' in manifest, false)
+  assert.equal('targetRect' in manifest, false)
+  for (const placement of manifest.placements) {
+    assert.equal('position' in placement.tile, false)
+    assert.equal('footprint' in placement, false)
+  }
+}

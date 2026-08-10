@@ -30,7 +30,7 @@ const inside = (x, y, box) => x >= box.x && x < box.maxX && y >= box.y && y < bo
 export const scorePatchFidelity = async ({ manifestPath, outputPath, thresholds = { colorErrorMax: 0.35, edgeRetentionMin: 0.25, featureCoverageMin: 0.05 } }) => {
   const manifestFilePath = resolvePath(manifestPath)
   const manifest = await readJson(manifestFilePath)
-  assert.equal(manifest.schemaVersion, 1, 'unsupported manifest schema')
+  assert.equal(manifest.schemaVersion, 2, 'unsupported manifest schema')
   assert.equal(manifestContentHash(manifest), manifest.provenance.manifestSha256, 'manifest provenance hash mismatch')
   const manifestBuffer = await readFile(manifestFilePath)
   const normalizedPath = resolvePath(manifest.source.normalizedArtifact.path)
