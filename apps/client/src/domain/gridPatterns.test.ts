@@ -50,11 +50,16 @@ describe('gridPatterns', () => {
 
   it('keeps lattice conversion and nearest cells stable across negative coordinates', () => {
     const pattern = GRID_PATTERNS[0]
-    const lattice = worldToLattice(pattern, { x: -1.96, y: 0.98 })
+    const [basisX, basisY] = pattern.basis
+    const point = {
+      x: -2 * basisX.x + basisY.x,
+      y: -2 * basisX.y + basisY.y,
+    }
+    const lattice = worldToLattice(pattern, point)
 
     expect(lattice.x).toBeCloseTo(-2)
     expect(lattice.y).toBeCloseTo(1)
-    expect(getNearestGridCells(pattern, { x: -1.96, y: 0.98 })).toContainEqual({ x: -2, y: 1 })
+    expect(getNearestGridCells(pattern, point)).toContainEqual({ x: -2, y: 1 })
   })
 
   it('generates deterministic world-origin slot IDs and viewport overscan', () => {

@@ -101,4 +101,24 @@ describe('GridOverlay geometry', () => {
     expect(groups.blocked).toHaveLength(0)
     expect(groups.structural).toHaveLength(0)
   })
+
+  it('clips a wide camera viewport before generating bounded grid slots', () => {
+    const ownedBounds = { minX: -0.5, maxX: 0.5, minY: -0.5, maxY: 0.5 }
+    const wideViewportGroups = buildGridOverlaySegments({
+      pattern: squarePattern,
+      viewport: { minX: -1_000, maxX: 1_000, minY: -1_000, maxY: 1_000 },
+      activeShape: 'square',
+      tiles: [],
+      bounds: ownedBounds,
+    })
+    const clippedViewportGroups = buildGridOverlaySegments({
+      pattern: squarePattern,
+      viewport: ownedBounds,
+      activeShape: 'square',
+      tiles: [],
+      bounds: ownedBounds,
+    })
+
+    expect(wideViewportGroups).toEqual(clippedViewportGroups)
+  })
 })

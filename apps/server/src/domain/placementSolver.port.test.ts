@@ -100,10 +100,10 @@ describe('placementSolver server parity', () => {
       MAX_GROUT_GAP,
     )
 
-    expect(bounds.minX).toBeCloseTo(10 - 0.88 * 0.36 - MAX_GROUT_GAP)
-    expect(bounds.maxX).toBeCloseTo(10 + 0.88 * 0.36 + MAX_GROUT_GAP)
-    expect(bounds.minY).toBeCloseTo(20 - 0.88 * 0.68 - MAX_GROUT_GAP)
-    expect(bounds.maxY).toBeCloseTo(20 + 0.88 * 0.68 + MAX_GROUT_GAP)
+    expect(bounds.minX).toBeCloseTo(10 - 0.44 * 0.36 - MAX_GROUT_GAP)
+    expect(bounds.maxX).toBeCloseTo(10 + 0.44 * 0.36 + MAX_GROUT_GAP)
+    expect(bounds.minY).toBeCloseTo(20 - 0.44 * 0.68 - MAX_GROUT_GAP)
+    expect(bounds.maxY).toBeCloseTo(20 + 0.44 * 0.68 + MAX_GROUT_GAP)
   })
 
   it('projects seam neighbors to the nearest periodic image before validation', () => {

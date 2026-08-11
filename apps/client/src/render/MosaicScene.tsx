@@ -17,7 +17,7 @@ import { getTileDefinition } from '../domain/tileGeometry'
 import { GridOverlay } from './GridOverlay'
 import { useCraftMaterial, useRemoteSelectionMaterial } from './materials'
 import type { ThreeEvent } from '@react-three/fiber'
-import type { GridPattern } from '../domain/gridPatterns'
+import { GRID_PATTERNS, type GridPattern } from '../domain/gridPatterns'
 import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 import { getCollaboratorColor } from '../ui/palettes'
@@ -291,7 +291,6 @@ const InteractionPlane = ({
         onCameraPan(deltaX, deltaY)
       }
       lastMiddlePos.current = { x: event.clientX, y: event.clientY }
-      ;(event as any).nativeEvent?.preventDefault()
       event.stopPropagation()
       return
     }
@@ -315,7 +314,6 @@ const InteractionPlane = ({
     }
     if (event.button === 1) {
       lastMiddlePos.current = { x: event.clientX, y: event.clientY }
-      ;(event as any).nativeEvent?.preventDefault()
       event.stopPropagation()
       return
     }
@@ -333,7 +331,6 @@ const InteractionPlane = ({
     }
     if (event.button === 1) {
       lastMiddlePos.current = null
-      ;(event as any).nativeEvent?.preventDefault()
       event.stopPropagation()
       return
     }
@@ -518,16 +515,15 @@ const SceneContents = ({
 
       <group position={[0, 0, 0]}>
         <CanvasBounds worldBounds={worldBounds} />
-        {gridOverlay && (
-          <GridOverlay
-            pattern={gridOverlay.pattern}
-            activeShape={activeShape}
-            tiles={tiles}
-            bounds={gridOverlay.bounds ?? (topology ? { mode: 'unbounded' } : worldBounds ?? DEFAULT_WORLD_BOUNDS)}
-            activeSlotId={gridOverlay.activeSlotId}
-            topology={topology}
-          />
-        )}
+        <GridOverlay
+          enabled={gridOverlay !== undefined}
+          pattern={gridOverlay?.pattern ?? GRID_PATTERNS[0]}
+          activeShape={activeShape}
+          tiles={tiles}
+          bounds={gridOverlay?.bounds ?? (topology ? { mode: 'unbounded' } : worldBounds ?? DEFAULT_WORLD_BOUNDS)}
+          activeSlotId={gridOverlay?.activeSlotId}
+          topology={topology}
+        />
         {tileImages.map((image) => (
           <group
             key={`${image.key}:${image.tile.settleFrom ? 'settling' : 'settled'}`}

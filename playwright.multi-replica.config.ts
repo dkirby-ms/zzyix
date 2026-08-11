@@ -36,6 +36,12 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
+      command: 'VITE_E2E_TEST_MODE=true VITE_SERVER_URL=http://127.0.0.1:3201 VITE_TEST_OIDC_ISSUER=http://127.0.0.1:3299/ VITE_TEST_OIDC_TOKEN_URL=http://127.0.0.1:3299/token npm run dev --workspace=apps/client -- --host 127.0.0.1 --port 4174',
+      url: 'http://127.0.0.1:4174',
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
       command: [...common, 'REPLICA_ID=replica-a', 'PORT=3201', 'CORS_ORIGIN=http://127.0.0.1:4174', 'node --import tsx/esm e2e/support/startMultiReplicaServer.ts'].join(' '),
       url: 'http://127.0.0.1:3201/health',
       reuseExistingServer: false,

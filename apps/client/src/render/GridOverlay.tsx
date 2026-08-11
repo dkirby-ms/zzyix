@@ -9,6 +9,7 @@ import type {
 } from './gridOverlayGeometry'
 
 type GridOverlayProps = Omit<BuildGridOverlaySegmentsInput, 'viewport'>
+  & { enabled: boolean }
 
 const createLineGeometry = (positions: number[]): BufferGeometry => {
   const geometry = new BufferGeometry()
@@ -83,6 +84,7 @@ const useVisibleWorldViewport = (fallback: WorldViewport): WorldViewport => {
 }
 
 export const GridOverlay = ({
+  enabled,
   pattern,
   activeShape,
   tiles,
@@ -96,21 +98,39 @@ export const GridOverlay = ({
       : { minX: -5, maxX: 5, minY: -5, maxY: 5 }
     : bounds
   const viewport = useVisibleWorldViewport(viewportFallback)
+  const cachedInputRef = useRef<BuildGridOverlaySegmentsInput | null>(null)
+  const currentInput = useMemo<BuildGridOverlaySegmentsInput>(() => ({
+    pattern,
+    viewport,
+    activeShape,
+    tiles,
+    bounds,
+    activeSlotId,
+    topology,
+  }), [activeShape, activeSlotId, bounds, pattern, tiles, topology, viewport])
+  if (enabled) {
+    cachedInputRef.current = currentInput
+  }
+  const cachedInput = cachedInputRef.current
+  const canReuseCachedInput = cachedInput !== null
+    && cachedInput.pattern === currentInput.pattern
+    && cachedInput.activeShape === currentInput.activeShape
+    && cachedInput.tiles === currentInput.tiles
+    && cachedInput.bounds === currentInput.bounds
+    && cachedInput.activeSlotId === currentInput.activeSlotId
+    && cachedInput.topology === currentInput.topology
+    && cachedInput.viewport === currentInput.viewport
+  const effectiveInput = canReuseCachedInput ? cachedInput : currentInput
+  if (enabled && effectiveInput !== cachedInput) {
+    cachedInputRef.current = effectiveInput
+  }
   const groups = useMemo(
-    () => buildGridOverlaySegments({
-      pattern,
-      viewport,
-      activeShape,
-      tiles,
-      bounds,
-      activeSlotId,
-      topology,
-    }),
-    [activeShape, activeSlotId, bounds, pattern, tiles, topology, viewport],
+    () => buildGridOverlaySegments(effectiveInput),
+    [effectiveInput],
   )
 
   return (
-    <group position={[0, 0, -0.07]}>
+    <group position={[0, 0, -0.07]} visible={enabled}>
       <GridLineBatch positions={groups.structural} state="structural" />
       <GridLineBatch positions={groups.blocked} state="blocked" />
       <GridLineBatch positions={groups.placeable} state="placeable" />

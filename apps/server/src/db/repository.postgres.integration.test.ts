@@ -9,7 +9,14 @@ import {
   principals,
   quilts,
 } from './schema.js'
-import { listQuiltOccupancy, persistQuiltTilePlacement, persistQuiltTileRemoval } from './repository.js'
+import {
+  listQuiltOccupancy,
+  loadPatchDeliverySnapshot,
+  persistQuiltTilePlacement,
+  persistQuiltTileRemoval,
+  reconstructPatchState,
+  savePatchSnapshot,
+} from './repository.js'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
 
 const CANVAS_ID = '10000000-0000-4000-8000-000000000001'
@@ -40,6 +47,19 @@ const placement = (
     material: 'ceramic',
     transform: { position: { x, y: 5 }, rotation: 0 },
   },
+})
+
+const importedPlacement = (request: {
+  operationId: string
+  tile: Parameters<typeof persistQuiltTilePlacement>[0]['payload']
+  expectedPatchRevisions: Record<string, number>
+  principalId?: string
+}) => persistQuiltTilePlacement({
+  quiltId: QUILT_ID,
+  operationId: request.operationId,
+  principalId: request.principalId ?? PRINCIPAL_ID,
+  expectedPatchRevisions: request.expectedPatchRevisions,
+  payload: request.tile,
 })
 
 const revisions = (value: number, patchIds = PATCH_IDS): Record<string, number> =>
@@ -196,6 +216,72 @@ describe('patch-scoped PostgreSQL placement', () => {
     expect(first).toMatchObject({ committed: true, idempotent: false })
     expect(retry).toMatchObject({ committed: true, idempotent: true })
     expect(counts[0]).toEqual({ tiles: 1, refs: 1, operations: 1 })
+  })
+
+  it('persists import-shaped placements through canonical replay and snapshot state', async () => {
+    const imported = [
+      {
+        operationId: randomUUID(),
+        tile: {
+          tileId: '40000000-0000-4000-8000-000000000019',
+          shape: 'square' as const,
+          color: '#abc',
+          material: 'ceramic' as const,
+          transform: { position: { x: 5, y: 5 }, rotation: 0 },
+        },
+        expectedPatchRevisions: { [PATCH_IDS[0]]: 0 },
+      },
+      {
+        operationId: randomUUID(),
+        tile: {
+          tileId: '40000000-0000-4000-8000-000000000020',
+          shape: 'square' as const,
+          color: '#def',
+          material: 'glass' as const,
+          transform: { position: { x: 15, y: 5 }, rotation: 0 },
+        },
+        expectedPatchRevisions: { [PATCH_IDS[1]]: 0 },
+      },
+    ]
+
+    const accepted = await Promise.all(imported.map(importedPlacement))
+    const replay = await importedPlacement(imported[0])
+    const unauthorized = await importedPlacement({
+      ...imported[0],
+      operationId: randomUUID(),
+      principalId: MEMBER_PRINCIPAL_ID,
+    })
+    const stale = await importedPlacement({
+      ...imported[0],
+      operationId: randomUUID(),
+    })
+    const collision = await importedPlacement({
+      ...imported[0],
+      operationId: randomUUID(),
+      expectedPatchRevisions: { [PATCH_IDS[0]]: 1 },
+      tile: { ...imported[0].tile, tileId: '40000000-0000-4000-8000-000000000021' },
+    })
+
+    expect(accepted.every((result) => result.committed)).toBe(true)
+    expect(replay).toMatchObject({ committed: true, idempotent: true, patchRevisions: { [PATCH_IDS[0]]: 1 } })
+    expect(unauthorized).toEqual({ committed: false, reason: 'UNAUTHORIZED' })
+    expect(stale).toEqual({ committed: false, reason: 'STALE_REVISION' })
+    expect(collision).toEqual({ committed: false, reason: 'PLACEMENT_REJECTED' })
+
+    const snapshot = await savePatchSnapshot(PATCH_IDS[0])
+    const delivered = await loadPatchDeliverySnapshot(PATCH_IDS[0], { principalId: PRINCIPAL_ID })
+    const reconstructed = await reconstructPatchState(PATCH_IDS[0])
+    const counts = await queryWithConnection<{ tiles: number; refs: number; operations: number }>(database,
+      'SELECT (SELECT count(*)::int FROM tiles) AS tiles, '
+      + '(SELECT count(*)::int FROM tile_spatial_refs) AS refs, '
+      + '(SELECT count(*)::int FROM patch_operations) AS operations',
+    )
+
+    expect(snapshot.tiles.map((tile) => tile.id)).toContain(imported[0].tile.tileId)
+    expect(delivered.tiles.map((tile) => tile.id)).toEqual([imported[0].tile.tileId])
+    expect(reconstructed.tiles.map((tile) => tile.id)).toEqual([imported[0].tile.tileId])
+    expect(delivered.revision).toBe(1)
+    expect(counts[0]).toEqual({ tiles: 2, refs: 2, operations: 2 })
   })
 
   it('binds placement replay to the actor and canonical command payload', async () => {

@@ -483,6 +483,11 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const [zoomTier, setZoomTier] = useState<ZoomTier>('fine')
   const [quiltProtocol, setQuiltProtocol] = useState<QuiltProtocolHandshake | null>(null)
   const [quiltCache, setQuiltCache] = useState<QuiltCacheState>(createQuiltCache)
+  const quiltCacheRef = useRef(quiltCache)
+  const quiltProtocolRef = useRef(quiltProtocol)
+  const connectionStateRef = useRef<ReturnType<typeof useConnectionStatus> | null>(null)
+  quiltCacheRef.current = quiltCache
+  quiltProtocolRef.current = quiltProtocol
   const [quiltOccupancy, setQuiltOccupancy] = useState<QuiltOccupancyChunk[]>([])
   const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
   const [connectionEpoch, setConnectionEpoch] = useState(0)
@@ -975,6 +980,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   )
 
   const connectionState = useConnectionStatus(socketRef)
+  connectionStateRef.current = connectionState
 
   useEffect(() => {
     if (!quiltProtocol?.canaryTelemetryEnabled || !quiltProtocol.topology) return
@@ -1350,6 +1356,10 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     placeFromState(activeTileRef.current, ghostRef.current)
   }, [placeFromState])
 
+  const handleCanvasPointerUp = useCallback((): void => {
+    attemptPlace()
+  }, [attemptPlace])
+
   useEffect(() => () => {
     stopCanonicalMutationObserverRef.current?.()
   }, [])
@@ -1470,6 +1480,9 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     },
     setGridEnabled: (enabled) => {
       setGridOverlayEnabled(enabled)
+    },
+    releasePointer: () => {
+      handleCanvasPointerUp()
     },
     placeTileAt: (position) => {
       const pointer = vec2(position.x, position.y)
@@ -1622,6 +1635,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     activeCollaborators,
     activeTile,
     attemptPlace,
+    handleCanvasPointerUp,
     clientId,
     cameraPan,
     connectionState.status,
@@ -1875,7 +1889,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
                 }}
                 onPointerMove={updatePointer}
                 onPointerDown={updatePointer}
-                onPointerUp={mutationControlsEnabled ? attemptPlace : () => undefined}
+                onPointerUp={mutationControlsEnabled ? handleCanvasPointerUp : () => undefined}
                 onRotateDrag={(deltaX) => dispatchActiveTileUi({ type: 'rotate-fine', delta: deltaX * (Math.PI / 200) })}
                 remoteCursors={remoteCursors}
                 remoteSelections={remoteSelections}

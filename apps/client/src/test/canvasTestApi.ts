@@ -119,6 +119,7 @@ export type CanvasTestApi = {
   joinSession: (sessionId: string) => void
   setActiveTile: (patch: Partial<ActiveTile>) => void
   movePointer: (position: { x: number; y: number }) => void
+  releasePointer: () => void
   setCameraPan: (position: { x: number; y: number }) => void
   setGridEnabled: (enabled: boolean) => void
   placeTileAt: (position: { x: number; y: number }) => void
