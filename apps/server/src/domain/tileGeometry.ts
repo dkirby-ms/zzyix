@@ -26,7 +26,7 @@ export type TileDefinition = {
   convexParts: ConvexPolygon[]
 }
 
-const unit = 0.88
+const unit = 0.44
 
 const squareOutline: Vec2[] = [
   vec2(-unit / 2, -unit / 2),

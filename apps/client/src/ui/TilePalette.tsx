@@ -6,18 +6,6 @@ import type { PaletteName } from './palettes'
 import { TileShapePreview } from './TileShapePreview'
 import type { ActiveTile } from '../interaction/controller'
 
-type AlexanderPlacementControl = {
-  status: 'idle' | 'loading' | 'armed' | 'confirming' | 'preflighting' | 'queue' | 'error'
-  message: string
-  onToggle: () => void
-}
-
-const DEFAULT_ALEXANDER_PLACEMENT: AlexanderPlacementControl = {
-  status: 'idle',
-  message: '',
-  onToggle: () => {},
-}
-
 type TilePaletteProps = {
   activeTile: ActiveTile
   onShape: (shape: TileShape) => void
@@ -27,7 +15,6 @@ type TilePaletteProps = {
   onTogglePaletteOpen: () => void
   onColor: (color: string) => void
   paletteFallbackAnnouncement: string
-  alexanderPlacement?: AlexanderPlacementControl
 }
 
 const paletteNames = Object.keys(palettes) as PaletteName[]
@@ -101,7 +88,6 @@ export const TilePalette = ({
   onTogglePaletteOpen,
   onColor,
   paletteFallbackAnnouncement,
-  alexanderPlacement = DEFAULT_ALEXANDER_PLACEMENT,
 }: TilePaletteProps) => {
   const customColorInputId = useId()
   const [customColorValue, setCustomColorValue] = useState(activeTile.color)
@@ -159,33 +145,6 @@ export const TilePalette = ({
           <p>{shapeLabels[activeTile.shape]} · {activeTile.material} · {paletteLabels[paletteName]}</p>
         </div>
         <code>{activeTile.color}</code>
-      </section>
-      <section className="palette-control" aria-label="Alexander patch placement">
-        <div className="palette-control-header">
-          <div><h2>Alexander patch</h2></div>
-        </div>
-        <button
-          type="button"
-          className={alexanderPlacement.status === 'armed' ? 'active' : undefined}
-          aria-pressed={alexanderPlacement.status === 'armed'}
-          disabled={['loading', 'preflighting', 'confirming'].includes(alexanderPlacement.status)}
-          onClick={alexanderPlacement.onToggle}
-        >
-          {alexanderPlacement.status === 'loading'
-            ? 'Loading Alexander'
-            : alexanderPlacement.status === 'armed'
-              ? 'Cancel Alexander tool'
-              : 'Place Alexander in my patch'}
-        </button>
-        {alexanderPlacement.message && (
-          <p
-            className="palette-alexander-status"
-            role={alexanderPlacement.status === 'error' ? 'alert' : 'status'}
-            aria-live="polite"
-          >
-            {alexanderPlacement.message}
-          </p>
-        )}
       </section>
       <div id="tile-palette-body" hidden={!paletteOpen}>
         <section>

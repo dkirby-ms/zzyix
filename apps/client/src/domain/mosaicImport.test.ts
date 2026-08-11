@@ -9,7 +9,7 @@ import {
 
 const makeManifest = (count = 2): MosaicManifest => ({
   schemaVersion: 2,
-  source: { imageId: 'alexander', sourceSha256: 'source-hash', dimensions: { width: 1077, height: 1616 } },
+  source: { imageId: 'source-image', sourceSha256: 'source-hash', dimensions: { width: 1077, height: 1616 } },
   coordinateSpace: 'source-local-normalized-x-y',
   geometry: { shape: 'square', material: 'ceramic', rotation: 0, mirrored: false },
   budget: { placementBudget: count, accepted: count },
@@ -23,7 +23,7 @@ const makeManifest = (count = 2): MosaicManifest => ({
 })
 
 const context = {
-  expectedSourceImageId: 'alexander', expectedSourceDimensions: { width: 1077, height: 1616 },
+  expectedSourceImageId: 'source-image', expectedSourceDimensions: { width: 1077, height: 1616 },
   quiltId: 'quilt-a', deployment: { targetRect: { minX: 0, maxX: 10, minY: 0, maxY: 10 }, sourceToWorld: { origin: { x: 0, y: 0 }, scale: { x: 10, y: 10 } } },
   topology: { quiltId: 'quilt-a', topology: 'bounded' as const, patchRows: 1, patchColumns: 1, patchWidth: 10, patchHeight: 10 },
   worldBounds: { minX: 0, maxX: 10, minY: 0, maxY: 10 },

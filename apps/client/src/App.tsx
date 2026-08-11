@@ -35,21 +35,6 @@ import {
 import { useSocketConnection } from './network/useSocketConnection'
 import { useConnectionStatus } from './network/useConnectionStatus'
 import type { AuthLossReason } from './network/authenticatedFetch'
-import {
-  createMosaicImportQueue,
-  hashMosaicManifest,
-  parseMosaicManifest,
-  parseMosaicImportRequest,
-  preflightMosaicManifest,
-  type MosaicImportQueueState,
-  type MosaicBoundPlacement,
-  type MosaicPreflightResult,
-} from './domain/mosaicImport'
-import {
-  ALEXANDER_PATCH_MANIFEST_PATH,
-  filterAlexanderManifestForDeployment,
-  selectAlexanderOwnedPatch,
-} from './domain/alexanderPatchPlacement'
 import { DEFAULT_BOUNDED_WORLD_BOUNDS, RUNTIME_CHUNK_WORLD_SIZE } from '../../server/src/contracts'
 import type {
   CanonicalPatchNavigation,
@@ -238,15 +223,6 @@ const MosaicScene = lazy(async () => {
 })
 
 type ZoomTier = 'fine' | 'aggregate'
-
-type AlexanderPlacementStatus = 'idle' | 'loading' | 'armed' | 'preflighting' | 'queue' | 'error'
-
-type AlexanderPlacementState = {
-  status: AlexanderPlacementStatus
-  manifest?: unknown
-  placementCount?: number
-  message: string
-}
 
 type ActiveTileUiState = {
   activeTile: ActiveTile
@@ -450,18 +426,6 @@ const expectedPatchRevisions = (
   cache.patches[patchId]?.cursor.revision,
 ]).filter((entry): entry is [string, number] => entry[1] !== undefined))
 
-const mosaicImportPatchStates = (cache: QuiltCacheState, ownedPatchId: string) =>
-  Object.values(cache.patches).flatMap((patch) => {
-    const match = patch.roomId.match(/:patch:(\d+):(\d+):/)
-    return match ? [{
-      patchId: patch.patchId,
-      row: Number.parseInt(match[1], 10),
-      column: Number.parseInt(match[2], 10),
-      revision: patch.cursor.revision,
-      owned: patch.patchId === ownedPatchId,
-    }] : []
-  })
-
 const DEFAULT_WORLD_BOUNDS = DEFAULT_BOUNDED_WORLD_BOUNDS
 
 function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleTheme: () => void }) {
@@ -513,11 +477,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const [mode, setMode] = useState<'canonical-loading' | 'canonical-unavailable' | 'canvas'>('canonical-loading')
   const [canonicalError, setCanonicalError] = useState<string | null>(null)
   const [canonicalDescriptor, setCanonicalDescriptor] = useState<CanonicalWorldEntryDescriptor | null>(null)
-  const [alexanderPlacement, setAlexanderPlacement] = useState<AlexanderPlacementState>({
-    status: 'idle',
-    message: '',
-  })
-  const [mosaicImportQueueState, setMosaicImportQueueState] = useState<MosaicImportQueueState | null>(null)
   const [focusedCanonicalPatch, setFocusedCanonicalPatch] = useState<CanonicalPatchNavigation | null>(null)
   const [collaborators, setCollaborators] = useState<RemoteCollaboratorMap>({})
   const [activeChunkIds, setActiveChunkIds] = useState<ChunkId[]>([])
@@ -529,8 +488,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const connectionStateRef = useRef<ReturnType<typeof useConnectionStatus> | null>(null)
   quiltCacheRef.current = quiltCache
   quiltProtocolRef.current = quiltProtocol
-  const mosaicImportStateRef = useRef<MosaicImportQueueState | null>(null)
-  const mosaicImportResyncPendingRef = useRef(false)
   const [quiltOccupancy, setQuiltOccupancy] = useState<QuiltOccupancyChunk[]>([])
   const [quiltSubscriptionEpoch, setQuiltSubscriptionEpoch] = useState(0)
   const [connectionEpoch, setConnectionEpoch] = useState(0)
@@ -543,7 +500,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const ghostRef = useRef(ghost)
   const ghostVisibleRef = useRef(ghostVisible)
   const socketActionRef = useRef<ReturnType<typeof useSocketConnection>['current']>(null)
-  const mosaicImportQueueRef = useRef<ReturnType<typeof createMosaicImportQueue> | null>(null)
   const pointerEmitThrottleRef = useRef<{
     lastSentAt: number
     pendingPosition?: { x: number; y: number }
@@ -571,7 +527,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const sceneMetricsRef = useRef({ sceneObjectCount: 0, drawCalls: 0, frameTimeMs: 0 })
   const canonicalMutationTrafficRef = useRef<string[]>([])
   const stopCanonicalMutationObserverRef = useRef<(() => void) | null>(null)
-  const alexanderPreloadAttemptedRef = useRef(false)
   const clientId = useMemo(() => ensureClientId(), [])
 
   const { activeTile, paletteName, paletteOpen, paletteFallbackAnnouncement } = activeTileUiState
@@ -748,9 +703,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     setCameraZoomOverride(undefined)
     setCameraZoom(58)
     setConnectionEpoch(0)
-    mosaicImportQueueRef.current = null
-    mosaicImportStateRef.current = null
-    mosaicImportResyncPendingRef.current = false
   }, [])
 
   useEffect(() => {
@@ -907,7 +859,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
 
   const onQuiltPatchState = useCallback((payload: QuiltScopedStatePayload): void => {
     quiltCursorsRef.current[payload.canonicalRoomId] = payload.cursor
-    mosaicImportResyncPendingRef.current = false
     if (payload.payloadMode === 'fine') {
       setQuiltCache((previous) => mergeQuiltPatchSnapshot(previous, {
         patchId: payload.patchId,
@@ -1377,108 +1328,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     triggerInvalidPulse()
   }, [emitSelectionUpdate, isQuiltV2, ownershipIdentity, quiltCache, quiltProtocol, socketRef, triggerInvalidPulse, visibleTiles])
 
-  const startMosaicImport = useCallback(async (input: unknown): Promise<MosaicPreflightResult> => {
-    const topology = quiltProtocol?.topology
-    const request = parseMosaicImportRequest(input)
-    if (!request) {
-      return { ready: false, accepted: [], rejected: [{ reason: 'target', message: 'Import request must provide a manifest and explicit deployment rectangle and source-to-world transform' }], warnings: [], counts: { accepted: 0, rejected: 1, warnings: 0 } }
-    }
-    if (!isQuiltV2 || !topology || !canonicalDescriptor || topology.quiltId !== canonicalDescriptor.quiltId) {
-      return { ready: false, accepted: [], rejected: [{ reason: 'target', message: 'Canonical quilt is not ready for import' }], warnings: [], counts: { accepted: 0, rejected: 1, warnings: 0 } }
-    }
-
-    const preflight = await preflightMosaicManifest(request.manifest, {
-      expectedSourceImageId: 'alexander-mosaic-primary',
-      expectedSourceDimensions: { width: 1077, height: 1616 },
-      quiltId: canonicalDescriptor.quiltId,
-      deployment: request.deployment,
-      topology,
-      worldBounds,
-      patches: mosaicImportPatchStates(quiltCacheRef.current, canonicalDescriptor.assignedPatch.id),
-      policy: { ordering: 'score-descending-then-candidate-id-ascending', conflict: 'skip-and-record', outOfBounds: 'skip-and-record' },
-    })
-    if (!preflight.ready || !preflight.manifest || !preflight.manifestHash) return preflight
-
-    const manifest = preflight.manifest
-    const queue = createMosaicImportQueue({
-      manifestHash: preflight.manifestHash,
-      placements: manifest.placements,
-      getExpectedPatchRevisions: (placement: MosaicBoundPlacement) => {
-        const latestTopology = quiltProtocolRef.current?.topology
-        if (!latestTopology) return undefined
-        const patchIds = findAffectedCachedPatchIds(quiltCacheRef.current, { shape: placement.tile.shape, transform: placement.tile }, latestTopology)
-        if (!patchIds) return undefined
-        const revisions = expectedPatchRevisions(quiltCacheRef.current, patchIds)
-        return Object.keys(revisions).length === patchIds.length ? revisions : undefined
-      },
-      buildRequest: (placement, operationId, revisions) => {
-        const tile = { id: operationId, shape: placement.tile.shape, color: placement.tile.color, material: placement.tile.material, transform: placement.tile, createdAt: Date.now(), placedBy: ownershipIdentity }
-        const latestTopology = quiltProtocolRef.current?.topology
-        const patchIds = latestTopology ? findAffectedCachedPatchIds(quiltCacheRef.current, tile, latestTopology) ?? [] : []
-        const nextCache = setQuiltOptimisticTile(quiltCacheRef.current, patchIds, tile, operationId)
-        quiltCacheRef.current = nextCache
-        setQuiltCache(nextCache)
-        return { quiltId: manifest.deployment.quiltId, operationId, expectedPatchRevisions: revisions, tile: { tileId: operationId, shape: placement.tile.shape, color: placement.tile.color, material: placement.tile.material, transform: placement.tile } }
-      },
-      submit: (request, ack) => socketActionRef.current?.emit('quilt_place_tile', request, ack),
-      onAccepted: (placement, ack) => {
-        const latestTopology = quiltProtocolRef.current?.topology
-        const nextCache = (() => {
-          const cleared = clearQuiltOptimisticTile(quiltCacheRef.current, ack.operationId)
-          const patchIds = latestTopology ? findAffectedCachedPatchIds(cleared, ack.tile, latestTopology) ?? [] : []
-          const applied = patchIds.reduce((next, patchId) => applyQuiltPatchPlacement(next, patchId, { ...ack.tile, placedBy: ownershipIdentity }, {
-            patchId, opSeq: ack.patchRevisions[patchId], revision: ack.patchRevisions[patchId], eventId: ack.eventIds[patchId],
-          }), cleared)
-          return reconcileQuiltMutationRevisions(applied, ack.patchRevisions, ack.eventIds)
-        })()
-        quiltCacheRef.current = nextCache
-        setQuiltCache(nextCache)
-        void placement
-      },
-      onRejected: (_placement, operationId) => {
-        const nextCache = clearQuiltOptimisticTile(quiltCacheRef.current, operationId)
-        quiltCacheRef.current = nextCache
-        setQuiltCache(nextCache)
-      },
-      isConnected: () => connectionStateRef.current?.status === 'connected' && socketActionRef.current?.connected === true,
-      canResume: () => quiltProtocolRef.current?.mutationEnabled === true && !mosaicImportResyncPendingRef.current,
-      onStaleRevision: (_placement, operationId) => {
-        const nextCache = clearQuiltOptimisticTile(quiltCacheRef.current, operationId)
-        quiltCacheRef.current = nextCache
-        setQuiltCache(nextCache)
-        mosaicImportResyncPendingRef.current = true
-        setQuiltSubscriptionEpoch((previous) => previous + 1)
-      },
-      onState: (state) => {
-        mosaicImportStateRef.current = state
-        setMosaicImportQueueState(state)
-      },
-    })
-    mosaicImportQueueRef.current = queue
-    queue.start()
-    return preflight
-  }, [canonicalDescriptor, isQuiltV2, ownershipIdentity, quiltProtocol, worldBounds])
-
-  useEffect(() => {
-    const handleImport = (event: Event): void => {
-      void startMosaicImport((event as CustomEvent<unknown>).detail)
-    }
-    window.addEventListener('zzyix:mosaic-import', handleImport)
-    return () => window.removeEventListener('zzyix:mosaic-import', handleImport)
-  }, [startMosaicImport])
-
-  useEffect(() => {
-    const queue = mosaicImportQueueRef.current
-    if (!queue) return
-    if (connectionState.status !== 'connected') {
-      mosaicImportResyncPendingRef.current = true
-      queue.pause()
-      return
-    }
-    const state = queue.getState()
-    if (state.status === 'paused' && !mosaicImportResyncPendingRef.current) queue.resume(state.manifestHash)
-  }, [connectionEpoch, connectionState.status, quiltCache, quiltSubscriptionEpoch])
-
   const updatePointer = useCallback((x: number, y: number): void => {
     const pointer = vec2(x, y)
     lastPointerWorldRef.current = pointer
@@ -1507,193 +1356,9 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     placeFromState(activeTileRef.current, ghostRef.current)
   }, [placeFromState])
 
-  const loadAlexanderManifest = useCallback(
-    async (
-      loadingMessage: string,
-      options?: { showLoadingState?: boolean },
-    ): Promise<{ manifest: unknown; placementCount: number } | undefined> => {
-      const showLoadingState = options?.showLoadingState ?? true
-      if (showLoadingState) {
-        setAlexanderPlacement((previous) => ({
-          ...previous,
-          status: 'loading',
-          message: loadingMessage,
-        }))
-      }
-    try {
-      const response = await fetch(ALEXANDER_PATCH_MANIFEST_PATH, { cache: 'no-store' })
-      if (!response.ok) {
-        throw new Error(`The local Alexander manifest is unavailable (${response.status}). Run npm run prepare:alexander-patch-manifest.`)
-      }
-
-      const manifest = await response.json() as unknown
-      const parsed = parseMosaicManifest(manifest)
-      if (!parsed.manifest) {
-        throw new Error(parsed.rejected[0]?.message ?? 'The local Alexander manifest is malformed.')
-      }
-
-      const placementCount = parsed.manifest.placements.length
-      setAlexanderPlacement((previous) => ({
-        ...previous,
-        status: showLoadingState ? 'idle' : previous.status,
-        manifest,
-        placementCount,
-        message: previous.status === 'armed'
-          ? previous.message
-          : showLoadingState ? 'Alexander import ready. Click Place Alexander in my patch to arm the tool.' : previous.message,
-      }))
-      return { manifest, placementCount }
-    } catch (error) {
-      if (!showLoadingState) {
-        return undefined
-      }
-
-      setAlexanderPlacement((previous) => ({
-        ...previous,
-        status: 'error',
-        message: error instanceof Error ? error.message : 'The local Alexander manifest could not be loaded.',
-      }))
-      return undefined
-    }
-  }, [])
-
-  useEffect(() => {
-    if (mode !== 'canvas' || alexanderPreloadAttemptedRef.current || alexanderPlacement.manifest) {
-      return
-    }
-
-    alexanderPreloadAttemptedRef.current = true
-    void loadAlexanderManifest('Preparing the local Alexander manifest...', { showLoadingState: false })
-  }, [alexanderPlacement.manifest, loadAlexanderManifest, mode])
-
-  const armAlexanderPlacement = useCallback(async (): Promise<void> => {
-    if (alexanderPlacement.status === 'armed') {
-      setAlexanderPlacement((previous) => ({
-        ...previous,
-        status: 'idle',
-        message: '',
-      }))
-      return
-    }
-
-    let manifest = alexanderPlacement.manifest
-    let placementCount = alexanderPlacement.placementCount
-
-    if (!manifest || !placementCount) {
-      const loaded = await loadAlexanderManifest('Loading the local Alexander manifest...')
-      if (!loaded) {
-        return
-      }
-
-      manifest = loaded.manifest
-      placementCount = loaded.placementCount
-    }
-
-    setAlexanderPlacement((previous) => ({
-      ...previous,
-      status: 'armed',
-      manifest,
-      placementCount,
-      message: 'Alexander tool armed. Click your owned patch on the canvas to start import.',
-    }))
-  }, [alexanderPlacement.manifest, alexanderPlacement.placementCount, alexanderPlacement.status, loadAlexanderManifest])
-
-  const cancelAlexanderPlacement = useCallback((): void => {
-    setAlexanderPlacement({ status: 'idle', message: '' })
-  }, [])
-
   const handleCanvasPointerUp = useCallback((): void => {
-    if (alexanderPlacement.status === 'idle' || alexanderPlacement.status === 'queue') {
-      attemptPlace()
-      return
-    }
-
-    if (alexanderPlacement.status !== 'armed') {
-      if (alexanderPlacement.status === 'loading' || alexanderPlacement.status === 'preflighting') {
-        setAlexanderPlacement((previous) => ({
-          ...previous,
-          message: 'Alexander import is still preparing. Wait for it to finish before placing.',
-        }))
-      }
-      return
-    }
-
-    const pointer = lastPointerWorldRef.current
-    const deployment = pointer && canonicalDescriptor ? selectAlexanderOwnedPatch(canonicalDescriptor, pointer) : undefined
-    if (!deployment) {
-      setAlexanderPlacement((previous) => ({
-        ...previous,
-        message: 'Alexander tool armed. Click your owned patch on the canvas to start import.',
-      }))
-      return
-    }
-
-    if (!alexanderPlacement.manifest) {
-      setAlexanderPlacement((previous) => ({
-        ...previous,
-        status: 'error',
-        message: 'Alexander manifest is not loaded yet. Click Place Alexander in my patch again.',
-      }))
-      return
-    }
-
-    setAlexanderPlacement((previous) => ({
-      ...previous,
-      status: 'preflighting',
-      message: 'Checking the selected patch before queueing Alexander tiles...',
-    }))
-
-    void (async () => {
-      try {
-        const parsed = parseMosaicManifest(alexanderPlacement.manifest)
-        if (!parsed.manifest) {
-          setAlexanderPlacement((previous) => ({
-            ...previous,
-            status: 'error',
-            message: parsed.rejected[0]?.message ?? 'Alexander manifest could not be parsed.',
-          }))
-          return
-        }
-
-        const filteredManifest = filterAlexanderManifestForDeployment(parsed.manifest, deployment)
-        if (filteredManifest.placements.length === 0) {
-          setAlexanderPlacement((previous) => ({
-            ...previous,
-            status: 'error',
-            message: 'No Alexander placements fit inside your owned patch bounds.',
-          }))
-          return
-        }
-
-        filteredManifest.provenance.manifestSha256 = await hashMosaicManifest(filteredManifest as unknown as Record<string, unknown>)
-
-        const preflight = await startMosaicImport({
-          manifest: filteredManifest,
-          deployment,
-        })
-        if (!preflight.ready) {
-          setAlexanderPlacement((previous) => ({
-            ...previous,
-            status: 'error',
-            message: preflight.rejected[0]?.message ?? 'Alexander placement could not pass preflight.',
-          }))
-          return
-        }
-
-        setAlexanderPlacement((previous) => ({
-          ...previous,
-          status: 'idle',
-          message: `${preflight.counts.accepted} Alexander tiles queued for your patch.`,
-        }))
-      } catch (error) {
-        setAlexanderPlacement((previous) => ({
-          ...previous,
-          status: 'error',
-          message: error instanceof Error ? error.message : 'Alexander placement could not be started.',
-        }))
-      }
-    })()
-  }, [alexanderPlacement.manifest, alexanderPlacement.status, attemptPlace, canonicalDescriptor, startMosaicImport])
+    attemptPlace()
+  }, [attemptPlace])
 
   useEffect(() => () => {
     stopCanonicalMutationObserverRef.current?.()
@@ -1966,7 +1631,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
       triggerInvalidPulse()
       return { placed: null, rejected: true, reason: 'PLACEMENT_REJECTED' as const }
     },
-    startMosaicImport,
   }), [
     activeCollaborators,
     activeTile,
@@ -1990,7 +1654,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     visibleTiles,
     sessionId,
     socketRef,
-    startMosaicImport,
     triggerInvalidPulse,
     updatePointer,
     visibleWitnessSignals,
@@ -2333,13 +1996,6 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
             onShape={(shape) => dispatchActiveTileUi({ type: 'set-shape', shape })}
             onColor={(color) => dispatchActiveTileUi({ type: 'set-color', color })}
             paletteFallbackAnnouncement={paletteFallbackAnnouncement}
-            alexanderPlacement={{
-              status: alexanderPlacement.status,
-              message: alexanderPlacement.status === 'queue' && mosaicImportQueueState
-                ? `${alexanderPlacement.message} ${mosaicImportQueueState.status}: ${mosaicImportQueueState.outcomes.length} processed.`
-                : alexanderPlacement.message,
-              onToggle: () => void armAlexanderPlacement(),
-            }}
           />
         )}
       </div>
