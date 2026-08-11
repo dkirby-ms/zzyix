@@ -17,7 +17,7 @@ import { getTileDefinition } from '../domain/tileGeometry'
 import { GridOverlay } from './GridOverlay'
 import { useCraftMaterial, useRemoteSelectionMaterial } from './materials'
 import type { ThreeEvent } from '@react-three/fiber'
-import type { GridPattern } from '../domain/gridPatterns'
+import { GRID_PATTERNS, type GridPattern } from '../domain/gridPatterns'
 import type { MosaicBounds, TileInstance } from '../domain/placementSolver'
 import type { ConfidenceState, TileShape, Transform2D } from '../domain/tileGeometry'
 import { getCollaboratorColor } from '../ui/palettes'
@@ -515,16 +515,15 @@ const SceneContents = ({
 
       <group position={[0, 0, 0]}>
         <CanvasBounds worldBounds={worldBounds} />
-        {gridOverlay && (
-          <GridOverlay
-            pattern={gridOverlay.pattern}
-            activeShape={activeShape}
-            tiles={tiles}
-            bounds={gridOverlay.bounds ?? (topology ? { mode: 'unbounded' } : worldBounds ?? DEFAULT_WORLD_BOUNDS)}
-            activeSlotId={gridOverlay.activeSlotId}
-            topology={topology}
-          />
-        )}
+        <GridOverlay
+          enabled={gridOverlay !== undefined}
+          pattern={gridOverlay?.pattern ?? GRID_PATTERNS[0]}
+          activeShape={activeShape}
+          tiles={tiles}
+          bounds={gridOverlay?.bounds ?? (topology ? { mode: 'unbounded' } : worldBounds ?? DEFAULT_WORLD_BOUNDS)}
+          activeSlotId={gridOverlay?.activeSlotId}
+          topology={topology}
+        />
         {tileImages.map((image) => (
           <group
             key={`${image.key}:${image.tile.settleFrom ? 'settling' : 'settled'}`}
