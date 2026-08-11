@@ -128,8 +128,9 @@ describe('interaction controller', () => {
       mirrored: true,
     }
     const pattern = GRID_PATTERNS.find((entry) => entry.id === 'triangle-tessellation')!
+    const downSlot = pattern.slots.find((slot) => slot.id === 'down')!
     const guided = updateGhostTarget(
-      vec2(0.66, 0.04),
+      vec2(downSlot.offset.x, downSlot.offset.y),
       active,
       [],
       undefined,
@@ -137,7 +138,8 @@ describe('interaction controller', () => {
     )
 
     expect(guided.guideSlotId).toContain('triangle-tessellation')
-    expect(guided.target.position).not.toEqual({ x: 0.66, y: 0.04 })
+    expect(guided.guideSlotId).toContain(':down')
+    expect(guided.target.position).toEqual(downSlot.offset)
     expect(guided.target.rotation).toBe(Math.PI)
     expect(guided.target.mirrored).toBe(false)
     expect(guided.valid).toBe(true)
