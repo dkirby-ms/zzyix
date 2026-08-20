@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^5.18.0",
-    "@azure/msal-react": "^5.5.3",
+    "@azure/msal-react": "^5.5.5",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-tabs": "^1.1.21",
