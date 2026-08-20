@@ -12,7 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@azure/msal-browser": "^5.17.3",
+    "@azure/msal-browser": "^5.18.0",
     "@azure/msal-react": "^5.5.3",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-dialog": "^1.1.23",
