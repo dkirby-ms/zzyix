@@ -1,3 +1,4 @@
+export * from './chatRepository.js'
 export * from './client.js'
 export * from './quiltParity.js'
 export * from './repository.js'

@@ -68,6 +68,7 @@ import { ResourceNotFoundError } from './db/repository.js'
 import type { PatchDeliveryOperation, QuiltDeliveryContext } from './db/repository.js'
 import { startRetentionJob } from './jobs/retention.js'
 import { buildPatchRoomAccess, resolveQuiltRooms } from './realtime/quiltRooms.js'
+import { handleChatDisconnect, handleChatJoin, handleChatSend } from './realtime/chatHandlers.js'
 import { loadAuthenticationConfig } from './auth/config.js'
 import { createTokenVerifier, type TokenVerifier } from './auth/tokenVerifier.js'
 import {
@@ -2046,6 +2047,14 @@ io.on('connection', (socket) => {
     })
   })
 
+  socket.on('chat_join', async (payload, ack) => {
+    await handleChatJoin(socket, payload, ack)
+  })
+
+  socket.on('chat_send', async (payload, ack) => {
+    await handleChatSend(socket, payload, ack)
+  })
+
   socket.on('subscribe_quilt_area', async (payload, ack) => {
     const resubscribeStartedAt = performance.now()
     const recordResubscribe = async (outcomes: SubscribeQuiltAreaAck['outcomes']): Promise<void> => {
@@ -2334,6 +2343,7 @@ io.on('connection', (socket) => {
   // ── Disconnection ──────────────────────────────────────────────────────────
 
   socket.on('disconnect', async () => {
+    await handleChatDisconnect(socket)
     if (presenceHeartbeat) {
       clearInterval(presenceHeartbeat)
       presenceHeartbeat = null

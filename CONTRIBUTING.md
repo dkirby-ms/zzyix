@@ -20,6 +20,16 @@ Thanks for contributing.
 * Run the app locally and verify expected behavior before opening a pull request.
 * Run tests for impacted packages.
 
+## Chat Development
+
+Chat protocol types live in `apps/server/src/contracts.ts`. Server authorization,
+history, and idempotent persistence are implemented in
+`apps/server/src/realtime/chatHandlers.ts` and `apps/server/src/db/chatRepository.ts`.
+Keep new chat events typed in the shared contract, derive authorship from the
+authenticated socket principal, and preserve cursor ordering and
+`clientMessageId` retry semantics. Update the product contract and focused
+client, server, and Playwright tests when changing chat behavior.
+
 ## Branch And Pull Request Workflow
 
 * Create a branch from `main`.

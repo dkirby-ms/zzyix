@@ -12,6 +12,11 @@ import type {
   QuiltScopedStatePayload,
   CanonicalWorldEntryDescriptor,
   CanonicalClientTelemetry,
+  ChatCursor,
+  ChatConversationId,
+  ChatErrorPayload,
+  ChatJoinAck,
+  ChatMessageAcceptedPayload,
 } from '../../../server/src/contracts'
 import { SCHEMA_VERSION } from '../../../server/src/contracts'
 import { isInteractionRequiredError, type AccessTokenProvider, type AuthLossReason } from './authenticatedFetch'
@@ -35,6 +40,10 @@ export const useSocketConnection = (
   onProtocolMismatch?: () => void,
   onConnectionEpoch?: (epoch: number) => void,
   suppliedEntryAttemptId?: string,
+  onChatHistory?: (payload: ChatJoinAck) => void,
+  onChatMessageAccepted?: (payload: ChatMessageAcceptedPayload) => void,
+  onChatError?: (payload: ChatErrorPayload) => void,
+  chatSubscription?: { conversationId: ChatConversationId; cursor?: ChatCursor },
 ): React.MutableRefObject<AppSocket | null> => {
   const socketRef = useRef<AppSocket | null>(null)
 
@@ -144,6 +153,15 @@ export const useSocketConnection = (
         reconnectAttempts = 0
       }
       onConnectionEpoch?.(connectionEpoch)
+      if (chatSubscription) {
+        socket.emit('chat_join', chatSubscription, (response) => {
+          if ('messages' in response) {
+            onChatHistory?.(response)
+          } else {
+            onChatError?.(response)
+          }
+        })
+      }
     })
 
     const handleCanonicalLineage = (payload: { lineageAttemptId: string }): void => {
@@ -226,6 +244,8 @@ export const useSocketConnection = (
     if (onClientLeft) {
       socket.on('client_left', onClientLeft)
     }
+    if (onChatMessageAccepted) socket.on('chat_message_accepted', onChatMessageAccepted)
+    if (onChatError) socket.on('chat_error', onChatError)
 
     socketRef.current = socket
     if (socketActionRef) {
@@ -246,6 +266,8 @@ export const useSocketConnection = (
       if (onClientLeft) {
         socket.off('client_left', onClientLeft)
       }
+      if (onChatMessageAccepted) socket.off('chat_message_accepted', onChatMessageAccepted)
+      if (onChatError) socket.off('chat_error', onChatError)
       socket.io.off('reconnect_attempt', handleReconnectAttempt)
       socket.io.off('reconnect_failed', handleReconnectFailed)
       socket.disconnect()
@@ -271,6 +293,10 @@ export const useSocketConnection = (
     onProtocolMismatch,
     onConnectionEpoch,
     suppliedEntryAttemptId,
+    onChatHistory,
+    onChatMessageAccepted,
+    onChatError,
+    chatSubscription,
   ])
 
   return socketRef

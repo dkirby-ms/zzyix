@@ -59,12 +59,15 @@ Gaps and differences identified between research findings and the implementation
 
 ## Suggested Follow-On Work
 
-* WI-01: Define moderation and abuse response — add moderation hooks, reporting, structured events, and retention/deletion runbooks after the first slice is accepted. (Medium priority)
+* WI-01: Define moderation and abuse response, including moderation hooks, reporting, structured events, and retention/deletion runbooks after the first slice is accepted. (Medium priority)
   * Source: DR-02.
   * Dependency: Initial durable message schema and first-slice policy implementation.
 * WI-02: Evaluate richer conversation topology — assess direct conversations, multiple rooms, unread state, and notifications after shared chat usage is understood. (Medium priority)
   * Source: DR-01 and deferred product scope.
   * Dependency: First-slice shared conversation is shipped.
+* WI-03: Enforce the documented 10-send rolling-minute chat limit across replicas, or update the product contract after explicit product and operations approval. (Release blocker)
+  * Source: `docs/chat-product-contract.md` and Phase 4 validation review.
+  * Dependency: A shared rate-limit strategy that works with the PostgreSQL adapter and has focused tests.
 
 ## Validation Status
 
@@ -73,3 +76,5 @@ Gaps and differences identified between research findings and the implementation
 * Major findings: none after selecting and documenting the socket lifecycle path and correcting phase metadata.
 * Remaining minor risk: exact migration filename, repository module split, and final component naming depend on local implementation discovery at execution time.
 * Validation note: the repository does not expose a `validate:frontmatter` script; frontmatter was checked manually against the repository instruction requirements.
+* Phase 4 validation note: focused client, repository, handler, lint, build, and full client commands passed. Full server tests were blocked by missing `psql` and two duplicate-key integration failures; multi-replica E2E was blocked by missing Chromium Linux libraries. Playwright listed all four new chat tests successfully.
+* Release blocker: the documented rolling-minute rate limit is not currently enforced by `chatHandlers.ts`.

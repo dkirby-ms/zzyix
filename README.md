@@ -20,6 +20,7 @@ development by building and shipping a real product in small increments.
 * Pan and zoom through a continuous wrapped quilt
 * See other collaborators and distinguish their tile ownership
 * Return to a patch you own when you sign in
+* Exchange durable plain-text messages with authenticated collaborators in the shared chat
 
 ## Try it locally
 
@@ -47,6 +48,11 @@ The experience is built from three main pieces:
 
 The quilt is finite in storage but wraps at its edges, so navigation feels
 continuous without duplicating persisted tiles.
+
+Authenticated users can also use the shared chat panel. Messages are stored in
+PostgreSQL, ordered by server sequence, replayed from a cursor after reconnect,
+and rendered as plain text. See the [chat product contract](docs/chat-product-contract.md)
+for limits, authorization, retention, and deferred features.
 
 For a visual explanation of the data model, see
 [Canonical quilt data storage](docs/canonical-quilt-data-storage.md).

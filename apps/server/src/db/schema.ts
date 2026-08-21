@@ -453,6 +453,44 @@ export const participants = pgTable(
   }),
 )
 
+export const conversations = pgTable(
+  'conversations',
+  {
+    id: uuid('id').primaryKey(),
+    productKey: text('product_key').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    productKeyCheck: check('conversations_product_key_check', sql`${table.productKey} = 'shared'`),
+  }),
+)
+
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    principalId: uuid('principal_id').references(() => principals.id, { onDelete: 'set null' }),
+    sequence: integer('sequence').notNull(),
+    clientMessageId: text('client_message_id').notNull(),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    conversationSequenceUnique: unique('chat_messages_conversation_sequence_unique').on(table.conversationId, table.sequence),
+    conversationPrincipalClientMessageUnique: unique('chat_messages_conversation_principal_client_message_unique').on(
+      table.conversationId,
+      table.principalId,
+      table.clientMessageId,
+    ),
+    conversationSequenceIndex: index('chat_messages_conversation_sequence_idx').on(table.conversationId, table.sequence),
+    conversationCreatedAtIndex: index('chat_messages_conversation_created_at_idx').on(table.conversationId, table.createdAt),
+    bodyLengthCheck: check('chat_messages_body_length_check', sql`char_length(${table.body}) <= 2000`),
+  }),
+)
+
 export const tiles = pgTable(
   'tiles',
   {

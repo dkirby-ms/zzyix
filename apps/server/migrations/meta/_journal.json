@@ -78,6 +78,13 @@
       "when": 1785626954568,
       "tag": "0010_new_tile_shapes",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787332424482,
+      "tag": "0011_chat",
+      "breakpoints": true
     }
   ]
 }

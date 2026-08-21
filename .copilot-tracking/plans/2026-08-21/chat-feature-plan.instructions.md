@@ -50,13 +50,13 @@ Implement an authenticated, durable first-slice chat experience on the existing 
 
 ## Implementation Checklist
 
-### [ ] Implementation Phase 1: Product Contract and Shared Protocol
+### [x] Implementation Phase 1: Product Contract and Shared Protocol
 
 <!-- parallelizable: false -->
 
-* [ ] Step 1.1: Freeze first-slice conversation scope, membership, limits, unsupported features, and account lifecycle behavior.
+* [x] Step 1.1: Freeze first-slice conversation scope, membership, limits, unsupported features, and account lifecycle behavior.
   * Details: `.copilot-tracking/details/2026-08-21/chat-feature-details.md` Lines 10-38.
-* [ ] Step 1.2: Add typed chat events, payloads, cursors, stable IDs, idempotency IDs, safe profiles, and error outcomes.
+* [x] Step 1.2: Add typed chat events, payloads, cursors, stable IDs, idempotency IDs, safe profiles, and error outcomes.
   * Details: `.copilot-tracking/details/2026-08-21/chat-feature-details.md` Lines 40-61.
 
 ### [ ] Implementation Phase 2: Durable Storage and Server Authorization
@@ -80,12 +80,22 @@ Implement an authenticated, durable first-slice chat experience on the existing 
   * Details: `.copilot-tracking/details/2026-08-21/chat-feature-details.md` Lines 180-214.
 
 ### [ ] Implementation Phase 4: Layered Validation and Documentation
+@@### [x] Implementation Phase 3: Client Domain and Panel UI
+@@
+@@<!-- parallelizable: false -->
+@@
+@@* [x] Step 3.1: Add ordered chat cache, cursor tracking, optimistic acknowledgement reconciliation, duplicate suppression, and shared connection wiring.
+@@  * Details: `.copilot-tracking/details/2026-08-21/chat-feature-details.md` Lines 150-178.
+@@* [x] Step 3.2: Mount an accessible responsive chat panel in the authenticated shell with explicit loading, empty, error, disconnected, and validation states.
+@@  * Details: `.copilot-tracking/details/2026-08-21/chat-feature-details.md` Lines 180-214.
+@@
+@@### [x] Implementation Phase 4: Layered Validation and Documentation
 
 <!-- parallelizable: false -->
 
-* [ ] Step 4.1: Add client, server, repository, Socket.IO, authenticated UI, reconnect, multi-user, and multi-replica tests.
+* [x] Step 4.1: Add client, server, repository, Socket.IO, authenticated UI, reconnect, multi-user, and multi-replica tests.
   * Details: `.copilot-tracking/details/2026-08-21/chat-feature-details.md` Lines 216-233.
-* [ ] Step 4.2: Run focused checks, workspace lint/build/tests, multi-replica E2E, and update product/API and migration documentation.
+* [x] Step 4.2: Run focused checks, workspace lint/build/tests, multi-replica E2E, and update product/API and migration documentation.
   * Details: `.copilot-tracking/details/2026-08-21/chat-feature-details.md` Lines 235-267.
 
 ## Planning Log
