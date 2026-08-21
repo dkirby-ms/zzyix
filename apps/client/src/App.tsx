@@ -53,7 +53,10 @@ import type {
   QuiltScopedStatePayload,
   QuiltTopologyHandshake,
   CanonicalWorldEntryDescriptor,
+  ChatCursor,
+  ChatSendAck,
 } from '../../server/src/contracts'
+import { SHARED_CHAT_CONVERSATION_ID } from '../../server/src/contracts'
 import { decomposeWrappedViewport } from '../../server/src/domain/quiltTopology'
 import { CanvasLoadingFallback } from './ui/CanvasLoadingFallback'
 import { TilePalette } from './ui/TilePalette'
@@ -90,6 +93,15 @@ import {
   setQuiltUndoMetadata,
   type QuiltCacheState,
 } from './domain/quiltCache'
+import {
+  acknowledgeMessage,
+  addPendingSend,
+  createChatCache,
+  mergeChatStateHistory,
+  mergeChatStateMessage,
+  type ChatCacheState,
+} from './domain/chatCache'
+import { ChatPanel } from './ui/ChatPanel'
 import './App.css'
 
 const CHUNK_WORLD_SIZE = RUNTIME_CHUNK_WORLD_SIZE
@@ -365,6 +377,10 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const [connectionEpoch, setConnectionEpoch] = useState(0)
   const [worldBounds, setWorldBounds] = useState(DEFAULT_WORLD_BOUNDS)
   const [cameraViewport, setCameraViewport] = useState<MinimapViewport | null>(null)
+  const [chatCache, setChatCache] = useState<ChatCacheState>(createChatCache)
+  const [chatLoading, setChatLoading] = useState(true)
+  const [chatError, setChatError] = useState<string | undefined>()
+  const [chatOpen, setChatOpen] = useState(false)
   const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
   const activeTileRef = useRef(activeTileUiState.activeTile)
   const sequencedStateRef = useRef(sequencedState)
@@ -773,6 +789,26 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     void tileId
   }, [])
 
+  const onChatHistory = useCallback((payload: { messages: import('../../server/src/contracts').ChatMessage[]; cursor?: ChatCursor }): void => {
+    setChatCache((previous) => mergeChatStateHistory(previous, payload.messages, payload.cursor))
+    setChatLoading(false)
+    setChatError(undefined)
+  }, [])
+
+  const onChatMessageAccepted = useCallback((payload: import('../../server/src/contracts').ChatMessageAcceptedPayload): void => {
+    setChatCache((previous) => mergeChatStateMessage(previous, payload.message))
+  }, [])
+
+  const onChatError = useCallback((payload: { message?: string }): void => {
+    setChatLoading(false)
+    setChatError(payload.message ?? 'Chat is unavailable.')
+  }, [])
+
+  const chatSubscription = useMemo(() => ({
+    conversationId: SHARED_CHAT_CONVERSATION_ID,
+    cursor: chatCache.continuationCursor,
+  }), [chatCache.continuationCursor])
+
   const socketRef = useSocketConnection(
     auth.apiOrigin,
     canonicalDescriptor,
@@ -789,9 +825,46 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
     true,
     onCanonicalProtocolMismatch,
     setConnectionEpoch,
+    undefined,
+    onChatHistory,
+    onChatMessageAccepted,
+    onChatError,
+    chatSubscription,
   )
 
   const connectionState = useConnectionStatus(socketRef)
+
+  const sendChatMessage = useCallback((body: string): void => {
+    const socket = socketRef.current
+    if (!socket?.connected) {
+      setChatError('Reconnect before sending a message.')
+      return
+    }
+
+    const clientMessageId = crypto.randomUUID()
+    setChatCache((previous) => addPendingSend(previous, clientMessageId, body))
+    socket.emit('chat_send', {
+      conversationId: SHARED_CHAT_CONVERSATION_ID,
+      body,
+      clientMessageId,
+    }, (ack: ChatSendAck) => {
+      setChatCache((previous) => acknowledgeMessage(previous, clientMessageId, ack))
+      if (ack.status === 'rejected') setChatError(ack.message ?? 'Message was not sent.')
+    })
+  }, [socketRef])
+
+  const loadMoreChatHistory = useCallback((cursor?: ChatCursor): void => {
+    const socket = socketRef.current
+    if (!socket?.connected || !cursor) return
+    setChatLoading(true)
+    socket.emit('chat_join', {
+      conversationId: SHARED_CHAT_CONVERSATION_ID,
+      cursor,
+    }, (response) => {
+      if ('messages' in response) onChatHistory(response)
+      else onChatError(response)
+    })
+  }, [onChatError, onChatHistory, socketRef])
 
   useEffect(() => {
     if (!quiltProtocol?.canaryTelemetryEnabled || !quiltProtocol.topology) return
@@ -1399,6 +1472,8 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
         onLogout={() => void auth.logout()}
         theme={theme}
         onToggleTheme={onToggleTheme}
+        chatOpen={chatOpen}
+        onToggleChat={() => setChatOpen((previous) => !previous)}
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
@@ -1610,6 +1685,18 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
           />
         )}
       </div>
+      {chatOpen && (
+        <ChatPanel
+          messages={chatCache.messages}
+          pending={Object.values(chatCache.pendingSends)}
+          connectionStatus={connectionState.status}
+          loading={chatLoading}
+          error={chatError}
+          onSend={sendChatMessage}
+          onLoadMoreHistory={loadMoreChatHistory}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
     </main>
   )
 

@@ -22,6 +22,20 @@ Server runs on `http://localhost:3001` with Socket.IO WebSocket on the same orig
 - `npm run test` — Run tests with coverage
 - `npm run test:watch` — Watch tests
 
+## Chat Module
+
+The authenticated chat module uses the existing Socket.IO connection and
+PostgreSQL adapter. `src/realtime/chatHandlers.ts` authorizes joins and sends,
+persists messages through `src/db/chatRepository.ts`, broadcasts accepted
+messages, and replays history from a cursor. The shared conversation schema is
+introduced by migration `0011_chat.sql`.
+
+Migration `0011_chat.sql` is additive. It creates the single shared conversation
+table, durable message table, sequence and retry uniqueness constraints, and
+indexes. Principal deletion sets `principal_id` to null so historical messages
+remain readable as `Deleted user`. Apply it through the normal release-owned
+migration job; no reverse migration is supplied.
+
 ## Deployment
 
 ```bash

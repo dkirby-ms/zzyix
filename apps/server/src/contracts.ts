@@ -302,6 +302,7 @@ export type ConnectionAuth = {
   canonicalGeneration: number
   entryAttemptId: string
   lineageAttemptId?: string
+  chatConversationId?: ChatConversationId
 }
 
 /** Per-socket metadata stored by Socket.IO (accessible as socket.data). */
@@ -316,6 +317,10 @@ export type SocketData = {
   reconnectCycleLineageId?: string
   principalId: string
   tokenExpiresAt: number
+  chatSubscribed?: {
+    conversationId: ChatConversationId
+    cursor?: ChatCursor
+  }
 }
 
 // ── Event payload types ───────────────────────────────────────────────────────
@@ -575,6 +580,101 @@ export type QuiltPatchResyncRequiredPayload = {
   reason: 'EVENT_GAP' | 'CURSOR_AHEAD' | 'SNAPSHOT_REQUIRED'
 }
 
+// ── Chat event payload types ──────────────────────────────────────────────────
+// Authenticated durable text chat with message retention, rate limits, and
+// cursor-based replay. One shared conversation available to all authenticated
+// principals. See docs/chat-product-contract.md for scope, limits, and policies.
+
+export type ChatConversationId = string & { readonly _brand: 'ChatConversationId' }
+
+export const SHARED_CHAT_CONVERSATION_ID = '00000000-0000-4000-8000-000000000001' as ChatConversationId
+
+export type ChatMessageId = string & { readonly _brand: 'ChatMessageId' }
+
+export type ChatSequence = number & { readonly _brand: 'ChatSequence' }
+
+/** Safe author profile for display. Servers MUST NOT accept these from clients. */
+export type ChatAuthorProfile = {
+  displayName?: string
+  email?: string
+}
+
+/** Durable chat message with server-authoritative fields and safe author. */
+export type ChatMessage = {
+  id: ChatMessageId
+  conversationId: ChatConversationId
+  principalId: string | null
+  clientMessageId: string
+  authorProfile: ChatAuthorProfile
+  body: string
+  sequence: ChatSequence
+  createdAt: number
+}
+
+/** Cursor for replay, pagination, and history reconciliation. */
+export type ChatCursor = {
+  conversationId: ChatConversationId
+  sequence: ChatSequence
+  messageId: ChatMessageId
+}
+
+/** Request to join a conversation and receive initial history. */
+export type ChatJoinPayload = {
+  conversationId: ChatConversationId
+  cursor?: ChatCursor
+}
+
+/** Response: server confirms join and provides initial message history. */
+export type ChatJoinAck = {
+  conversationId: ChatConversationId
+  messages: ChatMessage[]
+  cursor?: ChatCursor
+}
+
+/** Client sends a message. Includes idempotency ID and conversation scope. */
+export type ChatSendPayload = {
+  conversationId: ChatConversationId
+  body: string
+  clientMessageId: string
+}
+
+/** Response: server acknowledges send with server-assigned ID and sequence. */
+export type ChatSendAck =
+  | {
+      status: 'accepted'
+      message: ChatMessage
+      idempotent: boolean
+    }
+  | {
+      status: 'rejected'
+      code: ChatRejectReason
+      message?: string
+      retryAfterSeconds?: number
+    }
+
+/** Rejection reasons for send and join operations. */
+export type ChatRejectReason =
+  | 'unauthorized'
+  | 'rate_limited'
+  | 'invalid_request'
+  | 'duplicate'
+  | 'invalid_response'
+  | 'disconnected'
+
+/** Notification: a message was accepted and persisted. Broadcast to all. */
+export type ChatMessageAcceptedPayload = {
+  conversationId: ChatConversationId
+  message: ChatMessage
+}
+
+/** Error response for chat operations. */
+export type ChatErrorPayload = {
+  conversationId: ChatConversationId
+  code: ChatRejectReason
+  message?: string
+  retryAfterSeconds?: number
+}
+
 // ── Typed event maps ──────────────────────────────────────────────────────────
 // Pass these to Server<C, S, I, D> and Socket<C, S, I, D>.
 
@@ -590,6 +690,10 @@ export interface ClientToServerEvents {
   quilt_client_runtime_metrics: (payload: QuiltClientRuntimeMetrics) => void
   /** Submit one canonical entry/reconnect/resubscribe terminal for server-owned telemetry. */
   canonical_telemetry: (payload: CanonicalClientTelemetry) => void
+  /** Join a chat conversation and request initial history. */
+  chat_join: (payload: ChatJoinPayload, ack: (response: ChatJoinAck | ChatErrorPayload) => void) => void
+  /** Send an authenticated message to a conversation. */
+  chat_send: (payload: ChatSendPayload, ack: (response: ChatSendAck) => void) => void
 }
 
 /** Events emitted by the server, received by clients. */
@@ -608,6 +712,10 @@ export interface ServerToClientEvents {
   quilt_patch_event: (payload: QuiltPatchEventPayload) => void
   /** Requests cursor-based recovery for one accepted room. */
   quilt_patch_resync_required: (payload: QuiltPatchResyncRequiredPayload) => void
+  /** Broadcast: a message was accepted and persisted to the conversation. */
+  chat_message_accepted: (payload: ChatMessageAcceptedPayload) => void
+  /** Error notification for a failed chat operation. */
+  chat_error: (payload: ChatErrorPayload) => void
 }
 
 /** Reserved for the Socket.IO Postgres adapter (multi-server state sync). */
