@@ -129,3 +129,27 @@ None. Implementation followed the Phase 1 specification exactly as documented in
 
 **Release readiness**: Not ready for production rollout. Focused code quality checks pass, but the documented rate limit is unenforced and full server and multi-replica E2E execution require environment remediation.
 
+## Phase 4 Rework: Review Findings and Manual Testing Fix (2026-08-21)
+
+### Modified
+
+* **apps/server/src/realtime/chatHandlers.ts**: Added an in-memory, per-principal, rolling-minute rate limiter (10 sends/min per `docs/chat-product-contract.md`). `handleChatSend` now rejects with `rate_limited` and a `retryAfterSeconds` value once the limit is exceeded. Exported `resetChatRateLimiterForTests` for test isolation.
+* **apps/server/src/realtime/chatHandlers.test.ts**: Added a boundary test (10 accepted sends, 11th rejected with `rate_limited`) and a `beforeEach` that resets the rate limiter and clears mocks between tests.
+* **apps/server/src/db/chatRepository.ts**: Added `ensureSharedConversation()`, an idempotent `insert ... onConflictDoNothing()` seed of the shared `conversations` row, called before the message insert in `sendMessage()`. Fixes a foreign key violation on `chat_messages.conversation_id` observed during manual testing (no prior code ever created the shared conversation row referenced by `SHARED_CHAT_CONVERSATION_ID`).
+* **apps/server/src/db/chatRepository.test.ts**: Removed unused `ChatCursor`, `ChatMessage`, `conversations`, and `principals` imports flagged by the lint review.
+
+### Additional or Deviating Changes
+
+* Rate limiting is enforced per server process (in-memory), not shared across horizontally scaled replicas. Tracked as WI-03 follow-on work if the deployment runs multiple replicas.
+* Added lazy conversation-row provisioning instead of a new Drizzle migration for the seed row, to avoid hand-editing the migration journal/snapshot for a single static row. Tracked as WI-04 follow-on work to move this into a migration or startup step.
+
+### Validation
+
+* `npx vitest run apps/server/src/realtime/chatHandlers.test.ts apps/server/src/db/chatRepository.test.ts`: passed, 8 tests.
+* `npm run build`: passed.
+* `npm run lint:server`: passed, no warnings.
+* `npm run lint:client`: passed.
+
+**Release readiness**: Critical rate-limit gap and the manual-testing FK violation are resolved. Environment blockers (missing `psql`, missing Chromium) from the original review remain outstanding and require dev/CI environment remediation, not code changes.
+
+

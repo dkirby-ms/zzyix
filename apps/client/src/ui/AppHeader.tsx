@@ -1,5 +1,5 @@
 import type { ConnectionState } from '../network/useConnectionStatus'
-import { ArrowLeft, LogOut, Moon, Sun, Users } from 'lucide-react'
+import { ArrowLeft, LogOut, MessageCircle, Moon, Sun, Users } from 'lucide-react'
 import { StatusIndicator } from './StatusIndicator'
 
 export type ThemeMode = 'dark' | 'light'
@@ -12,6 +12,8 @@ type AppHeaderProps = {
   onLogout: () => void
   theme: ThemeMode
   onToggleTheme: () => void
+  chatOpen: boolean
+  onToggleChat: () => void
 }
 
 export const AppHeader = ({
@@ -22,6 +24,8 @@ export const AppHeader = ({
   onLogout,
   theme,
   onToggleTheme,
+  chatOpen,
+  onToggleChat,
 }: AppHeaderProps) => {
   return (
     <header className="app-header">
@@ -46,6 +50,16 @@ export const AppHeader = ({
             {collaboratorCount} active
           </span>
         )}
+        <button
+          type="button"
+          className="chat-toggle"
+          aria-label={chatOpen ? 'Hide chat' : 'Show chat'}
+          title={chatOpen ? 'Hide chat' : 'Show chat'}
+          aria-pressed={chatOpen}
+          onClick={onToggleChat}
+        >
+          <MessageCircle aria-hidden="true" />
+        </button>
         <button
           type="button"
           className="theme-toggle"

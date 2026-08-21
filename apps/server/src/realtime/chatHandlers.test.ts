@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatMessage, SocketData } from '../contracts.js'
-import { handleChatJoin, handleChatSend } from './chatHandlers.js'
+import { handleChatJoin, handleChatSend, resetChatRateLimiterForTests } from './chatHandlers.js'
 
 const repository = vi.hoisted(() => ({
   getConversationHistory: vi.fn(),
@@ -40,6 +40,11 @@ const createSocket = () => {
 }
 
 describe('chat socket handlers', () => {
+  beforeEach(() => {
+    resetChatRateLimiterForTests()
+    vi.clearAllMocks()
+  })
+
   it('rejects unauthorized joins and sends', async () => {
     rooms.canAccessChatConversation.mockResolvedValue(false)
     const { socket } = createSocket()
@@ -65,5 +70,23 @@ describe('chat socket handlers', () => {
     expect(ack).toHaveBeenCalledWith({ status: 'accepted', message, idempotent: true })
     expect(socket.to).not.toHaveBeenCalled()
     expect(emitted).toEqual([])
+  })
+
+  it('rejects sends past the 10-per-minute rolling rate limit', async () => {
+    rooms.canAccessChatConversation.mockResolvedValue(true)
+    repository.sendMessage.mockResolvedValue({ message, idempotent: false })
+    const { socket } = createSocket()
+
+    for (let i = 0; i < 10; i += 1) {
+      const ack = vi.fn()
+      await handleChatSend(socket as never, { conversationId, body: 'hello', clientMessageId: `client-${i}` }, ack)
+      expect(ack).toHaveBeenCalledWith(expect.objectContaining({ status: 'accepted' }))
+    }
+
+    const rejectedAck = vi.fn()
+    await handleChatSend(socket as never, { conversationId, body: 'hello', clientMessageId: 'client-11' }, rejectedAck)
+
+    expect(rejectedAck).toHaveBeenCalledWith(expect.objectContaining({ status: 'rejected', code: 'rate_limited' }))
+    expect(repository.sendMessage).toHaveBeenCalledTimes(10)
   })
 })

@@ -8,7 +8,7 @@ import type {
   ChatSequence,
 } from '../contracts.js'
 import { getDatabaseBundle } from './client.js'
-import { chatMessages, principals } from './schema.js'
+import { chatMessages, conversations, principals } from './schema.js'
 
 export type ChatHistoryPage = {
   messages: ChatMessage[]
@@ -19,6 +19,16 @@ export type ChatHistoryPage = {
 export const SHARED_CHAT_CONVERSATION_ID = '00000000-0000-4000-8000-000000000001' as ChatConversationId
 
 const normalizeConversationId = (conversationId: ChatConversationId): string => String(conversationId)
+
+// The shared conversation row has no seeding migration or startup hook, so ensure it
+// exists before any insert that references it via foreign key.
+const ensureSharedConversation = async (conversationId: string): Promise<void> => {
+  if (conversationId !== SHARED_CHAT_CONVERSATION_ID) return
+  const { db } = getDatabaseBundle()
+  await db.insert(conversations)
+    .values({ id: conversationId, productKey: 'shared' })
+    .onConflictDoNothing()
+}
 
 const toSafeMessage = (row: {
   id: string
@@ -139,6 +149,7 @@ export const sendMessage = async (
   }
 
   const normalizedConversationId = normalizeConversationId(conversationId)
+  await ensureSharedConversation(normalizedConversationId)
   const existingRow = await db
     .select({
       id: chatMessages.id,

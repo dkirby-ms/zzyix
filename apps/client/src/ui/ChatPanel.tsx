@@ -9,6 +9,7 @@ type ChatPanelProps = {
   connectionStatus: ConnectionStatus
   onSend: (body: string) => void
   onLoadMoreHistory: (cursor?: ChatCursor) => void
+  onClose: () => void
   loading?: boolean
   error?: string
 }
@@ -29,6 +30,7 @@ export function ChatPanel({
   connectionStatus,
   onSend,
   onLoadMoreHistory,
+  onClose,
   loading = false,
   error,
 }: ChatPanelProps) {
@@ -62,6 +64,9 @@ export function ChatPanel({
           <span aria-hidden="true" />
           {statusLabel[connectionStatus]}
         </span>
+        <button type="button" className="chat-panel-close" aria-label="Close chat" onClick={onClose}>
+          &times;
+        </button>
       </div>
 
       {error && <p className="chat-panel-error" role="alert">{error}</p>}

@@ -380,6 +380,7 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
   const [chatCache, setChatCache] = useState<ChatCacheState>(createChatCache)
   const [chatLoading, setChatLoading] = useState(true)
   const [chatError, setChatError] = useState<string | undefined>()
+  const [chatOpen, setChatOpen] = useState(false)
   const lastPointerWorldRef = useRef<{ x: number; y: number } | null>(null)
   const activeTileRef = useRef(activeTileUiState.activeTile)
   const sequencedStateRef = useRef(sequencedState)
@@ -1471,6 +1472,8 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
         onLogout={() => void auth.logout()}
         theme={theme}
         onToggleTheme={onToggleTheme}
+        chatOpen={chatOpen}
+        onToggleChat={() => setChatOpen((previous) => !previous)}
       />
       <div className="canvas-workspace">
         <section className="canvas-shell">
@@ -1681,6 +1684,8 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
             paletteFallbackAnnouncement={paletteFallbackAnnouncement}
           />
         )}
+      </div>
+      {chatOpen && (
         <ChatPanel
           messages={chatCache.messages}
           pending={Object.values(chatCache.pendingSends)}
@@ -1689,8 +1694,9 @@ function ProtectedApp({ theme, onToggleTheme }: { theme: ThemeMode; onToggleThem
           error={chatError}
           onSend={sendChatMessage}
           onLoadMoreHistory={loadMoreChatHistory}
+          onClose={() => setChatOpen(false)}
         />
-      </div>
+      )}
     </main>
   )
 

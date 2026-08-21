@@ -30,6 +30,13 @@ Gaps and differences identified between research findings and the implementation
   * Research recommends making the socket lifecycle choice explicit because the current handshake is quilt-coupled.
   * Plan implements: one shared authenticated transport with independently authorized chat subscription.
   * Rationale: This preserves existing reconnect and PostgreSQL adapter behavior without duplicating authentication and transport infrastructure.
+* DD-03: Rate limit enforcement (WI-03) was implemented as an in-memory, per-process rolling-minute counter in `chatHandlers.ts` rather than a cross-replica shared counter.
+  * Review requirement: enforce the 10-send rolling-minute limit per principal.
+  * Plan implements: a single-process `Map`-based sliding window, which is correct for a single server instance but does not share counts across horizontally scaled replicas behind the PostgreSQL adapter.
+  * Rationale: Matches the 1-2 hour fix effort from the review and closes the release-blocking scope gap. A cross-replica limiter (for example, backed by Postgres or Redis) is tracked as follow-on work if the deployment runs multiple server replicas.
+* DD-04: Discovered during manual testing (not in the original review): inserting a chat message failed with a foreign key violation on `chat_messages.conversation_id` because no code or migration ever seeds the shared `conversations` row referenced by `SHARED_CHAT_CONVERSATION_ID`.
+  * Fix: added `ensureSharedConversation()` in `chatRepository.ts`, an idempotent `insert ... onConflictDoNothing()` seed of the shared conversation row, called before the message insert in `sendMessage()`.
+  * Rationale: Mirrors the existing `onConflictDoNothing()` lazy-provisioning pattern already used in `repository.ts` for canvases, avoiding a hand-written Drizzle migration/snapshot edit for a single seed row.
 
 ## Implementation Paths Considered
 
@@ -65,9 +72,12 @@ Gaps and differences identified between research findings and the implementation
 * WI-02: Evaluate richer conversation topology — assess direct conversations, multiple rooms, unread state, and notifications after shared chat usage is understood. (Medium priority)
   * Source: DR-01 and deferred product scope.
   * Dependency: First-slice shared conversation is shipped.
-* WI-03: Enforce the documented 10-send rolling-minute chat limit across replicas, or update the product contract after explicit product and operations approval. (Release blocker)
+* WI-03: ✅ Resolved — 10-send rolling-minute chat limit is now enforced per principal in `chatHandlers.ts` with a focused boundary test. The current limiter is per-process; if the server is scaled to multiple replicas, replace it with a shared counter (for example, backed by Postgres or Redis) so the limit holds across instances. (Medium priority, non-blocking for single-replica deployments)
   * Source: `docs/chat-product-contract.md` and Phase 4 validation review.
-  * Dependency: A shared rate-limit strategy that works with the PostgreSQL adapter and has focused tests.
+  * Dependency: A shared rate-limit strategy that works with the PostgreSQL adapter and has focused tests, if multi-replica enforcement is required.
+* WI-04: Add a proper Drizzle migration (or startup seed step) that inserts the shared `conversations` row instead of relying on lazy `onConflictDoNothing()` provisioning inside `sendMessage()`, for clearer operational visibility. (Low priority)
+  * Source: Manual testing discovery, DD-04.
+  * Dependency: None; current lazy-provisioning fix is functionally correct.
 
 ## Validation Status
 
@@ -77,4 +87,5 @@ Gaps and differences identified between research findings and the implementation
 * Remaining minor risk: exact migration filename, repository module split, and final component naming depend on local implementation discovery at execution time.
 * Validation note: the repository does not expose a `validate:frontmatter` script; frontmatter was checked manually against the repository instruction requirements.
 * Phase 4 validation note: focused client, repository, handler, lint, build, and full client commands passed. Full server tests were blocked by missing `psql` and two duplicate-key integration failures; multi-replica E2E was blocked by missing Chromium Linux libraries. Playwright listed all four new chat tests successfully.
-* Release blocker: the documented rolling-minute rate limit is not currently enforced by `chatHandlers.ts`.
+* Release blocker: resolved. `chatHandlers.ts` now enforces the 10-send rolling-minute rate limit (DD-03) and the shared conversation FK-violation bug found in manual testing is fixed (DD-04). Unused test imports flagged by lint review were removed.
+

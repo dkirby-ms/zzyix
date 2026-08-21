@@ -26,6 +26,7 @@ const renderPanel = (overrides: Partial<React.ComponentProps<typeof ChatPanel>> 
     connectionStatus="connected"
     onSend={vi.fn()}
     onLoadMoreHistory={vi.fn()}
+    onClose={vi.fn()}
     {...overrides}
   />,
 )

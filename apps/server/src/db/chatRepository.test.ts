@@ -1,8 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import type { ChatConversationId, ChatCursor, ChatMessage } from '../contracts.js'
+import type { ChatConversationId } from '../contracts.js'
 import { createPostgresTestDatabase, type PostgresTestDatabase } from '../test/postgresTestDatabase.js'
-import { chatMessages, conversations, principals } from './schema.js'
+import { chatMessages } from './schema.js'
 import { getConversationHistory, isAuthorizedToJoinConversation, sendMessage } from './chatRepository.js'
 
 const SHARED_CONVERSATION_ID = '00000000-0000-4000-8000-000000000001' as ChatConversationId

@@ -23,6 +23,31 @@ const buildChatError = (conversationId: ChatConversationId, code: ChatErrorPaylo
   message,
 })
 
+// Product contract: 10 sends per rolling minute per principal. See docs/chat-product-contract.md.
+const CHAT_RATE_LIMIT_MAX_SENDS = 10
+const CHAT_RATE_LIMIT_WINDOW_MS = 60_000
+const chatSendTimestampsByPrincipal = new Map<string, number[]>()
+
+const checkChatRateLimit = (principalId: string, now = Date.now()): { allowed: boolean; retryAfterSeconds?: number } => {
+  const windowStart = now - CHAT_RATE_LIMIT_WINDOW_MS
+  const recentSends = (chatSendTimestampsByPrincipal.get(principalId) ?? []).filter((timestamp) => timestamp > windowStart)
+
+  if (recentSends.length >= CHAT_RATE_LIMIT_MAX_SENDS) {
+    chatSendTimestampsByPrincipal.set(principalId, recentSends)
+    const retryAfterSeconds = Math.max(1, Math.ceil((recentSends[0] + CHAT_RATE_LIMIT_WINDOW_MS - now) / 1000))
+    return { allowed: false, retryAfterSeconds }
+  }
+
+  recentSends.push(now)
+  chatSendTimestampsByPrincipal.set(principalId, recentSends)
+  return { allowed: true }
+}
+
+/** Test-only reset for the in-memory rate limit window. */
+export const resetChatRateLimiterForTests = (): void => {
+  chatSendTimestampsByPrincipal.clear()
+}
+
 export const handleChatJoin = async (
   socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
   payload: unknown,
@@ -79,6 +104,17 @@ export const handleChatSend = async (
   const allowed = await canAccessChatConversation(principalId)
   if (!allowed) {
     ack({ status: 'rejected', code: 'unauthorized', message: 'You are not authorized to send messages.' })
+    return
+  }
+
+  const rateLimit = checkChatRateLimit(principalId)
+  if (!rateLimit.allowed) {
+    ack({
+      status: 'rejected',
+      code: 'rate_limited',
+      message: 'Too many messages sent. Please wait before sending another.',
+      retryAfterSeconds: rateLimit.retryAfterSeconds,
+    })
     return
   }
 
