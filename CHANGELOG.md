@@ -5,6 +5,28 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.7.0](https://github.com/dkirby-ms/zzyix/compare/v1.6.1...v1.7.0) (2026-08-21)
+### Features
+
+* add chat feature with shared conversation ([54502d1](https://github.com/dkirby-ms/zzyix/commit/54502d12e772247a1bd3782022b0eb29f9085e18))
+### Bug Fixes
+
+* minor chat styling and db issues ([72aaa5e](https://github.com/dkirby-ms/zzyix/commit/72aaa5e4d7819f75af0e18a3a6a7bd51af194c65))
+### Miscellaneous Chores
+
+* chat research and planning ([fabaee4](https://github.com/dkirby-ms/zzyix/commit/fabaee4f4090de5100569ecee27c60ad97e12e80))
+* **deps-dev:** bump js-yaml from 4.3.0 to 4.3.1 ([8184d89](https://github.com/dkirby-ms/zzyix/commit/8184d89fca0710e79b75643f8097a34b824b2125))
+* **deps-dev:** bump the safe-dev-dependencies group with 4 updates ([cd64e17](https://github.com/dkirby-ms/zzyix/commit/cd64e1702767ba9c3b39e29ca66c3d09ab652f43))
+* **deps-dev:** bump the safe-dev-dependencies group with 8 updates ([d48a978](https://github.com/dkirby-ms/zzyix/commit/d48a978fe4df62fb9c85ef21de4d70d0b7e6aba8))
+* **deps:** bump @azure/msal-browser from 5.17.3 to 5.18.0 ([0bc0793](https://github.com/dkirby-ms/zzyix/commit/0bc0793c801c7a10a9d51e3a0e65b8d161ad0352))
+* **deps:** bump @azure/msal-react from 5.5.3 to 5.5.5 ([e68ce98](https://github.com/dkirby-ms/zzyix/commit/e68ce98f9ac6de9bdf41b6d73f312c7d730e363c))
+* **deps:** bump @react-three/drei from 10.7.7 to 10.7.8 ([b3fe0c9](https://github.com/dkirby-ms/zzyix/commit/b3fe0c9255043edd154d83ed2a6e99f6da80311a))
+* **deps:** bump express-rate-limit from 8.6.1 to 8.6.2 ([c5e5ee0](https://github.com/dkirby-ms/zzyix/commit/c5e5ee09cdb493dd1ac795fa58e3935fcd21b5b7))
+* **deps:** bump jose from 6.2.7 to 6.2.8 ([f1110cb](https://github.com/dkirby-ms/zzyix/commit/f1110cb46e67594fb89dbde0a62c2806886e5ba9))
+* **deps:** bump lucide-react from 1.28.0 to 1.31.0 ([90f55c1](https://github.com/dkirby-ms/zzyix/commit/90f55c1ee65439d0853cca9411698ee16bab0093))
+* **deps:** bump pg and @types/pg ([fb4cbb6](https://github.com/dkirby-ms/zzyix/commit/fb4cbb6df973a19611fca0dd6a5b2798c412b75c))
+* gitignore ([53587d1](https://github.com/dkirby-ms/zzyix/commit/53587d11bfe6a306318e3aecb882f7f895702eb5))
+
 ## [1.6.1](https://github.com/dkirby-ms/zzyix/compare/v1.6.0...v1.6.1) (2026-08-07)
 ### Bug Fixes
 
