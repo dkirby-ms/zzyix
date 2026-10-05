@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^5.18.0",
-    "@azure/msal-react": "^5.5.5",
+    "@azure/msal-react": "^5.6.0",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-tabs": "^1.1.21",
@@ -23,11 +23,11 @@
     "@radix-ui/react-visually-hidden": "^1.2.11",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.7.0",
-    "lucide-react": "^1.31.0",
+    "lucide-react": "^1.33.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "socket.io-client": "^4.8.2",
-    "three": "^0.185.1",
+    "three": "^0.186.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
@@ -37,13 +37,13 @@
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@types/three": "^0.185.4",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "^30.0.1",
     "oxlint": "^1.78.0",
     "typescript": "~7.0.2",
     "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
