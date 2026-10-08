@@ -31,7 +31,7 @@
     "jose": "^6.2.10",
     "node-cron": "^4.2.1",
     "pg": "^8.23.0",
-    "socket.io": "^4.8.2"
+    "socket.io": "^4.8.4"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
