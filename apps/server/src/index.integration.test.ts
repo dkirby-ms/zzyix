@@ -350,6 +350,37 @@ describe('live canonical product boundaries', () => {
     }
   })
 
+  it('does not acquire a presence lease after disconnect during socket initialization', async () => {
+    await seedCanonicalBoundary()
+    const entryAttemptId = await discoverEntryAttempt('allowed')
+    const client = createSocketClient(liveBaseUrl, {
+      transports: ['websocket'],
+      reconnection: false,
+      auth: {
+        token: 'allowed',
+        quiltId: QUILT_ID,
+        clientId: 'client-disconnected-during-initialization',
+        schemaVersion: '2.0.0',
+        protocolVersion: 2,
+        canonicalGeneration: 2,
+        entryAttemptId,
+      },
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        client.once('connect', resolve)
+        client.once('connect_error', reject)
+      })
+      client.disconnect()
+      await vi.waitFor(async () => {
+        const leases = await attemptDatabase.db.execute(sql`select count(*)::integer as count from quilt_presence_leases`)
+        expect(leases.rows[0]?.count).toBe(0)
+      })
+    } finally {
+      client.disconnect()
+    }
+  })
+
   it('accepts one terminal for one observed disconnect and rejects duplicate fallback delivery', async () => {
     await seedCanonicalBoundary()
     const entryAttemptId = await discoverEntryAttempt('allowed')
