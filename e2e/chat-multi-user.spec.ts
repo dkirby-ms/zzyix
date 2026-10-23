@@ -48,7 +48,7 @@ const connect = async (replica: string, token: string): Promise<TestSocket> => {
   })
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Timed out connecting to chat replica')), 10_000)
-    socket.once('connect', () => { clearTimeout(timeout); resolve() })
+    socket.once('quilt_protocol', () => { clearTimeout(timeout); resolve() })
     socket.once('connect_error', (error) => { clearTimeout(timeout); reject(error) })
     socket.connect()
   })
