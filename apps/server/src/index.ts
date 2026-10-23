@@ -1774,6 +1774,7 @@ io.on('connection', (socket) => {
   let dualReadEnabled = false
   let selectedQuiltId: string | undefined
   let selectedPrincipalId: string | undefined
+  let connectionDisconnected = false
   let presenceLeaseActive = false
   let presenceHeartbeat: NodeJS.Timeout | null = null
   let canonicalTargetValidation: NodeJS.Timeout | null = null
@@ -1828,8 +1829,19 @@ io.on('connection', (socket) => {
     selectedPrincipalId = deliveryContext.principalId
     const presenceRoom = quiltPresenceRoomName(selectedQuiltId)
     await socket.join(presenceRoom)
+    if (connectionDisconnected) return
     const presence = await acquireQuiltPresenceLease({ socketId: socket.id, quiltId: selectedQuiltId, principalId: selectedPrincipalId, clientId, now: joinedAt, ttlMs: QUILT_PRESENCE_LEASE_TTL_MS })
     presenceLeaseActive = true
+    if (connectionDisconnected) {
+      await releaseQuiltPresenceLease({
+        socketId: socket.id,
+        quiltId: selectedQuiltId,
+        principalId: selectedPrincipalId,
+        now: Date.now(),
+      })
+      presenceLeaseActive = false
+      return
+    }
     presenceHeartbeat = setInterval(() => {
       void renewPresenceLeaseOrDisconnect(
         () => renewQuiltPresenceLease(socket.id, Date.now(), QUILT_PRESENCE_LEASE_TTL_MS),
@@ -2343,7 +2355,7 @@ io.on('connection', (socket) => {
   // ── Disconnection ──────────────────────────────────────────────────────────
 
   socket.on('disconnect', async () => {
-    await handleChatDisconnect(socket)
+    connectionDisconnected = true
     if (presenceHeartbeat) {
       clearInterval(presenceHeartbeat)
       presenceHeartbeat = null
@@ -2352,6 +2364,7 @@ io.on('connection', (socket) => {
       clearInterval(canonicalTargetValidation)
       canonicalTargetValidation = null
     }
+    await handleChatDisconnect(socket)
 
     writeLog('info', 'socket_disconnected', {
       clientId,
