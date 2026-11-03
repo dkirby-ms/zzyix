@@ -5,6 +5,16 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.7.2](https://github.com/dkirby-ms/zzyix/compare/v1.7.1...v1.7.2) (2026-11-03)
+### Bug Fixes
+
+* **client:** avoid unresolved jest-dom vitest peer ([9a96b62](https://github.com/dkirby-ms/zzyix/commit/9a96b62b50ec0cf2164ff58b90f65b64c05c0e28))
+### Miscellaneous Chores
+
+* **deps-dev:** bump the safe-dev-dependencies group across 1 directory with 10 updates ([b0aa2a4](https://github.com/dkirby-ms/zzyix/commit/b0aa2a4390f90a96222d3b3a0811660e1e984053))
+* **deps:** bump express-rate-limit from 8.6.2 to 8.7.1 ([86a75c1](https://github.com/dkirby-ms/zzyix/commit/86a75c1eb5da8007f685ad46c9b58ccb907142d5))
+* **deps:** bump undici ([63a0dd6](https://github.com/dkirby-ms/zzyix/commit/63a0dd6d411f424c697da72da45da168212f26ab))
+
 ## [1.7.1](https://github.com/dkirby-ms/zzyix/compare/v1.7.0...v1.7.1) (2026-11-03)
 ### Bug Fixes
 
