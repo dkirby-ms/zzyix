@@ -5,6 +5,47 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.7.1](https://github.com/dkirby-ms/zzyix/compare/v1.7.0...v1.7.1) (2026-11-03)
+### Bug Fixes
+
+* **deps:** patch vulnerable production transitive dependencies ([a74c699](https://github.com/dkirby-ms/zzyix/commit/a74c699f8b4617a7e6960093dcc27d281a5b2d81))
+### Miscellaneous Chores
+
+* **deps-dev:** bump @types/three ([a9f4d86](https://github.com/dkirby-ms/zzyix/commit/a9f4d8637514312ae972ed9c3f5bca94748e0a21))
+* **deps-dev:** bump @vitest/coverage-v8 in /apps/client ([4ed437a](https://github.com/dkirby-ms/zzyix/commit/4ed437a3c1b7688431338cf1c34dbb3d016dca97))
+* **deps-dev:** bump @vitest/coverage-v8 in /apps/server ([3004f04](https://github.com/dkirby-ms/zzyix/commit/3004f047519873175ff13e30157782129342121e))
+* **deps-dev:** bump fast-uri from 3.1.5 to 3.1.8 ([29a4783](https://github.com/dkirby-ms/zzyix/commit/29a4783ee26833ca2e77ee7a86eefe31cb9856ee))
+* **deps-dev:** bump handlebars from 4.7.9 to 4.7.10 ([efa341d](https://github.com/dkirby-ms/zzyix/commit/efa341dbe2ac5b711f85de2c4629d2e1125a422e))
+* **deps-dev:** bump js-yaml from 4.3.1 to 4.3.2 ([34c0416](https://github.com/dkirby-ms/zzyix/commit/34c0416af137e8e8cb910e8037c4bbfa7a5fe56c))
+* **deps-dev:** bump moment from 2.30.1 to 2.31.0 ([e85ea23](https://github.com/dkirby-ms/zzyix/commit/e85ea23782dea40ab7b2dc19630d988865022b23))
+* **deps-dev:** bump source-map-js from 1.2.1 to 1.2.2 ([d6417d1](https://github.com/dkirby-ms/zzyix/commit/d6417d1087b994107a7a990dd20d7154c98ab26a))
+* **deps-dev:** bump the safe-dev-dependencies group across 1 directory with 14 updates ([cefc131](https://github.com/dkirby-ms/zzyix/commit/cefc13149fa04d7b5b8bb335e8481d0afc588f91))
+* **deps-dev:** bump the safe-dev-dependencies group with 2 updates ([2d3d3b9](https://github.com/dkirby-ms/zzyix/commit/2d3d3b9db584cca74a02b976d7b9f798aeb1c08d))
+* **deps-dev:** bump vite from 8.3.2 to 8.3.5 ([ec7a5e1](https://github.com/dkirby-ms/zzyix/commit/ec7a5e14d69b3b408f6f524164c200e2a7f85bc2))
+* **deps-dev:** bump vitest from 4.1.10 to 4.1.11 ([8bd8cb9](https://github.com/dkirby-ms/zzyix/commit/8bd8cb9aec5b6439f2783e664ac743088e50e30c))
+* **deps-dev:** bump vitest from 4.1.11 to 5.0.3 in /apps/client ([30c2166](https://github.com/dkirby-ms/zzyix/commit/30c21660adf97680ed96eed648c5055c5f9d50a2))
+* **deps-dev:** bump vitest from 4.1.11 to 5.0.3 in /apps/server ([94d428c](https://github.com/dkirby-ms/zzyix/commit/94d428c63572792005bda477998f46ab78b6b8dd))
+* **deps:** bump @azure/monitor-opentelemetry from 1.19.0 to 1.20.0 ([8c3cdbe](https://github.com/dkirby-ms/zzyix/commit/8c3cdbe0e307455ff04e5dc1a06e1d20b92913bd))
+* **deps:** bump @azure/msal-browser from 5.19.0 to 5.24.0 ([47fed23](https://github.com/dkirby-ms/zzyix/commit/47fed2325834d6ac14f0bb0fae5ce9af72326a67))
+* **deps:** bump @azure/msal-react from 5.5.5 to 5.6.0 ([6f8c17c](https://github.com/dkirby-ms/zzyix/commit/6f8c17c23fce25d4e2d04ee258601ab3af87f3ec))
+* **deps:** bump @grpc/grpc-js from 1.14.4 to 1.14.5 ([9068267](https://github.com/dkirby-ms/zzyix/commit/90682677306a9290297a7ea715e1e2787f754c02))
+* **deps:** bump @radix-ui/react-dialog from 1.1.23 to 1.3.0 ([fd86633](https://github.com/dkirby-ms/zzyix/commit/fd8663313e9756b5b8e85296a02fa48d2c43723b))
+* **deps:** bump brace-expansion from 5.0.9 to 5.0.12 ([862242b](https://github.com/dkirby-ms/zzyix/commit/862242b4fac3cc5ec4364805a627cb06bcaf18fa))
+* **deps:** bump engine.io from 6.6.9 to 6.6.11 ([573a5c6](https://github.com/dkirby-ms/zzyix/commit/573a5c618cfb6913ef118030a25d310f0b4e6556))
+* **deps:** bump ip-address from 10.3.1 to 10.7.3 ([4826d1d](https://github.com/dkirby-ms/zzyix/commit/4826d1d47bead559966bac9025105db6429638b3))
+* **deps:** bump jose from 6.2.8 to 6.2.10 ([5687f64](https://github.com/dkirby-ms/zzyix/commit/5687f64b5cfd1243756c29b753b1a2e03fa0a48c))
+* **deps:** bump lucide-react from 1.31.0 to 1.33.0 ([eda0868](https://github.com/dkirby-ms/zzyix/commit/eda0868c52063a595fb32a091794eddb0681b763))
+* **deps:** bump pg and @types/pg ([7c462b3](https://github.com/dkirby-ms/zzyix/commit/7c462b3da7ae7cb758a126a322039a977d7d0c80))
+* **deps:** bump proxy-addr from 2.0.7 to 2.0.8 ([2f9e847](https://github.com/dkirby-ms/zzyix/commit/2f9e8470c2a4674ea816d3aaf33352e93bb022a3))
+* **deps:** bump qs from 6.15.3 to 6.16.0 ([c30c044](https://github.com/dkirby-ms/zzyix/commit/c30c044383e1e3c08f9d70f066b10fcdc24f8c9f))
+* **deps:** bump socket.io from 4.8.3 to 4.8.4 ([f356a39](https://github.com/dkirby-ms/zzyix/commit/f356a39d86e8c0a532cc0dc839309f24366fb615))
+* **deps:** bump socket.io-client from 4.8.3 to 4.8.4 ([2123158](https://github.com/dkirby-ms/zzyix/commit/2123158e5e60c67f84db09f33ebe75e3e1d2cce0))
+* **deps:** bump three from 0.185.1 to 0.186.1 in /apps/client ([95026eb](https://github.com/dkirby-ms/zzyix/commit/95026eb79203db8f19c860537314a1420e5981ab))
+* **deps:** bump undici ([5997930](https://github.com/dkirby-ms/zzyix/commit/5997930c7b98fd768b6a94c8d29bf8b5d1757efe))
+* fix package sync ([fb85d56](https://github.com/dkirby-ms/zzyix/commit/fb85d5676d9b58d5031750ab1af254e48c4191d8))
+* fix package sync ([12599a9](https://github.com/dkirby-ms/zzyix/commit/12599a9c0bfe3b2ef27b06a941b1574e31b29472))
+* package-lock sync ([3a93703](https://github.com/dkirby-ms/zzyix/commit/3a937037ba25da56e35b473b9d80157c581511ea))
+
 ## [1.7.0](https://github.com/dkirby-ms/zzyix/compare/v1.6.1...v1.7.0) (2026-08-21)
 ### Features
 
