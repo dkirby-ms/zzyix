@@ -5,6 +5,14 @@ description: Release notes and notable changes by version.
 
 ## Changelog
 
+## [1.7.3](https://github.com/dkirby-ms/zzyix/compare/v1.7.2...v1.7.3) (2026-11-05)
+### Bug Fixes
+
+* sync three types lockfile ([0758418](https://github.com/dkirby-ms/zzyix/commit/07584181f5e8895abdd8ae9984595ec604874d6c))
+### Miscellaneous Chores
+
+* **deps-dev:** bump @types/three ([5bad9a0](https://github.com/dkirby-ms/zzyix/commit/5bad9a07caadabdb615b9904daf9bef8e39b075d))
+
 ## [1.7.2](https://github.com/dkirby-ms/zzyix/compare/v1.7.1...v1.7.2) (2026-11-03)
 ### Bug Fixes
 
